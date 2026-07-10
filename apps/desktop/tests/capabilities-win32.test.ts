@@ -18,7 +18,10 @@
  *   (4) Pure logic replica: isConfinementSupported(platform) returns expected
  *       values for darwin, win32, linux, freebsd.
  *   (5) Pure logic replica: probeConfinementCapabilities on win32 returns
- *       supported:true, trackingAvailable:true, focusActionAvailable:false.
+ *       supported:true, trackingAvailable:true, focusActionAvailable:true.
+ *   (6) Source-regex: win32 branch of probeConfinementCapabilities enables
+ *       the focus action (no focusUnavailableReason), and
+ *       isFocusActionAvailable returns true on win32.
  */
 
 import assert from "node:assert/strict";
@@ -92,7 +95,7 @@ assert.equal(isConfinementSupportedFor("openbsd"), false, "(4) openbsd → not s
     focusActionAvailable: boolean;
   } {
     if (platform === "win32") {
-      return { supported: true, trackingAvailable: true, focusActionAvailable: false };
+      return { supported: true, trackingAvailable: true, focusActionAvailable: true };
     }
     if (platform === "linux") {
       return { supported: true, trackingAvailable: true, focusActionAvailable: false };
@@ -106,7 +109,7 @@ assert.equal(isConfinementSupportedFor("openbsd"), false, "(4) openbsd → not s
   const win32Caps = probeForPlatform("win32");
   assert.equal(win32Caps.supported, true, "(5) win32 supported");
   assert.equal(win32Caps.trackingAvailable, true, "(5) win32 trackingAvailable");
-  assert.equal(win32Caps.focusActionAvailable, false, "(5) win32 focusAction not yet implemented");
+  assert.equal(win32Caps.focusActionAvailable, true, "(5) win32 focusAction available");
 
   const linuxCaps = probeForPlatform("linux");
   assert.equal(linuxCaps.supported, true, "(5) linux supported");
@@ -114,6 +117,27 @@ assert.equal(isConfinementSupportedFor("openbsd"), false, "(4) openbsd → not s
 
   const bsdCaps = probeForPlatform("freebsd");
   assert.equal(bsdCaps.supported, false, "(5) freebsd not supported");
+}
+
+// ---------------------------------------------------------------------------
+// (6) Source-regex: win32 branch of probeConfinementCapabilities enables focus
+// ---------------------------------------------------------------------------
+{
+  const win32BranchIdx = src.indexOf(`process.platform === "win32"`);
+  const linuxBranchIdx = src.indexOf(`process.platform === "linux"`);
+  const win32Branch = src.slice(win32BranchIdx, linuxBranchIdx);
+  assert.ok(
+    win32Branch.includes("focusActionAvailable: true"),
+    "(6) win32 branch must return focusActionAvailable:true",
+  );
+  assert.ok(
+    !win32Branch.includes("focusUnavailableReason"),
+    "(6) win32 branch must not set focusUnavailableReason",
+  );
+  assert.ok(
+    src.includes(`if (process.platform === "win32") return true;`),
+    "(6) isFocusActionAvailable must return true on win32",
+  );
 }
 
 console.log("capabilities-win32 validation passed.");

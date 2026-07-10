@@ -13,7 +13,7 @@
  *   context-menu action on macOS. When absent, confinement tracking still
  *   works; only the focus button is degraded.
  * - Windows: confinement is fully supported. No Screen Recording concept.
- *   Focus action is not yet implemented (LOW priority).
+ *   Focus action uses user32 SetForegroundWindow (no permission needed).
  * - Linux: best-effort confinement via /proc and get-windows (X11).
  * - Other: confinement is a no-op. Free-roam applies.
  */
@@ -47,14 +47,13 @@ export interface ConfinementCapabilities {
  */
 export function probeConfinementCapabilities(): ConfinementCapabilities {
   // Windows: get-windows works without any special permission.
-  // Focus action is not yet implemented for win32 (LOW priority).
+  // Focus action uses user32 SetForegroundWindow — no permission needed.
   if (process.platform === "win32") {
     debug("capabilities", "confinement probed — win32");
     return {
       supported: true,
       trackingAvailable: true,
-      focusActionAvailable: false,
-      focusUnavailableReason: "not_macos",
+      focusActionAvailable: true,
     };
   }
 
@@ -111,13 +110,14 @@ export function isConfinementSupported(): boolean {
 
 /**
  * Returns true if the "Focus session window" context-menu action can succeed
- * at this moment (Accessibility permission is currently granted).
+ * at this moment.
  *
- * NOTE: The focus action itself handles the one-time Accessibility permission
- * prompt in terminal-focus.ts. This helper is for optional UI hints only.
- * Currently only supported on macOS.
+ * NOTE: On macOS the focus action itself handles the one-time Accessibility
+ * permission prompt in terminal-focus.ts. This helper is for optional UI
+ * hints only. Supported on macOS and Windows.
  */
 export function isFocusActionAvailable(): boolean {
+  if (process.platform === "win32") return true;
   if (process.platform !== "darwin") return false;
   return systemPreferences.isTrustedAccessibilityClient(false);
 }
