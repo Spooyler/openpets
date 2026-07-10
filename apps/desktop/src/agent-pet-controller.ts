@@ -204,7 +204,7 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     onBubbleDismissed: (token) => handleBubbleDismissed(petId, token),
     onFocusSessionWindow: focusSessionTerminal,
     onPetEvent: (name) => {
-      if (name === "pet:clicked") focusSessionTerminal();
+      if (name === "pet:doubleClicked") focusSessionTerminal();
     },
   }, getCurrentDismissToken(petId, display, badge));
   const windowId = window.id;

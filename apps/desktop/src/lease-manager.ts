@@ -11,6 +11,8 @@ export interface PetLease {
   readonly fallbackReason?: LeaseFallbackReason;
   readonly acquiredAt: number;
   readonly lastHeartbeatAt: number;
+  /** Last time the session performed a visible action (say/react), if any. */
+  readonly lastActivityAt?: number;
   readonly expiresAt: number;
   /** PID of the MCP client process (e.g. opencode) that acquired this lease. */
   readonly clientPid?: number;
@@ -292,6 +294,39 @@ export class LeaseManager {
     const updated: PetLease = { ...lease, ...info };
     this.#leases.set(leaseId, updated);
     this.#onLog("debug", "terminal identity set", { leaseId, terminalOwnerPid: info.terminalOwnerPid, terminalAppName: info.terminalAppName, terminalWindowId: info.terminalWindowId });
+  }
+
+  /**
+   * Record that the session behind `leaseId` performed a visible action
+   * (say/react). Used to pick the focus target when multiple sessions share
+   * the default pet.
+   */
+  touchActivity(leaseId: string): void {
+    const lease = this.#leases.get(leaseId);
+    if (!lease) return;
+    this.#leases.set(leaseId, { ...lease, lastActivityAt: this.#now() });
+  }
+
+  /**
+   * The default-target lease whose terminal the default pet should focus:
+   * active, has a resolved terminalOwnerPid, and — among candidates — the one
+   * with the most recent activity (say/react), falling back to the most
+   * recent heartbeat when no candidate has recorded activity.
+   */
+  getFocusableDefaultLease(): PetLease | undefined {
+    const now = this.#now();
+    let best: PetLease | undefined;
+    for (const lease of this.#leases.values()) {
+      if (lease.targetKind !== "default") continue;
+      if (!lease.terminalOwnerPid || lease.terminalOwnerPid <= 0) continue;
+      if (lease.expiresAt <= now) continue;
+      if (!best) { best = lease; continue; }
+      const bestKey = best.lastActivityAt ?? 0;
+      const leaseKey = lease.lastActivityAt ?? 0;
+      if (leaseKey > bestKey) { best = lease; continue; }
+      if (leaseKey === bestKey && lease.lastHeartbeatAt > best.lastHeartbeatAt) best = lease;
+    }
+    return best;
   }
 
   /** Return all active leases that have a resolved terminal PID (for confinement polling). */

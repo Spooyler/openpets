@@ -34,6 +34,14 @@ export interface DefaultPetWindowOptions extends PetWindowInteractionHooks {
   readonly pluginBubbles?: PetPluginBubbles | null;
   readonly onPositionChanged: (position: Point) => void;
   readonly onHideRequested: () => void;
+  /**
+   * Optional callback to bring the most recently active session's terminal
+   * window to focus. When provided, a "Focus session window" item is added to
+   * the right-click menu (gated on hasFocusableSessionTerminal).
+   */
+  readonly onFocusSessionWindow?: () => void;
+  /** Whether a session terminal is currently available to focus. */
+  readonly hasFocusableSessionTerminal?: () => boolean;
 }
 
 export interface AgentPetWindowOptions extends PetWindowInteractionHooks {
@@ -130,7 +138,7 @@ export function createDefaultPetWindow(options: DefaultPetWindowOptions, dismiss
   info("pet.window", "default window create", { windowId: window.id, position: options.position, paused: options.paused, hasDisplay: Boolean(options.display), badge: options.badge });
   installMousePassthroughAndDrag(window, options);
   installMotionStatePublisher(window);
-  installPetContextMenu(window, { label: t("pet.menu.hidePet"), click: options.onHideRequested, defaultPet: true });
+  installPetContextMenu(window, { label: t("pet.menu.hidePet"), click: options.onHideRequested, defaultPet: true, focusSessionWindow: options.onFocusSessionWindow, hasFocusableSessionTerminal: options.hasFocusableSessionTerminal });
 
   const savePosition = debounce(() => {
     if (window.isDestroyed()) {
@@ -173,7 +181,7 @@ export function recoverPetMouseInterop(window: BrowserWindow, reason: string): v
   debug("pet.window", "mouse interop recovery skipped", { windowId: window.id, reason, skippedReason: "unregistered-window" });
 }
 
-function installPetContextMenu(window: BrowserWindow, action: { readonly label: string; readonly click: () => void; readonly defaultPet?: boolean; readonly focusSessionWindow?: () => void }): void {
+function installPetContextMenu(window: BrowserWindow, action: { readonly label: string; readonly click: () => void; readonly defaultPet?: boolean; readonly focusSessionWindow?: () => void; readonly hasFocusableSessionTerminal?: () => boolean }): void {
   const webContents = window.webContents;
   const handleContextMenu = (event: Electron.Event): void => {
     event.preventDefault();
@@ -186,7 +194,7 @@ function installPetContextMenu(window: BrowserWindow, action: { readonly label: 
   });
 }
 
-async function buildPetContextMenuTemplate(action: { readonly label: string; readonly click: () => void; readonly defaultPet?: boolean; readonly focusSessionWindow?: () => void }): Promise<Electron.MenuItemConstructorOptions[]> {
+async function buildPetContextMenuTemplate(action: { readonly label: string; readonly click: () => void; readonly defaultPet?: boolean; readonly focusSessionWindow?: () => void; readonly hasFocusableSessionTerminal?: () => boolean }): Promise<Electron.MenuItemConstructorOptions[]> {
   if (!action.defaultPet) {
     const template: Electron.MenuItemConstructorOptions[] = [];
     if (action.focusSessionWindow) {
@@ -218,6 +226,14 @@ async function buildPetContextMenuTemplate(action: { readonly label: string; rea
     plugins.set(item.pluginId, group);
   }
   const template: Electron.MenuItemConstructorOptions[] = [];
+  // Session focus first: only offered while a session terminal is resolvable.
+  if (action.focusSessionWindow && action.hasFocusableSessionTerminal?.() !== false) {
+    const a11yReady = isFocusActionAvailable();
+    const focusLabel = a11yReady
+      ? t("pet.menu.focusSessionWindow")
+      : t("pet.menu.focusSessionWindowNoA11y");
+    template.push({ label: focusLabel, click: action.focusSessionWindow }, { type: "separator" });
+  }
   if (topLevel.length > 0) template.push(...topLevel.slice(0, 8), { type: "separator" });
   if (plugins.size > 0) template.push(...[...plugins.values()].map((plugin) => ({ label: plugin.name, submenu: plugin.commands })), { type: "separator" });
   template.push({ label: t("pet.menu.openControlCenter"), click: () => { import("./windows.js").then(({ openControlCenterWindow }) => openControlCenterWindow()).catch((error) => logError("pet.window", "open control center failed", error)); } }, { label: action.label, click: action.click });

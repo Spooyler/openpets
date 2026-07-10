@@ -12,8 +12,33 @@ import { PetBubbleArbiter, type ActiveBubble, type PetBubbleSink } from "./plugi
 import { publishPluginPetEvent } from "./plugin-events-source.js";
 import { reclampAgentPetWindows } from "./agent-pet-controller.js";
 import { reclampPluginPetWindows } from "./plugin-pet-registry.js";
+import { focusTerminalWindow } from "./terminal-focus.js";
 
 let defaultPetWindow: BrowserWindow | null = null;
+
+// Resolves the terminal PID of the session the default pet should focus
+// (registered by local-ipc, which owns the lease manager — the import points
+// the other way, so registration avoids a module cycle).
+let sessionTerminalFocusResolver: (() => number | undefined) | null = null;
+
+export function setSessionTerminalFocusResolver(resolver: () => number | undefined): void {
+  sessionTerminalFocusResolver = resolver;
+}
+
+function hasFocusableSessionTerminal(): boolean {
+  return sessionTerminalFocusResolver?.() !== undefined;
+}
+
+function focusSessionTerminalFromDefaultPet(trigger: string): void {
+  const terminalPid = sessionTerminalFocusResolver?.();
+  if (!terminalPid) {
+    debug("pet.default", "focus session window skipped", { trigger, reason: "no-focusable-session" });
+    return;
+  }
+  focusTerminalWindow(terminalPid).catch((err) => {
+    debug("pet.default", "focus session window failed", { trigger, terminalPid, error: String(err) });
+  });
+}
 let paused = false;
 let transientDisplay: PetTransientDisplay | null = null;
 let statusBadge: PetStatusBadgeReaction | null = null;
@@ -292,7 +317,12 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
     onBubbleDismissed: handleBubbleDismissed,
     onBubbleAction: (token, actionId) => defaultPetBubbleArbiter.handleAction(token, actionId),
     onBubbleSubmit: (token, values) => defaultPetBubbleArbiter.handleSubmit(token, values),
-    onPetEvent: (name, payload) => publishPluginPetEvent("default", name, payload),
+    onPetEvent: (name, payload) => {
+      if (name === "pet:doubleClicked") focusSessionTerminalFromDefaultPet("double-click");
+      publishPluginPetEvent("default", name, payload);
+    },
+    onFocusSessionWindow: () => focusSessionTerminalFromDefaultPet("context-menu"),
+    hasFocusableSessionTerminal,
   }, getCurrentDismissToken());
   const windowId = defaultPetWindow.id;
   info("pet.default", "created", { windowId, position, paused, petId: getAppStateSnapshot().preferences.defaultPetId });

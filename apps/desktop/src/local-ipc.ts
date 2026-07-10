@@ -7,7 +7,7 @@ import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetLeaseState, refre
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
-import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
@@ -37,6 +37,10 @@ const leaseManager = new LeaseManager({
   onLog: (level, message, fields) => level === "debug" ? debug("lease", message, fields) : info("lease", message, fields),
   isPetEligible,
 });
+
+// The default pet focuses the terminal of the session that most recently
+// interacted with it (say/react), falling back to the freshest heartbeat.
+setSessionTerminalFocusResolver(() => leaseManager.getFocusableDefaultLease()?.terminalOwnerPid);
 
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
 const warnedFallbackPets = new Set<string>();
@@ -432,6 +436,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const params = isRecord(request.params) ? request.params : {};
     const reaction = validateReaction(params.reaction);
     const lease = getLeaseTarget(params.leaseId);
+    if (lease) leaseManager.touchActivity(lease.leaseId);
     const petId = lease?.actualTargetPetId ?? getCurrentDefaultPet().id;
     debug("ipc", "pet react requested", { requestId: request.id, reaction, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
     if (lease?.targetKind === "explicit") {
@@ -450,6 +455,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
   const message = validateSayMessage(params.message);
   const reaction = params.reaction === undefined ? undefined : validateReaction(params.reaction);
   const lease = getLeaseTarget(params.leaseId);
+  if (lease) leaseManager.touchActivity(lease.leaseId);
   const petId = lease?.actualTargetPetId ?? getCurrentDefaultPet().id;
   debug("ipc", "pet say requested", { requestId: request.id, reaction, messageLength: message.length, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
   if (lease?.targetKind === "explicit") {
