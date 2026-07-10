@@ -47,6 +47,7 @@ async function checkMcpServerContract(): Promise<void> {
     status: async () => ({ ok: true, appRunning: true, defaultPet: { id: "snoopy", displayName: "Snoopy" } }),
     listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
     installPet: async () => { throw new Error("unused"); },
+    installLocalPet: async () => { throw new Error("unused"); },
     acquireLease: async () => ({ leaseId: "lease-1", requestedPetId: "snoopy", targetKind: "explicit" as const, actualTargetPetId: "snoopy", actualTargetPetName: "Snoopy", usingDefaultPet: false, expiresAt: Date.now() + 15_000, leaseActive: true }),
     heartbeatLease: async (leaseId: string) => ({ leaseId, expiresAt: Date.now() + 15_000 }),
     releaseLease: async () => ({ released: true }),
@@ -137,6 +138,7 @@ async function checkT6TransportOnclose(): Promise<void> {
     status: async () => ({ ok: true, appRunning: true }),
     listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
     installPet: async () => { throw new Error("unused"); },
+    installLocalPet: async () => { throw new Error("unused"); },
     acquireLease: async () => {
       calls.push("acquireLease");
       return { leaseId: "new-lease", requestedPetId: undefined, targetKind: "default" as const, actualTargetPetId: "default", actualTargetPetName: "Default", usingDefaultPet: true, expiresAt: Date.now() + 15_000, leaseActive: true };
@@ -216,6 +218,7 @@ async function checkT7EnsureLeaseHeartbeatFirst(): Promise<void> {
       status: async () => ({ ok: true, appRunning: true }),
       listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
       installPet: async () => { throw new Error("unused"); },
+      installLocalPet: async () => { throw new Error("unused"); },
       acquireLease: async () => { calls.push("acquireLease"); return { leaseId: "new-lease", requestedPetId: "snoopy", targetKind: "explicit" as const, actualTargetPetId: "snoopy", actualTargetPetName: "Snoopy", usingDefaultPet: false, expiresAt: Date.now() + 15_000, leaseActive: true }; },
       heartbeatLease: async (leaseId: string) => { calls.push(`heartbeat:${leaseId}`); return { leaseId, expiresAt: Date.now() + 15_000 }; },
       releaseLease: async () => { calls.push("releaseLease"); return { released: true }; },
@@ -266,6 +269,7 @@ async function checkT7EnsureLeaseHeartbeatFirst(): Promise<void> {
       status: async () => ({ ok: true, appRunning: true }),
       listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
       installPet: async () => { throw new Error("unused"); },
+      installLocalPet: async () => { throw new Error("unused"); },
       acquireLease: async () => { calls.push("acquireLease"); return { leaseId: "new-lease-2", requestedPetId: "snoopy", targetKind: "explicit" as const, actualTargetPetId: "snoopy", actualTargetPetName: "Snoopy", usingDefaultPet: false, expiresAt: Date.now() + 15_000, leaseActive: true }; },
       heartbeatLease: async (leaseId: string) => { calls.push(`heartbeat:${leaseId}`); throw new Error("lease not found"); },
       releaseLease: async () => { calls.push("releaseLease"); return { released: true }; },
@@ -318,6 +322,7 @@ async function checkT8ExitOnce(): Promise<void> {
     status: async () => ({ ok: true, appRunning: true }),
     listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
     installPet: async () => { throw new Error("unused"); },
+    installLocalPet: async () => { throw new Error("unused"); },
     acquireLease: async () => ({ leaseId: "new", requestedPetId: undefined, targetKind: "default" as const, actualTargetPetId: "default", actualTargetPetName: "Default", usingDefaultPet: true, expiresAt: Date.now() + 15_000, leaseActive: true }),
     heartbeatLease: async (leaseId: string) => ({ leaseId, expiresAt: Date.now() + 15_000 }),
     releaseLease: async (leaseId: string) => { releaseOrder.push("release:" + leaseId); return { released: true }; },
