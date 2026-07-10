@@ -96,6 +96,10 @@ const read = (name: string): string => readFileSync(join(appRoot, "src", name), 
   assert.ok(src.includes("setSessionTerminalFocusResolver("), "(B2) local-ipc must register the focus resolver");
   assert.ok(src.includes("getFocusableDefaultLease()"), "(B2) resolver must read the focusable default lease");
   assert.ok(src.includes("touchActivity("), "(B2) say/react must stamp lease activity");
+  assert.ok(
+    src.includes("resolveDefaultLeaseTerminalIdentity"),
+    "(B2) default-target leases must get a terminal-identity resolve (confinement path is explicit-only)",
+  );
 }
 
 // (B3) pet-window: default-pet context menu offers the focus action

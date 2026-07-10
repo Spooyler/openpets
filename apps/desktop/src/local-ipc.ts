@@ -517,9 +517,14 @@ function releaseExplicitLease(leaseId: string): { readonly released: boolean } {
 
 async function resolveTerminalIdentity(leaseId: string, clientPid: number): Promise<void> {
   // Get the petId — required to key confinement state. Non-explicit leases
-  // don't participate in window confinement.
+  // don't participate in window confinement, but the default pet still needs
+  // the terminal identity for its focus-session-window action.
   const lease = leaseManager.getRawLease(leaseId);
-  if (!lease || lease.targetKind !== "explicit") return;
+  if (!lease) return;
+  if (lease.targetKind !== "explicit") {
+    void resolveDefaultLeaseTerminalIdentity(leaseId, clientPid);
+    return;
+  }
   const petId = lease.actualPetId;
 
   const deps: ConfinementPollerDeps = {
@@ -588,6 +593,36 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
   } catch (err) {
     info("ipc", "terminal identity resolution error", { leaseId, clientPid, error: String(err) });
   }
+}
+
+/**
+ * Default-target leases don't participate in confinement, but the default pet
+ * can still focus the session terminal. Resolve the identity once (retrying a
+ * few times — window enumeration can lag right after acquire) and store it on
+ * the lease. No poller: a terminal window's owner PID is stable for the life
+ * of the session.
+ */
+async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: number): Promise<void> {
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (!leaseManager.getRawLease(leaseId)) return;
+    try {
+      const termInfo = await findTerminalWindowForPid(clientPid);
+      if (termInfo) {
+        leaseManager.setTerminalIdentity(leaseId, {
+          terminalOwnerPid: termInfo.terminalPid,
+          terminalAppName: termInfo.appName,
+          terminalWindowId: termInfo.window?.id,
+        });
+        info("ipc", "terminal identity resolved (default lease)", { leaseId, clientPid, attempt, terminalPid: termInfo.terminalPid, appName: termInfo.appName });
+        return;
+      }
+    } catch (err) {
+      info("ipc", "terminal identity resolution error (default lease)", { leaseId, clientPid, error: String(err) });
+      return;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 3_000));
+  }
+  info("ipc", "terminal identity unresolved (default lease)", { leaseId, clientPid });
 }
 
 function applyConfinementUpdate(petId: string, info: TerminalWindowInfo): void {
