@@ -185,6 +185,14 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     : clampToVisibleWorkArea(rawPosition, defaultPetWindowSize);
   const display = transientDisplays.get(petId) ?? null;
   const badge = statusBadges.get(petId) ?? null;
+  const focusSessionTerminal = (): void => {
+    const confinement = getConfinementState(petId);
+    if (confinement?.terminalOwnerPid) {
+      focusTerminalWindow(confinement.terminalOwnerPid).catch((err) => {
+        debug("pet.agent", "focus session window failed", { petId, error: String(err) });
+      });
+    }
+  };
   const window = createAgentPetWindow({
     petId,
     displayName: pet.displayName,
@@ -194,13 +202,9 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     badge,
     onCloseRequested: () => dismissAgentPetForActiveLease(petId),
     onBubbleDismissed: (token) => handleBubbleDismissed(petId, token),
-    onFocusSessionWindow: () => {
-      const confinement = getConfinementState(petId);
-      if (confinement?.terminalOwnerPid) {
-        focusTerminalWindow(confinement.terminalOwnerPid).catch((err) => {
-          debug("pet.agent", "focus session window failed", { petId, error: String(err) });
-        });
-      }
+    onFocusSessionWindow: focusSessionTerminal,
+    onPetEvent: (name) => {
+      if (name === "pet:clicked") focusSessionTerminal();
     },
   }, getCurrentDismissToken(petId, display, badge));
   const windowId = window.id;
