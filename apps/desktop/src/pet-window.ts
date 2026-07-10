@@ -487,9 +487,15 @@ function installMousePassthroughAndDrag(window: BrowserWindow, hooks: PetWindowI
       debug("pet.window", "manual drag move ignored on Wayland native drag", { windowId });
       return;
     }
-    const nextX = dragging.startWindowX + Math.round(point.screenX - dragging.startScreenX);
-    const nextY = dragging.startWindowY + Math.round(point.screenY - dragging.startScreenY);
-    window.setBounds({ x: nextX, y: nextY, width: dragging.width, height: dragging.height }, false);
+    const rawX = dragging.startWindowX + Math.round(point.screenX - dragging.startScreenX);
+    const rawY = dragging.startWindowY + Math.round(point.screenY - dragging.startScreenY);
+    // Clamp like the wander path (getSafeDefaultPetPosition) so a drag can
+    // never strand the pet outside the visible desktop.
+    const size = { width: dragging.width, height: dragging.height };
+    const next = isCrossDisplayRoamingEnabled()
+      ? clampToNearestDisplayIfOffscreen({ x: rawX, y: rawY }, size)
+      : clampToVisibleWorkArea({ x: rawX, y: rawY }, size);
+    window.setBounds({ x: next.x, y: next.y, width: dragging.width, height: dragging.height }, false);
   };
 
   const handleDragEnd = (event: IpcMainEvent): void => {
