@@ -13,6 +13,8 @@
  *   (3) The PowerShell script P/Invokes ShowWindow with SW_RESTORE (9) and
  *       SetForegroundWindow from user32.dll.
  *   (4) The win32 path interpolates the terminal PID into Get-Process.
+ *   (5) SW_RESTORE is guarded by IsIconic so a maximized (non-minimized)
+ *       window keeps its maximized state when focused.
  */
 
 import assert from "node:assert/strict";
@@ -51,6 +53,15 @@ const src = readFileSync(join(appRoot, "src", "terminal-focus.ts"), "utf-8");
 // (4) PID interpolation
 {
   assert.ok(src.includes("Get-Process -Id ${terminalPid}"), "(4) must query the terminal PID");
+}
+
+// (5) restore only when minimized — a maximized window must stay maximized
+{
+  assert.ok(src.includes("IsIconic"), "(5) must P/Invoke IsIconic");
+  assert.ok(
+    /if \(\[WinFocus\]::IsIconic\([^)]*\)\) \{[^}]*ShowWindow\([^)]*,\s*9\)/.test(src),
+    "(5) ShowWindow(SW_RESTORE) must be guarded by IsIconic",
+  );
 }
 
 console.log("terminal-focus-win32 validation passed.");

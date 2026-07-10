@@ -88,11 +88,13 @@ async function focusTerminalWindowWin32(terminalPid: number): Promise<boolean> {
       `public class WinFocus {` +
       `  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);` +
       `  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);` +
+      `  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);` +
       `}' -Language CSharp;` +
       `$proc = Get-Process -Id ${terminalPid} -ErrorAction SilentlyContinue;` +
       `if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {` +
-      // SW_RESTORE (9) unminimizes if needed; SetForegroundWindow then raises.
-      `  [WinFocus]::ShowWindow($proc.MainWindowHandle, 9);` +
+      // SW_RESTORE (9) only when minimized — on a visible maximized window it
+      // would demote it to normal size instead of just raising it.
+      `  if ([WinFocus]::IsIconic($proc.MainWindowHandle)) { [WinFocus]::ShowWindow($proc.MainWindowHandle, 9) };` +
       `  [WinFocus]::SetForegroundWindow($proc.MainWindowHandle)` +
       `}`;
 
