@@ -1,17 +1,19 @@
 /**
  * Terminal Focus Utility
  *
- * Raises a terminal (or any app) window to the front using osascript + AXRaise.
+ * Raises a terminal (or any app) window to the front.
  *
  * Design decisions:
- * - macOS-only: Windows/Linux are no-ops (out of scope per plan).
- * - Uses Accessibility API (AXRaise) via osascript — works with ANY terminal
- *   emulator (Ghostty, iTerm2, Terminal.app, VS Code, Warp, etc.) without
- *   knowing the app bundle identifier.
- * - Accessibility permission is required. On first use we prompt the user with
- *   a one-time dialog; subsequent calls skip the prompt.
+ * - macOS + Windows: Linux is a no-op (out of scope per plan).
+ * - macOS uses the Accessibility API (AXRaise) via osascript — works with ANY
+ *   terminal emulator (Ghostty, iTerm2, Terminal.app, VS Code, Warp, etc.)
+ *   without knowing the app bundle identifier.
+ * - macOS Accessibility permission is required. On first use we prompt the
+ *   user with a one-time dialog; subsequent calls skip the prompt.
  * - If Accessibility is not trusted the function resolves silently — the pet
  *   is still usable; only the "focus" action is degraded.
+ * - Windows uses user32 ShowWindow + SetForegroundWindow via PowerShell — no
+ *   permission or prompt exists there.
  */
 
 import { execFile } from "node:child_process";
@@ -37,8 +39,12 @@ let accessibilityPromptShown = false;
  * @returns true if the raise command was dispatched, false otherwise.
  */
 export async function focusTerminalWindow(terminalPid: number): Promise<boolean> {
+  if (process.platform === "win32") {
+    return focusTerminalWindowWin32(terminalPid);
+  }
+
   if (process.platform !== "darwin") {
-    debug("terminal-focus", "skip focus — non-macOS platform");
+    debug("terminal-focus", "skip focus — unsupported platform");
     return false;
   }
 
@@ -64,6 +70,37 @@ end tell
   } catch (err) {
     // Non-fatal: the pet still works, only the focus action failed.
     logError("terminal-focus", "focus failed", err instanceof Error ? err : new Error(String(err)));
+    return false;
+  }
+}
+
+/**
+ * Windows implementation: restore (if minimized) and raise the main window of
+ * the process with the given PID via user32 ShowWindow + SetForegroundWindow.
+ * No permission prompt exists on Windows — this either works or fails softly.
+ */
+async function focusTerminalWindowWin32(terminalPid: number): Promise<boolean> {
+  try {
+    const script =
+      `Add-Type -TypeDefinition '` +
+      `using System;` +
+      `using System.Runtime.InteropServices;` +
+      `public class WinFocus {` +
+      `  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);` +
+      `  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);` +
+      `}' -Language CSharp;` +
+      `$proc = Get-Process -Id ${terminalPid} -ErrorAction SilentlyContinue;` +
+      `if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {` +
+      // SW_RESTORE (9) unminimizes if needed; SetForegroundWindow then raises.
+      `  [WinFocus]::ShowWindow($proc.MainWindowHandle, 9);` +
+      `  [WinFocus]::SetForegroundWindow($proc.MainWindowHandle)` +
+      `}`;
+
+    await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
+    info("terminal-focus", "focus dispatched (win32)", { terminalPid });
+    return true;
+  } catch (err) {
+    logError("terminal-focus", "focus failed (win32)", err instanceof Error ? err : new Error(String(err)));
     return false;
   }
 }

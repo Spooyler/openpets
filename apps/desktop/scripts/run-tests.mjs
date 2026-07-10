@@ -48,6 +48,7 @@ const behaviorTests = [
   ".test-dist/tests/window-tracker-win32.test.js",
   ".test-dist/tests/window-tracker-reentry.test.js",
   ".test-dist/tests/capabilities-win32.test.js",
+  ".test-dist/tests/terminal-focus-win32.test.js",
   ".test-dist/tests/confinement-manager.test.js",
   ".test-dist/tests/pet-confinement-enabled.test.js",
   ".test-dist/tests/pet-motion-gravity.test.js",
