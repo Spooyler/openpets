@@ -10,6 +10,10 @@
  *   (2) The clamp respects the cross-display roaming flag (nearest-display
  *       clamp when roaming, work-area clamp otherwise), matching the wander
  *       path in getSafeDefaultPetPosition.
+ *   (3) The clamp is applied to the sprite rect (bottom-center of the window),
+ *       not the full window rect — the window has bubble headroom above and
+ *       margins beside the sprite, so a full-window clamp would stop the pet
+ *       far from the screen edges.
  */
 
 import assert from "node:assert/strict";
@@ -43,6 +47,18 @@ const dragMove = src.slice(dragMoveStart, dragMoveEnd);
   assert.ok(
     dragMove.includes("clampToNearestDisplayIfOffscreen"),
     "(2) roaming mode must use the nearest-display clamp",
+  );
+}
+
+// (3) clamp targets the sprite rect, not the whole window
+{
+  assert.ok(
+    dragMove.includes("defaultPetSprite.frameWidth") && dragMove.includes("defaultPetSprite.frameHeight"),
+    "(3) drag clamp must be computed from the scaled sprite frame, not the window size",
+  );
+  assert.ok(
+    !/clampToVisibleWorkArea\(\{ x: rawX, y: rawY \}/.test(dragMove),
+    "(3) drag clamp must not clamp the raw window origin directly",
   );
 }
 

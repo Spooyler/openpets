@@ -24,6 +24,8 @@ export interface PetWindowInteractionHooks {
   readonly onBubbleAction?: (dismissToken: string, actionId: string) => void;
   readonly onBubbleSubmit?: (dismissToken: string, values: Record<string, string | number>) => void;
   readonly onPetEvent?: (name: string, payload: Record<string, unknown>) => void;
+  /** Sprite scale used for drag clamping. Defaults to the petScale preference. */
+  readonly scale?: PetScaleValue;
 }
 
 export interface DefaultPetWindowOptions extends PetWindowInteractionHooks {
@@ -489,13 +491,19 @@ function installMousePassthroughAndDrag(window: BrowserWindow, hooks: PetWindowI
     }
     const rawX = dragging.startWindowX + Math.round(point.screenX - dragging.startScreenX);
     const rawY = dragging.startWindowY + Math.round(point.screenY - dragging.startScreenY);
-    // Clamp like the wander path (getSafeDefaultPetPosition) so a drag can
-    // never strand the pet outside the visible desktop.
-    const size = { width: dragging.width, height: dragging.height };
-    const next = isCrossDisplayRoamingEnabled()
-      ? clampToNearestDisplayIfOffscreen({ x: rawX, y: rawY }, size)
-      : clampToVisibleWorkArea({ x: rawX, y: rawY }, size);
-    window.setBounds({ x: next.x, y: next.y, width: dragging.width, height: dragging.height }, false);
+    // Keep the pet reachable: clamp the sprite rect (bottom-center of the
+    // window, 22px above its bottom edge — see the .pet-hitbox CSS) to the
+    // visible desktop. Clamping the whole window would stop the pet far from
+    // the screen edges because of the bubble headroom and side margins.
+    const scale = hooks.scale ?? (getAppStateSnapshot().preferences.petScale as PetScaleValue);
+    const spriteSize = { width: Math.ceil(defaultPetSprite.frameWidth * scale), height: Math.ceil(defaultPetSprite.frameHeight * scale) };
+    const insetX = Math.round((dragging.width - spriteSize.width) / 2);
+    const insetY = dragging.height - 22 - spriteSize.height;
+    const spritePos = { x: rawX + insetX, y: rawY + insetY };
+    const clamped = isCrossDisplayRoamingEnabled()
+      ? clampToNearestDisplayIfOffscreen(spritePos, spriteSize)
+      : clampToVisibleWorkArea(spritePos, spriteSize);
+    window.setBounds({ x: clamped.x - insetX, y: clamped.y - insetY, width: dragging.width, height: dragging.height }, false);
   };
 
   const handleDragEnd = (event: IpcMainEvent): void => {
