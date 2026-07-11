@@ -84,7 +84,8 @@ The deepest integration, because Claude Code has a rich hook system.
   managed entry carries the `--openpets-managed` marker. `runClaudeHookFromStdin()`
   maps an event to a reaction: prompt submit → thinking, permission → waiting,
   stop → success, stop-failure → error, and `PreToolUse` is classified by tool
-  (Edit/Write/MultiEdit → editing, Bash test commands → testing).
+  (Edit/Write/MultiEdit → editing, Read/Grep/Glob → thinking, Bash test
+  commands → testing, other Bash → running).
 - **Project-local awareness**: if a project defines its own OpenPets hook
   (`.claude/settings.local.json` with `--project-local`), the global hook stands
   down to avoid double-firing.
