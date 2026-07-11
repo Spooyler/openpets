@@ -3,7 +3,7 @@ import net from "node:net";
 
 import { Notification, shell, systemPreferences } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetLeaseState, refreshAgentPetBusyBadge, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
@@ -389,6 +389,13 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const sessionNonce = validateSessionNonce(params.sessionNonce);
     debug("ipc", "lease acquire requested", { requestId: request.id, requestedPetId, clientPid, sessionNonce });
     const lease = leaseManager.acquire(requestedPetId, clientPid, sessionNonce);
+    // A fresh explicit lease must always surface its pet, even when the pet
+    // window was dismissed under an earlier lease (e.g. a mid-session adopt
+    // joining an already-leased pet — the 0→1 show hook never fires then).
+    if (lease.targetKind === "explicit") {
+      clearAgentPetDismissal(lease.actualTargetPetId);
+      showAgentPet(lease.actualTargetPetId);
+    }
     trackDesktopEvent("desktop_lease_acquired", { requested_pet: requestedPetId ? "explicit" : "default", target_kind: lease.targetKind, fallback_reason: lease.fallbackReason });
     warnPetFallback(requestedPetId, lease.fallbackReason, warnedFallbackPets);
     // Resolve terminal window identity asynchronously (non-blocking).
