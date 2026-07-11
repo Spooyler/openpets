@@ -73,6 +73,21 @@ assert.equal(manager.getFocusableDefaultLease()?.leaseId, leaseB.leaseId, "(A7) 
 now = 10_000;
 assert.equal(manager.getFocusableDefaultLease(), undefined, "(A8) expired leases must not be focusable");
 
+// (A9) Pool-mode fallback: when no default-target lease is alive, an explicit
+// lease with terminal identity IS focusable (every session may hold a
+// dedicated pool/adopted pet, and the fox must still focus something).
+const explicitOnly = manager.acquire("raccoon", 444, "nonce-d");
+manager.setTerminalIdentity(explicitOnly.leaseId, { terminalOwnerPid: 8888, terminalAppName: "Windows Terminal" });
+assert.equal(manager.getFocusableDefaultLease()?.leaseId, explicitOnly.leaseId, "(A9) explicit lease must be focusable when no default lease exists");
+
+// (A10) A default-target lease still outranks explicit leases once one exists,
+// regardless of activity recency.
+now = 10_010;
+manager.touchActivity(explicitOnly.leaseId);
+const defaultBack = manager.acquire(undefined, 555, "nonce-e");
+manager.setTerminalIdentity(defaultBack.leaseId, { terminalOwnerPid: 9999, terminalAppName: "Windows Terminal" });
+assert.equal(manager.getFocusableDefaultLease()?.leaseId, defaultBack.leaseId, "(A10) default-target lease must outrank explicit leases");
+
 // ---------------------------------------------------------------------------
 // Part B — wiring source-regex assertions
 // ---------------------------------------------------------------------------

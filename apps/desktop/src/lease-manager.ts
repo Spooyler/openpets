@@ -308,19 +308,26 @@ export class LeaseManager {
   }
 
   /**
-   * The default-target lease whose terminal the default pet should focus:
-   * active, has a resolved terminalOwnerPid, and — among candidates — the one
-   * with the most recent activity (say/react), falling back to the most
-   * recent heartbeat when no candidate has recorded activity.
+   * The lease whose terminal the default pet should focus: active, with a
+   * resolved terminalOwnerPid. Default-target (pet-sharing) leases are
+   * preferred; when none exist — e.g. every session holds a pool or adopted
+   * pet — explicit leases are eligible so the default pet can still focus the
+   * most recent session. Within a tier, the most recent activity (say/react)
+   * wins, falling back to the most recent heartbeat.
    */
   getFocusableDefaultLease(): PetLease | undefined {
     const now = this.#now();
     let best: PetLease | undefined;
     for (const lease of this.#leases.values()) {
-      if (lease.targetKind !== "default") continue;
       if (!lease.terminalOwnerPid || lease.terminalOwnerPid <= 0) continue;
       if (lease.expiresAt <= now) continue;
       if (!best) { best = lease; continue; }
+      const bestIsDefault = best.targetKind === "default";
+      const leaseIsDefault = lease.targetKind === "default";
+      if (leaseIsDefault !== bestIsDefault) {
+        if (leaseIsDefault) best = lease;
+        continue;
+      }
       const bestKey = best.lastActivityAt ?? 0;
       const leaseKey = lease.lastActivityAt ?? 0;
       if (leaseKey > bestKey) { best = lease; continue; }
