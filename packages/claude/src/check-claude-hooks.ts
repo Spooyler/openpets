@@ -12,8 +12,12 @@ assert.equal(mapClaudeHookEvent({ hook_event_name: "UserPromptSubmit" })?.reacti
 assert.equal(mapClaudeHookEvent({ hook_event_name: "UserPromptSubmit" })?.speechCategory, undefined);
 assert.equal(mapClaudeHookEvent({ hook_event_name: "PreToolUse", tool_name: "Write" })?.reaction, "editing");
 assert.equal(mapClaudeHookEvent({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "pnpm test" } })?.reaction, "testing");
-assert.equal(mapClaudeHookEvent({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "ls" } })?.reaction, undefined);
-assert.equal(mapClaudeHookEvent({ hook_event_name: "PreToolUse", tool_name: "Read" })?.reaction, undefined);
+assert.equal(mapClaudeHookEvent({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "ls" } })?.reaction, "running");
+assert.equal(mapClaudeHookEvent({ hook_event_name: "PreToolUse", tool_name: "Read" })?.reaction, "thinking");
+assert.equal(mapClaudeHookEvent({ hook_event_name: "PreToolUse", tool_name: "Grep" })?.reaction, "thinking");
+assert.equal(mapClaudeHookEvent({ hook_event_name: "PreToolUse", tool_name: "Glob" })?.reaction, "thinking");
+assert.equal(mapClaudeHookEvent({ hook_event_name: "PreToolUse", tool_name: "WebFetch" })?.reaction, undefined);
+assert.equal(mapClaudeHookEvent({ hook_event_name: "PreToolUse" })?.reaction, undefined);
 assert.equal(mapClaudeHookEvent({ hook_event_name: "PermissionRequest" })?.speechCategory, "permission");
 assert.equal(mapClaudeHookEvent({ hook_event_name: "Notification" })?.reaction, undefined);
 assert.equal(mapClaudeHookEvent({ hook_event_name: "Stop" })?.reaction, "success");
@@ -55,11 +59,17 @@ assert.deepEqual(calls[0], { kind: "lease", value: "acquire", requestedPetId: "f
 assert.deepEqual(calls[1], { kind: "react", value: "thinking", leaseId: "lease-fixer" });
 await handleClaudeHookPayload(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "npm test -- --secret" } }), { client, throttlePath: join(dir, "throttle.json"), now: () => 101_000 });
 assert.deepEqual(calls[2], { kind: "react", value: "testing", leaseId: undefined });
-const beforeSilentBash = calls.length;
 await handleClaudeHookPayload(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "ls" } }), { client, throttlePath: join(dir, "throttle.json"), now: () => 102_000 });
-assert.equal(calls.length, beforeSilentBash);
+assert.deepEqual(calls.at(-1), { kind: "react", value: "running", leaseId: undefined });
+// Read/Grep/Glob share the "thinking" throttle key with UserPromptSubmit (last sent at t=100_000, 10s cooldown).
+const beforeThrottledRead = calls.length;
+await handleClaudeHookPayload(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "/never/shown" } }), { client, throttlePath: join(dir, "throttle.json"), now: () => 105_000 });
+assert.equal(calls.length, beforeThrottledRead, "thinking reaction within cooldown should be throttled");
+await handleClaudeHookPayload(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Grep", tool_input: { pattern: "x" } }), { client, throttlePath: join(dir, "throttle.json"), now: () => 111_000 });
+assert.deepEqual(calls.at(-1), { kind: "react", value: "thinking", leaseId: undefined });
+const beforeThrottledTest = calls.length;
 await handleClaudeHookPayload(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "npm test" } }), { client, throttlePath: join(dir, "throttle.json"), now: () => 102_000 });
-assert.equal(calls.length, beforeSilentBash, "duplicate testing reaction should be throttled");
+assert.equal(calls.length, beforeThrottledTest, "duplicate testing reaction should be throttled");
 await handleClaudeHookPayload("not json", { client, throttlePath: join(dir, "throttle.json") });
 
 const projectDir = join(dir, "project-with-local-hook");

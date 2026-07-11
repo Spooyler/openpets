@@ -146,9 +146,10 @@ export function getDefaultThrottlePath(): string {
 function classifyToolReaction(payload: Record<string, unknown>): OpenPetsReaction | undefined {
   const toolName = typeof payload.tool_name === "string" ? payload.tool_name : "";
   if (toolName === "Edit" || toolName === "Write" || toolName === "MultiEdit") return "editing";
+  if (toolName === "Read" || toolName === "Grep" || toolName === "Glob") return "thinking";
   if (toolName === "Bash") {
     const command = extractBashCommand(payload.tool_input);
-    return /\b(test|vitest|jest|pytest|npm\s+test|pnpm\s+test|yarn\s+test|cargo\s+test|go\s+test)\b/i.test(command) ? "testing" : undefined;
+    return /\b(test|vitest|jest|pytest|npm\s+test|pnpm\s+test|yarn\s+test|cargo\s+test|go\s+test)\b/i.test(command) ? "testing" : "running";
   }
   return undefined;
 }
