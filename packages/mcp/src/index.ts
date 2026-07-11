@@ -8,7 +8,7 @@ import type { OpenPetsClient, OpenPetsLeaseResult } from "@open-pets/client";
 
 import { createHelpText, parseMcpArgs } from "./args.js";
 import { createOpenPetsMcpServer } from "./server.js";
-import { createToolContext, type LeaseContext } from "./tools.js";
+import { createToolContext, resolveRequestedPetId, type LeaseContext } from "./tools.js";
 
 /** Minimal transport interface required by wireTransportLifecycle (subset of StdioServerTransport). */
 export interface McpTransportHook {
@@ -76,7 +76,7 @@ export function wireTransportLifecycle(opts: TransportLifecycleOptions): { close
           }
         }
         try {
-          const result = await client.acquireLease({ requestedPetId });
+          const result = await client.acquireLease({ requestedPetId: resolveRequestedPetId(lease, requestedPetId) });
           lease.lease = result;
           lease.staleLeaseId = undefined;
           lease.staleLease = undefined;

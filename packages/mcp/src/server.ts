@@ -1,10 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import { handleReact, handleSay, handleStatus, reactSchema, saySchema, type ToolContext } from "./tools.js";
+import { adoptSchema, handleAdopt, handleReact, handleSay, handleStatus, reactSchema, saySchema, type ToolContext } from "./tools.js";
 
 export function createOpenPetsMcpServer(context: ToolContext): McpServer {
   const server = new McpServer({ name: "open-pets", version: "0.0.0" }, {
-    instructions: "Interact with the user's OpenPets desktop companion. Use openpets_status first. Use openpets_say only for short status/personality messages, never code, logs, secrets, URLs, or file paths.",
+    instructions: "Interact with the user's OpenPets desktop companion. Use openpets_status first. Use openpets_say only for short status/personality messages, never code, logs, secrets, URLs, or file paths. Use openpets_adopt only when the user asks to switch this session's pet.",
   });
 
   server.registerTool("openpets_status", {
@@ -20,6 +20,13 @@ export function createOpenPetsMcpServer(context: ToolContext): McpServer {
     inputSchema: reactSchema,
     annotations: { readOnlyHint: false, idempotentHint: false },
   }, async (input) => handleReact(input, context));
+
+  server.registerTool("openpets_adopt", {
+    title: "OpenPets Adopt",
+    description: "Switch which pet this session targets. Pass the id of an installed pet to get a dedicated session pet, or omit petId to return to the default pet.",
+    inputSchema: adoptSchema,
+    annotations: { readOnlyHint: false, idempotentHint: false },
+  }, async (input) => handleAdopt(input, context));
 
   server.registerTool("openpets_say", {
     title: "OpenPets Say",

@@ -34,6 +34,7 @@ await checkStdioServerContract();
 await checkT6TransportOnclose();
 await checkT7EnsureLeaseHeartbeatFirst();
 await checkT8ExitOnce();
+await checkT9Adopt();
 const builtEntrypoint = readFileSync(join("dist", "index.js"), "utf8");
 if (!builtEntrypoint.startsWith("#!/usr/bin/env node")) {
   throw new Error("Built MCP entrypoint is missing a Node shebang.");
@@ -62,7 +63,7 @@ async function checkMcpServerContract(): Promise<void> {
   try {
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name).sort();
-    if (names.join(",") !== "openpets_react,openpets_say,openpets_status") {
+    if (names.join(",") !== "openpets_adopt,openpets_react,openpets_say,openpets_status") {
       throw new Error(`Unexpected MCP tool list: ${names.join(",")}`);
     }
 
@@ -105,7 +106,7 @@ async function checkStdioServerContract(): Promise<void> {
   try {
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name).sort();
-    if (names.join(",") !== "openpets_react,openpets_say,openpets_status") {
+    if (names.join(",") !== "openpets_adopt,openpets_react,openpets_say,openpets_status") {
       throw new Error(`Unexpected stdio MCP tool list: ${names.join(",")}`);
     }
 
@@ -298,6 +299,90 @@ async function checkT7EnsureLeaseHeartbeatFirst(): Promise<void> {
       await server3.close();
     }
   }
+}
+
+/**
+ * T9 — openpets_adopt: switches the session's lease to a new pet at runtime.
+ * (a) adopt acquires the new pet's lease FIRST, then releases the old lease;
+ * (b) later re-acquires (ensureLease) use the ADOPTED pet, not the --pet config;
+ * (c) invalid pet ids are rejected without touching the lease;
+ * (d) omitting petId returns to the default pet, and that choice also sticks
+ *     for later re-acquires.
+ */
+async function checkT9Adopt(): Promise<void> {
+  const calls: string[] = [];
+  let leaseCounter = 0;
+  const fakeClient = {
+    status: async () => ({ ok: true, appRunning: true }),
+    listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
+    installPet: async () => { throw new Error("unused"); },
+    installLocalPet: async () => { throw new Error("unused"); },
+    acquireLease: async (opts?: { readonly requestedPetId?: string }) => {
+      leaseCounter += 1;
+      const requested = opts?.requestedPetId;
+      calls.push(`acquire:${requested ?? "<default>"}`);
+      return requested
+        ? { leaseId: `t9-lease-${leaseCounter}`, requestedPetId: requested, targetKind: "explicit" as const, actualTargetPetId: requested, actualTargetPetName: requested, usingDefaultPet: false, expiresAt: Date.now() + 15_000, leaseActive: true }
+        : { leaseId: `t9-lease-${leaseCounter}`, requestedPetId: undefined, targetKind: "default" as const, actualTargetPetId: "fox", actualTargetPetName: "Fox", usingDefaultPet: true, expiresAt: Date.now() + 15_000, leaseActive: true };
+    },
+    heartbeatLease: async (leaseId: string) => ({ leaseId, expiresAt: Date.now() + 15_000 }),
+    releaseLease: async (leaseId: string) => { calls.push(`release:${leaseId}`); return { released: true }; },
+    react: async (reaction: string, options?: { readonly leaseId?: string }) => ({ ok: true, reaction, leaseId: options?.leaseId }),
+    say: async (message: string, options?: { readonly leaseId?: string }) => ({ ok: true, message, leaseId: options?.leaseId }),
+    hello: async () => ({ ok: true }),
+  };
+
+  const lease: LeaseContext = {
+    lease: { leaseId: "t9-lease-0", requestedPetId: undefined, targetKind: "default", actualTargetPetId: "fox", actualTargetPetName: "Fox", usingDefaultPet: true, expiresAt: Date.now() + 15_000, leaseActive: true },
+  };
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  const server = createOpenPetsMcpServer({ configuredPetId: "snoopy", client: fakeClient, lease, leaseReady: Promise.resolve() });
+  const mc = new Client({ name: "t9-client", version: "0.0.0" });
+  await Promise.all([server.connect(st), mc.connect(ct)]);
+  try {
+    // (a) adopt raccoon: acquire first, release old lease after
+    const adopt = await mc.callTool({ name: "openpets_adopt", arguments: { petId: "raccoon" } }, CallToolResultSchema);
+    if (adopt.isError) throw new Error(`T9a: adopt failed: ${JSON.stringify(adopt.content)}`);
+    const acquireIdx = calls.indexOf("acquire:raccoon");
+    const releaseIdx = calls.indexOf("release:t9-lease-0");
+    if (acquireIdx === -1) throw new Error(`T9a: adopt did not acquire raccoon. Calls: ${calls.join(",")}`);
+    if (releaseIdx === -1) throw new Error(`T9a: adopt did not release the previous lease. Calls: ${calls.join(",")}`);
+    if (acquireIdx > releaseIdx) throw new Error(`T9a: adopt released before acquiring. Calls: ${calls.join(",")}`);
+    if (lease.lease?.actualTargetPetId !== "raccoon") throw new Error(`T9a: lease context not switched. actual=${lease.lease?.actualTargetPetId}`);
+    if (lease.requestedPetId !== "raccoon") throw new Error(`T9a: adopted pet id not persisted on lease context.`);
+
+    // (b) lease loss → re-acquire must use raccoon (adopted), not snoopy (configured)
+    lease.lease = undefined;
+    const react = await mc.callTool({ name: "openpets_react", arguments: { reaction: "waving" } }, CallToolResultSchema);
+    if (react.isError) throw new Error(`T9b: react failed: ${JSON.stringify(react.content)}`);
+    if (calls.filter((c) => c === "acquire:raccoon").length !== 2) {
+      throw new Error(`T9b: re-acquire did not use the adopted pet. Calls: ${calls.join(",")}`);
+    }
+
+    // (c) invalid pet id rejected without lease churn
+    const callsBefore = calls.length;
+    const bad = await mc.callTool({ name: "openpets_adopt", arguments: { petId: "Bad/Pet" } }, CallToolResultSchema);
+    if (!bad.isError) throw new Error("T9c: invalid pet id was not rejected.");
+    if (calls.length !== callsBefore) throw new Error(`T9c: invalid adopt touched the lease. Calls: ${calls.join(",")}`);
+
+    // (d) omitting petId returns to the default pet, and it sticks
+    const back = await mc.callTool({ name: "openpets_adopt", arguments: {} }, CallToolResultSchema);
+    if (back.isError) throw new Error(`T9d: adopt-to-default failed: ${JSON.stringify(back.content)}`);
+    if (lease.requestedPetId !== null) throw new Error("T9d: adopting the default pet must persist as null.");
+    const backStructured = back.structuredContent as { readonly usingDefaultPet?: boolean } | undefined;
+    if (backStructured?.usingDefaultPet !== true) throw new Error("T9d: adopt result did not switch to the default pet.");
+    lease.lease = undefined;
+    const react2 = await mc.callTool({ name: "openpets_react", arguments: { reaction: "waving" } }, CallToolResultSchema);
+    if (react2.isError) throw new Error(`T9d: react failed: ${JSON.stringify(react2.content)}`);
+    const lastAcquire = [...calls].reverse().find((c) => c.startsWith("acquire:"));
+    if (lastAcquire !== "acquire:<default>") {
+      throw new Error(`T9d: re-acquire after adopting default must not request the configured pet. Calls: ${calls.join(",")}`);
+    }
+  } finally {
+    await mc.close();
+    await server.close();
+  }
+  void ct;
 }
 
 function assertRejects(callback: () => unknown): void {

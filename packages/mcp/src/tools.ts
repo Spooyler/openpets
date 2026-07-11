@@ -15,6 +15,13 @@ export const saySchema = z.object({
 
 export const reactSchema = z.object({ reaction: reactionSchema });
 
+export const adoptSchema = z.object({
+  petId: z.string().trim().min(1).max(64)
+    .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/, "Pet id must be a lowercase installed pet id.")
+    .refine((value) => value !== "builtin", "The built-in pet cannot be requested directly.")
+    .optional(),
+});
+
 export interface OpenPetsMcpStatus {
   readonly [key: string]: unknown;
   ok: boolean;
@@ -34,6 +41,18 @@ export interface LeaseContext {
   /** Full lease object saved when the lease became stale; used for heartbeat-first recovery. */
   staleLease?: OpenPetsLeaseResult;
   degradedReason?: string;
+  /**
+   * Pet adopted at runtime via openpets_adopt. Overrides the --pet configured
+   * id for every subsequent (re)acquire. `null` means the default pet was
+   * adopted; `undefined` means no adoption happened (use the configured pet).
+   */
+  requestedPetId?: string | null;
+}
+
+/** Effective pet id for (re)acquiring this session's lease. */
+export function resolveRequestedPetId(lease: LeaseContext | undefined, configuredPetId: string | undefined): string | undefined {
+  if (!lease || lease.requestedPetId === undefined) return configuredPetId;
+  return lease.requestedPetId ?? undefined;
 }
 
 export interface ToolContext {
@@ -95,7 +114,7 @@ async function ensureLease(context: ToolContext): Promise<boolean> {
         // Heartbeat failed — fall through to acquireLease
       }
     }
-    const newLease = await client.acquireLease({ requestedPetId: context.configuredPetId });
+    const newLease = await client.acquireLease({ requestedPetId: resolveRequestedPetId(context.lease, context.configuredPetId) });
     if (context.lease) {
       context.lease.lease = newLease;
       context.lease.staleLeaseId = undefined;
@@ -105,6 +124,48 @@ async function ensureLease(context: ToolContext): Promise<boolean> {
     return !!newLease;
   } catch {
     return false;
+  }
+}
+
+export async function handleAdopt(input: unknown, context: ToolContext): Promise<CallToolResult> {
+  await context.leaseReady;
+  const parsed = adoptSchema.safeParse(input);
+  if (!parsed.success) return toolError("Invalid pet id. Pass the id of an installed pet, or omit petId to return to the default pet.");
+  const leaseContext = context.lease;
+  if (!leaseContext) return toolError("OpenPets lease context is unavailable.");
+
+  const requestedPetId = parsed.data.petId;
+  try {
+    const client = context.client ?? createOpenPetsClient();
+    // Acquire the new lease first so a failure leaves the current pet working.
+    const newLease = await client.acquireLease({ requestedPetId });
+    const previousLeaseId = leaseContext.lease?.leaseId ?? leaseContext.staleLeaseId;
+    if (previousLeaseId && previousLeaseId !== newLease.leaseId) {
+      try { await client.releaseLease(previousLeaseId); } catch { /* best effort */ }
+    }
+    leaseContext.requestedPetId = requestedPetId ?? null;
+    leaseContext.lease = newLease;
+    leaseContext.staleLeaseId = undefined;
+    leaseContext.staleLease = undefined;
+    leaseContext.degradedReason = undefined;
+
+    const fallbackNote = requestedPetId && newLease.usingDefaultPet
+      ? ` Requested pet "${requestedPetId}" is unavailable — using the default pet instead.`
+      : "";
+    return {
+      content: [{ type: "text", text: `OpenPets now targets ${newLease.actualTargetPetName} (${newLease.actualTargetPetId}).${fallbackNote}` }],
+      structuredContent: {
+        ok: true,
+        requestedPetId,
+        actualTargetPetId: newLease.actualTargetPetId,
+        actualTargetPetName: newLease.actualTargetPetName,
+        usingDefaultPet: newLease.usingDefaultPet,
+        fallbackReason: newLease.fallbackReason,
+        leaseId: newLease.leaseId,
+      },
+    };
+  } catch (error) {
+    return toolError(`OpenPets desktop app is not running or local IPC is unavailable. ${sanitizeError(error)}`);
   }
 }
 
