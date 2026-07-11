@@ -75,8 +75,8 @@ function tryParsePetdexEntry(value: unknown): PetdexManifestEntry | undefined {
 }
 
 // Same rule as safe Codex pet ids: the slug doubles as the installed pet id.
-function isSafePetdexSlug(value: string): boolean {
-  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value) && value !== "builtin";
+export function isSafePetdexSlug(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value) && value !== "builtin";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
