@@ -6,6 +6,7 @@ import { createOpenPetsClient, type OpenPetsClient, type OpenPetsReaction, OpenP
 import { validateHookSpeech as validateSharedHookSpeech } from "@open-pets/agent-events";
 
 import { pickHookSpeech, type HookSpeechCategory } from "./hook-messages.js";
+import { collectOwnProcessAncestry } from "./process-ancestry.js";
 
 export type ClaudeHookEventName = "UserPromptSubmit" | "PreToolUse" | "PermissionRequest" | "Notification" | "Stop" | "StopFailure";
 
@@ -61,12 +62,16 @@ export async function handleClaudeHookPayload(raw: string, options: ClaudeHookOp
 
   const client = options.client ?? createOpenPetsClient({ connectTimeoutMs: 500, responseTimeoutMs: 500 });
   const lease = options.configuredPetId ? await acquireHookLease(client, options.configuredPetId, options.debug) : undefined;
+  // Lease-less hook events carry this process's ancestry so the desktop app
+  // can route them to the pet of the session this hook belongs to. Collected
+  // client-side: this process is usually gone before the app could walk it.
+  const clientAncestorPids = lease ? undefined : await collectOwnProcessAncestry();
   try {
     if (decision.speechCategory && shouldSpeak) {
       const message = validateHookSpeech(pickHookSpeech(decision.speechCategory, options.random));
-      await client.say(message, { reaction: decision.reaction, leaseId: lease?.leaseId });
+      await client.say(message, { reaction: decision.reaction, leaseId: lease?.leaseId, clientAncestorPids });
     } else {
-      await client.react(decision.reaction, { leaseId: lease?.leaseId });
+      await client.react(decision.reaction, { leaseId: lease?.leaseId, clientAncestorPids });
     }
   } catch (error) {
     if (!(error instanceof OpenPetsClientError) && options.debug) {

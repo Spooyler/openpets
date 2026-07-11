@@ -112,12 +112,32 @@ const appRoot = process.env["OPENPETS_DESKTOP_ROOT"]
   assert.ok(src.includes("hasSessionRoutableLeases()"), "(C1) routing must fast-path when no session pets exist");
 }
 
-// (C2) client package: say/react requests carry the caller's pid so lease-less
-// helpers (hooks) can be routed.
+// (C2) client package: say/react requests carry the caller's pid and optional
+// self-collected ancestry so lease-less helpers (hooks) can be routed.
 {
   const clientSrc = readFileSync(join(appRoot, "..", "..", "packages", "client", "src", "index.ts"), "utf-8");
   assert.ok(/pet\.say"?,\s*\{[^}]*clientPid: process\.pid/.test(clientSrc), "(C2) pet.say must include clientPid");
   assert.ok(/pet\.react"?,\s*\{[^}]*clientPid: process\.pid/.test(clientSrc), "(C2) pet.react must include clientPid");
+  assert.ok(/pet\.say"?,\s*\{[^}]*clientAncestorPids/.test(clientSrc), "(C2) pet.say must forward clientAncestorPids");
+  assert.ok(/pet\.react"?,\s*\{[^}]*clientAncestorPids/.test(clientSrc), "(C2) pet.react must forward clientAncestorPids");
+}
+
+// (C3) caller-supplied ancestry is preferred (hooks die before a server-side
+// walk can see them) and validated; the hook package collects its own chain.
+{
+  const src = readFileSync(join(appRoot, "src", "local-ipc.ts"), "utf-8");
+  const fnStart = src.indexOf("async function resolveSessionPetTarget");
+  assert.ok(fnStart >= 0, "(C3) resolveSessionPetTarget must exist");
+  const fn = src.slice(fnStart);
+  const supplied = fn.indexOf("validateClientAncestorPids(params.clientAncestorPids)");
+  const walk = fn.indexOf("getAncestorPidChain(clientPid)");
+  assert.ok(supplied >= 0, "(C3) routing must accept caller-supplied ancestry");
+  assert.ok(walk > supplied, "(C3) caller-supplied ancestry must be preferred over a live walk");
+
+  const hookSrc = readFileSync(join(appRoot, "..", "..", "packages", "claude", "src", "hooks.ts"), "utf-8");
+  assert.ok(hookSrc.includes("collectOwnProcessAncestry()"), "(C3) hooks must collect their own ancestry");
+  assert.ok(/say\([^)]*\{[^}]*clientAncestorPids/.test(hookSrc), "(C3) hook say must pass ancestry");
+  assert.ok(/react\([^)]*\{?[^}]*clientAncestorPids/.test(hookSrc), "(C3) hook react must pass ancestry");
 }
 
 console.log("session-pet-routing validation passed.");

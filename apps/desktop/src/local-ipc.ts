@@ -677,7 +677,11 @@ async function resolveSessionPetTarget(
 ): Promise<PetLease | undefined> {
   if (lease && lease.targetKind !== "default") return undefined;
   if (!leaseManager.hasSessionRoutableLeases()) return undefined;
-  let chain: readonly number[] | undefined = lease ? leaseManager.getRawLease(lease.leaseId)?.clientAncestorPids : undefined;
+  // Preference order: ancestry supplied by the caller (short-lived hooks — the
+  // only chance to observe a process that dies right after this request),
+  // then ancestry stored on the lease, then a live walk of the caller's pid.
+  let chain: readonly number[] | undefined = validateClientAncestorPids(params.clientAncestorPids);
+  if (!chain) chain = lease ? leaseManager.getRawLease(lease.leaseId)?.clientAncestorPids : undefined;
   if (!chain || chain.length === 0) {
     const clientPid = typeof params.clientPid === "number" && params.clientPid > 0 ? Math.floor(params.clientPid) : undefined;
     if (clientPid === undefined) return undefined;
@@ -689,6 +693,16 @@ async function resolveSessionPetTarget(
   }
   if (chain.length === 0) return undefined;
   return leaseManager.findSessionPetLease(chain);
+}
+
+function validateClientAncestorPids(value: unknown): readonly number[] | undefined {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 32) return undefined;
+  const pids: number[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "number" || !Number.isFinite(entry) || entry <= 0) return undefined;
+    pids.push(Math.floor(entry));
+  }
+  return pids;
 }
 
 function applyConfinementUpdate(petId: string, info: TerminalWindowInfo): void {

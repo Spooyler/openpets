@@ -70,8 +70,8 @@ export interface OpenPetsClient {
   acquireLease(options?: { readonly requestedPetId?: string }): Promise<OpenPetsLeaseResult>;
   heartbeatLease(leaseId: string): Promise<{ readonly leaseId: string; readonly expiresAt: number }>;
   releaseLease(leaseId: string): Promise<{ readonly released: boolean }>;
-  react(reaction: OpenPetsReaction, options?: { readonly leaseId?: string }): Promise<unknown>;
-  say(message: string, options?: { readonly reaction?: OpenPetsReaction; readonly leaseId?: string }): Promise<unknown>;
+  react(reaction: OpenPetsReaction, options?: { readonly leaseId?: string; readonly clientAncestorPids?: readonly number[] }): Promise<unknown>;
+  say(message: string, options?: { readonly reaction?: OpenPetsReaction; readonly leaseId?: string; readonly clientAncestorPids?: readonly number[] }): Promise<unknown>;
 }
 
 export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenPetsClient {
@@ -106,8 +106,8 @@ export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenP
     acquireLease: (leaseOptions) => sendDiscoveredRequest("lease.acquire", { requestedPetId: leaseOptions?.requestedPetId, clientPid: process.pid, sessionNonce: SESSION_NONCE }, options),
     heartbeatLease: (leaseId) => sendDiscoveredRequest("lease.heartbeat", { leaseId }, options),
     releaseLease: (leaseId) => sendDiscoveredRequest("lease.release", { leaseId }, options),
-    react: (reaction, reactOptions) => sendDiscoveredRequest("pet.react", { reaction: validateReaction(reaction), leaseId: reactOptions?.leaseId, clientPid: process.pid }, options),
-    say: (message, sayOptions) => sendDiscoveredRequest("pet.say", { message, reaction: sayOptions?.reaction, leaseId: sayOptions?.leaseId, clientPid: process.pid }, options),
+    react: (reaction, reactOptions) => sendDiscoveredRequest("pet.react", { reaction: validateReaction(reaction), leaseId: reactOptions?.leaseId, clientPid: process.pid, clientAncestorPids: reactOptions?.clientAncestorPids }, options),
+    say: (message, sayOptions) => sendDiscoveredRequest("pet.say", { message, reaction: sayOptions?.reaction, leaseId: sayOptions?.leaseId, clientPid: process.pid, clientAncestorPids: sayOptions?.clientAncestorPids }, options),
   };
 }
 
