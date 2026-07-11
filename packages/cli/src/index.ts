@@ -8,7 +8,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { allowedReactions, createOpenPetsClient, OpenPetsClientError, type OpenPetsPetListItem, type OpenPetsReaction } from "@open-pets/client";
-import { claudeHookEvents, doctorClaudeHooks, openPetsHookMarker, removeOpenPetsHooks, runClaudeHookFromStdin, validateOpenPetsPetArg } from "@open-pets/claude";
+import { claudeHookEvents, doctorClaudeHooks, doctorClaudeStatusline, openPetsHookMarker, removeOpenPetsHooks, runClaudeHookFromStdin, validateOpenPetsPetArg } from "@open-pets/claude";
 import { buildCursorRulesPreview, buildOpenPetsOnlyPreview, classifyCursorMcpStatus, classifyCursorRulesStatus, executeCursorMcpWrite, executeCursorRulesWrite, getCursorProjectMcpPath, getCursorProjectRulesPath, planCursorMcpInstall, planCursorMcpReplace, planCursorRulesInstall, planCursorRulesRemove, planCursorRulesReplace, readCursorMcpConfig, readCursorOpenPetsRules } from "@open-pets/cursor";
 import { prepareOpenCodeProjectSetup, writePreparedOpenCodeProjectSetup } from "@open-pets/opencode";
 
@@ -224,6 +224,7 @@ export function parseDoctorArgs(args: readonly string[]): DoctorOptions {
 
 export async function runDoctor(options: DoctorOptions): Promise<void> {
   const claude = doctorClaudeHooks();
+  const statusline = doctorClaudeStatusline();
 
   const projectDir = resolveProjectDir(options.cwd);
   const cursorConfigPath = getCursorProjectMcpPath(projectDir);
@@ -236,16 +237,19 @@ export async function runDoctor(options: DoctorOptions): Promise<void> {
   if (options.json) {
     process.stdout.write(`${JSON.stringify({
       claude: { status: claude.status, settingsPath: claude.settingsPath, asyncSupported: claude.asyncSupported },
+      claudeStatusline: { status: statusline.status, settingsPath: statusline.settingsPath },
       cursor: { status: cursor.status, configPath: cursor.configPath },
       app,
     }, null, 2)}\n`);
   } else {
     process.stdout.write(`Claude hooks: ${claude.status} (${claude.settingsPath})\n`);
+    process.stdout.write(`Claude statusline: ${statusline.status} (${statusline.settingsPath})\n`);
     process.stdout.write(`Cursor MCP: ${cursor.status} (${cursor.configPath})\n`);
     process.stdout.write(`OpenPets app: ${app.running ? "running" : `not running${app.reason ? ` (${app.reason})` : ""}`}\n`);
   }
 
-  if (claude.status === "error" || cursor.status === "error" || cursor.status === "invalid") process.exitCode = 1;
+  // A statusline "conflict" is informational (the user has their own statusLine), not a broken integration.
+  if (claude.status === "error" || statusline.status === "error" || cursor.status === "error" || cursor.status === "invalid") process.exitCode = 1;
 }
 
 async function showPets(args: readonly string[]): Promise<void> {
