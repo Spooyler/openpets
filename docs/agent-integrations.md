@@ -91,7 +91,9 @@ The deepest integration, because Claude Code has a rich hook system.
   each assistant message. The ping only re-arms an already-active busy badge —
   it never creates one, so an idle session can never look busy. Installed only
   when no custom statusLine exists; a foreign entry reports `conflict` and is
-  never replaced or removed.
+  never replaced or removed. Managed from the Control Center Integrations page
+  (Claude card) or via `open-pets-claude install-statusline`; `openpets doctor`
+  reports its status.
 - **Project-local awareness**: if a project defines its own OpenPets hook
   (`.claude/settings.local.json` with `--project-local`), the global hook stands
   down to avoid double-firing.
