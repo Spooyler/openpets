@@ -168,7 +168,7 @@ function shouldSendReaction(reaction: OpenPetsReaction, options: ClaudeHookOptio
   return shouldSendThrottleKey(`reaction:${reaction}`, reactionCooldownMs, now, options.throttlePath ?? getDefaultThrottlePath());
 }
 
-function shouldSendThrottleKey(key: string, cooldown: number, now: number, path: string): boolean {
+export function shouldSendThrottleKey(key: string, cooldown: number, now: number, path: string): boolean {
   const state = readThrottleState(path);
   const previous = typeof state[key] === "number" ? state[key] : 0;
   if (now - previous < cooldown) return false;
@@ -183,7 +183,7 @@ function readThrottleState(path: string): Record<string, number> {
     if (!isRecord(parsed)) return {};
     const state: Record<string, number> = {};
     for (const [key, value] of Object.entries(parsed)) {
-      if ((key === "thinking" || key === "success" || key === "error" || key === "permission" || key.startsWith("reaction:")) && typeof value === "number" && Number.isFinite(value)) state[key] = value;
+      if ((key === "thinking" || key === "success" || key === "error" || key === "permission" || key === "statusline" || key.startsWith("reaction:")) && typeof value === "number" && Number.isFinite(value)) state[key] = value;
     }
     return state;
   } catch {
@@ -202,7 +202,7 @@ function writeThrottleState(path: string, state: Record<string, number>): void {
   }
 }
 
-function readLimitedStdin(stdin: NodeJS.ReadStream, maxBytes: number): Promise<string> {
+export function readLimitedStdin(stdin: NodeJS.ReadStream, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     let buffer = "";
     stdin.setEncoding("utf8");
