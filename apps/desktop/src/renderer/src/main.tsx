@@ -13,13 +13,14 @@ import vscodeLogoUrl from "../../../assets/integrations/vscode.svg";
 import windsurfLogoUrl from "../../../assets/integrations/windsurf.svg";
 import zedLogoUrl from "../../../assets/integrations/zed.svg";
 
-type Filter = "all" | "installed" | "featured" | "originals" | "codex";
+type Filter = "all" | "installed" | "featured" | "originals" | "codex" | "petdex";
 type InstalledPet = { id: string; displayName: string; description?: string; builtIn: boolean; protected: boolean; installed: boolean; broken?: boolean; brokenReason?: string; source?: { kind?: "catalog"; preview?: string } | { kind: "codex"; path: string } };
-type PetEntry = { id: string; displayName: string; description?: string; searchText?: string; preview?: string; thumbnail?: string; spritesheet?: string; category?: "western" | "asian"; original?: boolean; featured?: boolean; catalogPage?: number; sourceKind?: "installed" | "catalog" | "codex"; installed?: boolean; builtIn?: boolean; protected?: boolean; broken?: boolean; brokenReason?: string };
+type PetEntry = { id: string; displayName: string; description?: string; searchText?: string; preview?: string; thumbnail?: string; spritesheet?: string; category?: "western" | "asian"; original?: boolean; featured?: boolean; catalogPage?: number; sourceKind?: "installed" | "catalog" | "codex" | "petdex"; submittedBy?: string; installed?: boolean; builtIn?: boolean; protected?: boolean; broken?: boolean; brokenReason?: string };
 type SearchPetEntry = Pick<PetEntry, "id" | "displayName" | "category" | "original" | "featured"> & { searchText?: string; catalogPage?: number };
 type StateSnapshot = { preferences: { defaultPetId: string }; pets: { installed: InstalledPet[] } };
 type CatalogState = { pets: PetEntry[]; source: string; error?: string; page?: number; pageCount?: number; total?: number; categories?: { id: "western" | "asian"; label: string; count: number }[]; originalsCount?: number; featuredCount?: number };
 type CodexState = { pets: PetEntry[]; error?: string };
+type PetdexState = { pets: { slug: string; displayName: string; kind: string; submittedBy: string }[]; error?: string };
 type PetScaleOption = { label: string; value: number };
 type UserSelectableAnimationState = "idle" | "review" | "running" | "waiting" | "waving" | "jumping" | "failed";
 type ReactionAnimationOverrides = Record<string, UserSelectableAnimationState>;
@@ -106,6 +107,10 @@ type ControlCenterApi = {
   installPet(petId: string): Promise<unknown>;
   installLocalPet(): Promise<unknown>;
   importCodexPet(petId: string): Promise<unknown>;
+  getPetdexPets(): Promise<PetdexState>;
+  getPetdexPreviews(slugs: string[]): Promise<Record<string, string>>;
+  installPetdexPet(slug: string): Promise<unknown>;
+  openPetdexPage(slug: string): Promise<void>;
   openGallery(): Promise<void>;
   removePet(petId: string): Promise<StateSnapshot>;
   onRouteChange(callback: (route: Route) => void): () => void;
@@ -309,6 +314,14 @@ const FilterCodexIcon = () => (
   <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
     <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+  </svg>
+);
+
+const FilterPetdexIcon = () => (
+  <svg className="filter-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M2 12h20" />
+    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
   </svg>
 );
 
@@ -702,6 +715,7 @@ const filterIcons: Record<Filter, React.ReactNode> = {
   featured: <FilterFeaturedIcon />,
   originals: <FilterOriginalIcon />,
   codex: <FilterCodexIcon />,
+  petdex: <FilterPetdexIcon />,
 };
 
 const filterLabelKeys: Record<Filter, string> = {
@@ -710,6 +724,7 @@ const filterLabelKeys: Record<Filter, string> = {
   featured: "pets.filter.featured",
   originals: "pets.filter.originals",
   codex: "pets.filter.codex",
+  petdex: "pets.filter.petdex",
 };
 
 const buttonVariantClass = {
@@ -2624,6 +2639,10 @@ function ControlCenter() {
   const [catalogSearch, setCatalogSearch] = useState<SearchPetEntry[] | null>(null);
   const [catalogPage, setCatalogPage] = useState(0);
   const [codex, setCodex] = useState<CodexState>({ pets: [] });
+  const [petdex, setPetdex] = useState<PetdexState>({ pets: [] });
+  const [petdexPreviews, setPetdexPreviews] = useState<Record<string, string>>({});
+  const [petdexVisible, setPetdexVisible] = useState(24);
+  const petdexRequestedPreviewsRef = useRef<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -2638,12 +2657,12 @@ function ControlCenter() {
 
   async function loadPetsData() {
     setError("");
-    const [nextState, nextCatalog, nextCodex] = await Promise.all([api.getPetsState(), api.getCatalog(), api.getCodexPets()]);
+    const [nextState, nextCatalog, nextCodex, nextPetdex] = await Promise.all([api.getPetsState(), api.getCatalog(), api.getCodexPets(), api.getPetdexPets().catch((err): PetdexState => ({ pets: [], error: String((err as Error)?.message ?? err) }))]);
     logPetsEvent("load-complete", { installed: nextState.pets.installed.length, defaultPetId: nextState.preferences.defaultPetId, catalogSource: nextCatalog.source, catalogPets: nextCatalog.pets.length, catalogPage: nextCatalog.page, catalogPageCount: nextCatalog.pageCount, codexPets: nextCodex.pets.length, catalogError: nextCatalog.error, codexError: nextCodex.error, firstCatalogPet: nextCatalog.pets[0] ? { id: nextCatalog.pets[0].id, preview: imageDebug(nextCatalog.pets[0].preview), thumbnail: imageDebug(nextCatalog.pets[0].thumbnail), spritesheet: imageDebug(nextCatalog.pets[0].spritesheet) } : null });
-    setState(nextState); setCatalog(nextCatalog); setCodex(nextCodex);
+    setState(nextState); setCatalog(nextCatalog); setCodex(nextCodex); setPetdex(nextPetdex);
     setCatalogPage(nextCatalog.page ?? 0);
     setCatalogPages({ [nextCatalog.page ?? 0]: nextCatalog.pets });
-    const visiblePetIds = new Set<string>([...nextState.pets.installed.map((pet) => pet.id), ...nextCatalog.pets.map((pet) => pet.id), ...nextCodex.pets.map((pet) => pet.id)]);
+    const visiblePetIds = new Set<string>([...nextState.pets.installed.map((pet) => pet.id), ...nextCatalog.pets.map((pet) => pet.id), ...nextCodex.pets.map((pet) => pet.id), ...nextPetdex.pets.map((pet) => pet.slug)]);
     setSelectedId((current) => current && visiblePetIds.has(current) ? current : "");
   }
   useEffect(() => {
@@ -2706,7 +2725,28 @@ function ControlCenter() {
       }
     }
 
+    // Petdex rows only surface under their own filter: the community catalog
+    // is thousands of entries and would swamp the default grid.
+    if (filter === "petdex") {
+      for (const p of petdex.pets) {
+        rows.push({
+          id: p.slug,
+          displayName: p.displayName,
+          searchText: `${p.submittedBy} ${p.kind}`,
+          preview: safePetImage(petdexPreviews[p.slug]),
+          submittedBy: p.submittedBy,
+          sourceKind: "petdex",
+          installed: installed.has(p.slug),
+        });
+      }
+    }
+
     return rows.filter((p) => {
+      if (filter === "petdex") {
+        if (p.sourceKind !== "petdex") return false;
+      } else if (p.sourceKind === "petdex") {
+        return false;
+      }
       if (filter === "installed" && !p.installed) return false;
       if (filter === "codex" && p.sourceKind !== "codex" && !(installed.get(p.id)?.source?.kind === "codex")) return false;
       if (filter === "originals" && !p.original && !p.builtIn) return false;
@@ -2714,10 +2754,26 @@ function ControlCenter() {
       const q = query.trim().toLowerCase();
       return !q || `${p.displayName} ${p.description ?? ""} ${p.searchText ?? ""} ${p.id}`.toLowerCase().includes(q);
     });
-  }, [state, catalogPages, catalogSearch, codex, filter, query]);
+  }, [state, catalogPages, catalogSearch, codex, petdex, petdexPreviews, filter, query]);
 
   const selected = selectedId ? pets.find((p) => p.id === selectedId) ?? null : null;
   const defaultId = state?.preferences.defaultPetId;
+  const displayedPets = filter === "petdex" ? pets.slice(0, petdexVisible) : pets;
+
+  useEffect(() => { setPetdexVisible(24); }, [filter, query]);
+
+  useEffect(() => {
+    if (filter !== "petdex") return;
+    const requested = petdexRequestedPreviewsRef.current;
+    const missing = displayedPets.filter((p) => p.sourceKind === "petdex" && !requested.has(p.id)).map((p) => p.id).slice(0, 24);
+    if (missing.length === 0) return;
+    for (const slug of missing) requested.add(slug);
+    void api.getPetdexPreviews(missing).then((previews) => {
+      if (Object.keys(previews).length > 0) setPetdexPreviews((current) => ({ ...current, ...previews }));
+    }).catch(() => {
+      // Missing previews keep the placeholder tile.
+    });
+  }, [filter, displayedPets]);
 
   useEffect(() => {
     if (!selected) return;
@@ -2778,6 +2834,7 @@ function ControlCenter() {
       return t("pets.status.installed");
     }
     if (selected.sourceKind === "codex") return t("pets.status.availableCodex");
+    if (selected.sourceKind === "petdex") return t("pets.status.availablePetdex");
     return t("pets.status.availableCatalog");
   }, [selected, defaultId, state, t]);
 
@@ -2892,7 +2949,7 @@ function ControlCenter() {
             <div className="toolbar"><SearchInput value={query} onChange={(e) => setQuery(e.target.value)} /></div>
             <div className="filter-row">
               <div className="filters">
-                {(["all", "installed", "featured", "originals", "codex"] as Filter[]).map((f) => (
+                {(["all", "installed", "featured", "originals", "codex", "petdex"] as Filter[]).map((f) => (
                   <button
                     key={f}
                     className={`filter ${filter === f ? "active" : ""} ${f === "originals" ? "original" : ""} ${f === "featured" ? "featured" : ""}`}
@@ -2909,13 +2966,14 @@ function ControlCenter() {
                 <Button variant="secondary" size="compact" icon={<HeartIcon />} onClick={() => void api.openGallery().catch((err) => setError(String(err?.message ?? err)))}>{t("pets.gallery")}</Button>
               </div>
             </div>
-            <div className="pets-grid">{pets.map((pet) => {
+            <div className="pets-grid">{displayedPets.map((pet) => {
               const isBuiltIn = pet.builtIn;
               const hasDistinctPreview = pet.preview && pet.preview !== pet.spritesheet;
               const useSpritesheetFrame = !isBuiltIn && !hasDistinctPreview && !!pet.spritesheet;
               const isDefault = pet.id === defaultId;
               const canInstall = !pet.installed && pet.sourceKind === "catalog";
               const canImport = !pet.installed && pet.sourceKind === "codex";
+              const canInstallPetdex = !pet.installed && pet.sourceKind === "petdex";
               const canSetDefault = pet.installed && !isDefault && !pet.broken;
               const canRemove = pet.installed && !pet.builtIn && !pet.protected;
 
@@ -2935,8 +2993,8 @@ function ControlCenter() {
                     <span className="card-title-row">
                       <b className="card-title">{pet.displayName}</b>
                     </span>
-                    <p className="card-desc">{pet.description || pet.id}</p>
-                    <div className="badges">{isDefault && <StatusPill tone="green">{t("pets.badge.default")}</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">{t("pets.badge.original")}</StatusPill> : pet.featured ? <StatusPill tone="purple">{t("pets.badge.featured")}</StatusPill> : null}{pet.installed && <StatusPill>{t("pets.badge.installed")}</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">{t("pets.badge.codex")}</StatusPill>}</div>
+                    <p className="card-desc">{pet.sourceKind === "petdex" && pet.submittedBy ? t("pets.petdex.by", { name: pet.submittedBy }) : pet.description || pet.id}</p>
+                    <div className="badges">{isDefault && <StatusPill tone="green">{t("pets.badge.default")}</StatusPill>}{pet.original || pet.builtIn ? <StatusPill tone="yellow">{t("pets.badge.original")}</StatusPill> : pet.featured ? <StatusPill tone="purple">{t("pets.badge.featured")}</StatusPill> : null}{pet.installed && <StatusPill>{t("pets.badge.installed")}</StatusPill>}{pet.sourceKind === "codex" && <StatusPill tone="orange">{t("pets.badge.codex")}</StatusPill>}{pet.sourceKind === "petdex" && <StatusPill tone="purple">{t("pets.badge.petdex")}</StatusPill>}</div>
 
                     <div className="pet-card-actions" onClick={(event) => event.stopPropagation()}>
                       <Button
@@ -2972,6 +3030,18 @@ function ControlCenter() {
                           {t("pets.action.import")}
                         </Button>
                       )}
+                      {canInstallPetdex && (
+                        <Button
+                          variant="primary"
+                          size="compact"
+                          icon={<InstallIcon />}
+                          disabled={!!busy}
+                          ariaLabel={t("pets.aria.install", { name: pet.displayName })}
+                          onClick={() => { void act(t("pets.busy.installing"), () => api.installPetdexPet(pet.id)); }}
+                        >
+                          {t("pets.action.install")}
+                        </Button>
+                      )}
                       {canSetDefault && (
                         <Button
                           variant="primary"
@@ -3001,6 +3071,14 @@ function ControlCenter() {
                 </div>
               );
             })}</div>
+            {filter === "petdex" && petdex.error && <p className="pager-text">{petdex.error}</p>}
+            {filter === "petdex" && pets.length > petdexVisible && (
+              <div className="pager">
+                <span />
+                <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => setPetdexVisible((count) => count + 24)}>{t("pets.action.loadMore")}</Button>
+                <span />
+              </div>
+            )}
             <div className="pager">
               {!!catalog?.pageCount && catalog.pageCount > 1 ? (
                 <Button
@@ -3108,6 +3186,27 @@ function ControlCenter() {
                       onClick={() => act(t("pets.busy.importing"), () => api.importCodexPet(selected.id))}
                     >
                       {busy || t("pets.detail.importCodexPet")}
+                    </Button>
+                  )}
+                  {!selected.installed && selected.sourceKind === "petdex" && (
+                    <Button
+                      variant="primary"
+                      fullWidth
+                      icon={<InstallIcon />}
+                      disabled={!!busy}
+                      onClick={() => act(t("pets.busy.installing"), () => api.installPetdexPet(selected.id))}
+                    >
+                      {busy || t("pets.detail.installPetdexPet")}
+                    </Button>
+                  )}
+                  {selected.sourceKind === "petdex" && (
+                    <Button
+                      variant="secondary"
+                      fullWidth
+                      icon={<HeartIcon />}
+                      onClick={() => void api.openPetdexPage(selected.id).catch((err) => setError(String((err as Error)?.message ?? err)))}
+                    >
+                      {t("pets.detail.viewOnPetdex")}
                     </Button>
                   )}
                   {selected.installed && selected.id !== defaultId && !selected.broken && (
