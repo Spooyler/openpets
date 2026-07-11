@@ -174,6 +174,13 @@ export function applyExternalPetStatusReaction(reaction: OpenPetsReaction | null
   refreshDefaultPetContent();
 }
 
+export function refreshDefaultPetBusyBadge(): boolean {
+  if (!statusBadge || !isBusyStatusBadgeReaction(statusBadge)) return false;
+  debug("pet.default", "busy badge re-armed", { reaction: statusBadge });
+  setStatusBadge(statusBadge);
+  return true;
+}
+
 export function applyExternalPetMoveBy(options: PetMoveOptions): Promise<{ readonly moved: boolean; readonly reason?: string }> {
   return moveDefaultPetBy(Number(options.x), Number(options.y), options.durationMs);
 }

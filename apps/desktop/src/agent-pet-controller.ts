@@ -94,6 +94,14 @@ export function applyAgentPetReaction(petId: string, reaction: OpenPetsReaction)
   return shown ? { shown } : { shown, reason: "dismissed" };
 }
 
+export function refreshAgentPetBusyBadge(petId: string): boolean {
+  const badge = statusBadges.get(petId);
+  if (!badge || !isBusyStatusBadgeReaction(badge)) return false;
+  debug("pet.agent", "busy badge re-armed", { petId, reaction: badge });
+  setStatusBadge(petId, badge);
+  return true;
+}
+
 export function applyAgentPetSay(petId: string, message: string, reaction?: OpenPetsReaction): { readonly shown: boolean; readonly reason?: string } {
   debug("pet.agent", "say apply", { petId, reaction, messageLength: message.length });
   if (!reaction) clearStatusBadge(petId);
