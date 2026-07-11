@@ -106,8 +106,8 @@ export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenP
     acquireLease: (leaseOptions) => sendDiscoveredRequest("lease.acquire", { requestedPetId: leaseOptions?.requestedPetId, clientPid: process.pid, sessionNonce: SESSION_NONCE }, options),
     heartbeatLease: (leaseId) => sendDiscoveredRequest("lease.heartbeat", { leaseId }, options),
     releaseLease: (leaseId) => sendDiscoveredRequest("lease.release", { leaseId }, options),
-    react: (reaction, reactOptions) => sendDiscoveredRequest("pet.react", { reaction: validateReaction(reaction), leaseId: reactOptions?.leaseId }, options),
-    say: (message, sayOptions) => sendDiscoveredRequest("pet.say", { message, reaction: sayOptions?.reaction, leaseId: sayOptions?.leaseId }, options),
+    react: (reaction, reactOptions) => sendDiscoveredRequest("pet.react", { reaction: validateReaction(reaction), leaseId: reactOptions?.leaseId, clientPid: process.pid }, options),
+    say: (message, sayOptions) => sendDiscoveredRequest("pet.say", { message, reaction: sayOptions?.reaction, leaseId: sayOptions?.leaseId, clientPid: process.pid }, options),
   };
 }
 

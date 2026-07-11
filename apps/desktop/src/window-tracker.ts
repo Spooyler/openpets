@@ -19,7 +19,7 @@
 
 import { debug, info, warn } from "./logger.js";
 import { isWindowOccluded as _isWindowOccluded } from "./window-occlusion.js";
-import { findTerminalPidInChain as _findTerminalPidInChain } from "./window-chain.js";
+import { collectAncestorPidChain, findTerminalPidInChain as _findTerminalPidInChain } from "./window-chain.js";
 import {
   getParentPid,
   isWin32MinimizedBounds,
@@ -144,6 +144,15 @@ export async function findTerminalPidInChain(
   getParentFn: (pid: number) => Promise<number | null> = getParentPid,
 ): Promise<{ pid: number; appName: string } | null> {
   return _findTerminalPidInChain(clientPid, windows, maxDepth, getParentFn);
+}
+
+/**
+ * Collect the ancestor PID chain of a process ([pid, parent, grandparent, …])
+ * using the real platform parent-PID lookup. Cache-warm right after a
+ * findTerminalWindowForPid walk for the same pid.
+ */
+export async function getAncestorPidChain(startPid: number, maxDepth = 10): Promise<number[]> {
+  return collectAncestorPidChain(startPid, getParentPid, maxDepth);
 }
 
 // ---------------------------------------------------------------------------

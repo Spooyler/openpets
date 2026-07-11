@@ -28,6 +28,13 @@ export interface PetLease {
   readonly terminalAppName?: string;
   /** Numeric window ID from CGWindowList for the terminal window. */
   readonly terminalWindowId?: number;
+  /**
+   * Ancestor PID chain of the client process ([clientPid, parent, …]),
+   * resolved alongside terminal identity. The segment below terminalOwnerPid
+   * identifies the coding-agent session; it lets lease-less helper processes
+   * (e.g. Claude Code hooks) be routed to this session's pet.
+   */
+  readonly clientAncestorPids?: readonly number[];
 }
 
 export interface LeaseSnapshot {
@@ -294,6 +301,65 @@ export class LeaseManager {
     const updated: PetLease = { ...lease, ...info };
     this.#leases.set(leaseId, updated);
     this.#onLog("debug", "terminal identity set", { leaseId, terminalOwnerPid: info.terminalOwnerPid, terminalAppName: info.terminalAppName, terminalWindowId: info.terminalWindowId });
+  }
+
+  /** Record the client's ancestor PID chain (resolved with terminal identity). */
+  setClientAncestry(leaseId: string, clientAncestorPids: readonly number[]): void {
+    const lease = this.#leases.get(leaseId);
+    if (!lease || clientAncestorPids.length === 0) return;
+    this.#leases.set(leaseId, { ...lease, clientAncestorPids });
+    this.#onLog("debug", "client ancestry set", { leaseId, chainLength: clientAncestorPids.length });
+  }
+
+  /**
+   * True when at least one active explicit lease carries the ancestry needed
+   * for session routing — the cheap pre-check before walking a caller's PID
+   * chain in findSessionPetLease.
+   */
+  hasSessionRoutableLeases(): boolean {
+    const now = this.#now();
+    for (const lease of this.#leases.values()) {
+      if (lease.targetKind !== "explicit") continue;
+      if (lease.expiresAt <= now) continue;
+      if (!lease.clientAncestorPids || !lease.terminalOwnerPid) continue;
+      if (lease.clientAncestorPids.indexOf(lease.terminalOwnerPid) > 0) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Match a caller's ancestor PID chain to the session owning a dedicated
+   * (explicit) pet. Lease-less helper processes (e.g. Claude Code hooks) share
+   * the coding agent's process ancestry with that session's MCP client, so a
+   * PID common to both chains identifies the session. Only ancestors STRICTLY
+   * BELOW the lease's terminal process count — the terminal and everything
+   * above it are shared by unrelated sessions. Ties break like focus
+   * selection: most recent activity, then freshest heartbeat.
+   */
+  findSessionPetLease(callerAncestorPids: readonly number[]): PetLease | undefined {
+    if (callerAncestorPids.length === 0) return undefined;
+    const now = this.#now();
+    const callerPids = new Set(callerAncestorPids);
+    let best: PetLease | undefined;
+    for (const lease of this.#leases.values()) {
+      if (lease.targetKind !== "explicit") continue;
+      if (lease.expiresAt <= now) continue;
+      const chain = lease.clientAncestorPids;
+      if (!chain || !lease.terminalOwnerPid) continue;
+      const cutoff = chain.indexOf(lease.terminalOwnerPid);
+      if (cutoff <= 0) continue;
+      let matched = false;
+      for (let i = 0; i < cutoff; i++) {
+        if (callerPids.has(chain[i]!)) { matched = true; break; }
+      }
+      if (!matched) continue;
+      if (!best) { best = lease; continue; }
+      const bestKey = best.lastActivityAt ?? 0;
+      const leaseKey = lease.lastActivityAt ?? 0;
+      if (leaseKey > bestKey) { best = lease; continue; }
+      if (leaseKey === bestKey && lease.lastHeartbeatAt > best.lastHeartbeatAt) best = lease;
+    }
+    return best;
   }
 
   /**

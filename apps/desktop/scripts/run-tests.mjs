@@ -52,6 +52,7 @@ const behaviorTests = [
   ".test-dist/tests/default-pet-focus.test.js",
   ".test-dist/tests/pet-drag-clamp.test.js",
   ".test-dist/tests/agent-pet-reshow.test.js",
+  ".test-dist/tests/session-pet-routing.test.js",
   ".test-dist/tests/confinement-manager.test.js",
   ".test-dist/tests/pet-confinement-enabled.test.js",
   ".test-dist/tests/pet-motion-gravity.test.js",

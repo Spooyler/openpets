@@ -60,3 +60,26 @@ export async function findTerminalPidInChain(
 
   return null;
 }
+
+/**
+ * Collect the ancestor PID chain of a process: [startPid, parent, grandparent, …].
+ * Stops at maxDepth, on a missing parent, or on a cycle. Pure — the parent
+ * lookup is injected so this is unit-testable without spawning processes.
+ */
+export async function collectAncestorPidChain(
+  startPid: number,
+  getParentFn: (pid: number) => Promise<number | null>,
+  maxDepth = 10,
+): Promise<number[]> {
+  const chain: number[] = [startPid];
+  const seen = new Set<number>([startPid]);
+  let current = startPid;
+  for (let i = 0; i < maxDepth; i++) {
+    const parent = await getParentFn(current);
+    if (parent === null || parent <= 0 || seen.has(parent)) break;
+    chain.push(parent);
+    seen.add(parent);
+    current = parent;
+  }
+  return chain;
+}

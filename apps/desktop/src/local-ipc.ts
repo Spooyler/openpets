@@ -8,7 +8,7 @@ import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActiv
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
-import { createStaleLeaseStatus, LeaseManager } from "./lease-manager.js";
+import { createStaleLeaseStatus, LeaseManager, type PetLease } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
 import { stat } from "node:fs/promises";
@@ -17,7 +17,7 @@ import { installPet, installPetFromFolderWithResult, installPetFromZipFileWithRe
 import { clearConfinementState, setConfinementState } from "./confinement-manager.js";
 import { isConfinementSupported } from "./capabilities.js";
 import { resolveAndSubscribe, type ConfinementPollerDeps } from "./confinement-poller.js";
-import { findTerminalWindowForPid, subscribeWindowTracking, type TerminalWindowInfo } from "./window-tracker.js";
+import { findTerminalWindowForPid, getAncestorPidChain, subscribeWindowTracking, type TerminalWindowInfo } from "./window-tracker.js";
 import { warnPetFallback } from "./pet-fallback-notify.js";
 import { getEligiblePoolPetIds, resolvePoolAssignment } from "./pet-pool.js";
 import { t } from "./i18n/index.js";
@@ -452,6 +452,15 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason });
       return { ok: true, reaction, shown: applied.shown, reason: applied.reason, leaseId: lease.leaseId };
     }
+    const sessionPet = await resolveSessionPetTarget(lease, params);
+    if (sessionPet) {
+      leaseManager.touchActivity(sessionPet.leaseId);
+      debug("ipc", "react routed to session pet", { requestId: request.id, petId: sessionPet.actualPetId, sessionLeaseId: sessionPet.leaseId });
+      const applied = applyAgentPetReaction(sessionPet.actualPetId, reaction);
+      safeRecordOpenPetsActivity({ kind: "react", reaction, petId: sessionPet.actualPetId, surface: "agent" });
+      trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: "session-routed", shown: applied.shown, reason: applied.reason });
+      return { ok: true, reaction, shown: applied.shown, reason: applied.reason };
+    }
     const applied = applyExternalPetReaction(reaction);
     safeRecordOpenPetsActivity({ kind: "react", reaction, petId, surface: "default" });
     trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason });
@@ -470,6 +479,15 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     safeRecordOpenPetsActivity({ kind: "say", reaction, petId, surface: "agent" });
     trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
     return { ok: true, shown: applied.shown, reason: applied.reason, reaction, leaseId: lease.leaseId };
+  }
+  const sessionPet = await resolveSessionPetTarget(lease, params);
+  if (sessionPet) {
+    leaseManager.touchActivity(sessionPet.leaseId);
+    debug("ipc", "say routed to session pet", { requestId: request.id, petId: sessionPet.actualPetId, sessionLeaseId: sessionPet.leaseId });
+    const applied = applyAgentPetSay(sessionPet.actualPetId, message, reaction);
+    safeRecordOpenPetsActivity({ kind: "say", reaction, petId: sessionPet.actualPetId, surface: "agent" });
+    trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: "session-routed", shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
+    return { ok: true, shown: applied.shown, reason: applied.reason, reaction };
   }
   const applied = applyExternalPetSay(message, reaction);
   safeRecordOpenPetsActivity({ kind: "say", reaction, petId, surface: "default" });
@@ -557,11 +575,14 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
       return termInfo;
     },
     subscribe: (id, pid, onFound, onNull) => subscribeWindowTracking(id, pid, onFound, onNull),
-    setIdentity: (termInfo) => leaseManager.setTerminalIdentity(leaseId, {
-      terminalOwnerPid: termInfo.terminalPid,
-      terminalAppName: termInfo.appName,
-      terminalWindowId: termInfo.window?.id,
-    }),
+    setIdentity: (termInfo) => {
+      leaseManager.setTerminalIdentity(leaseId, {
+        terminalOwnerPid: termInfo.terminalPid,
+        terminalAppName: termInfo.appName,
+        terminalWindowId: termInfo.window?.id,
+      });
+      void captureClientAncestry(leaseId, clientPid);
+    },
     applyUpdate: (termInfo) => applyConfinementUpdate(petId, termInfo),
     isAlive: () => !!leaseManager.getRawLease(leaseId),
     onDead: () => unsubscribeConfinement(leaseId),
@@ -620,6 +641,7 @@ async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: n
           terminalAppName: termInfo.appName,
           terminalWindowId: termInfo.window?.id,
         });
+        void captureClientAncestry(leaseId, clientPid);
         info("ipc", "terminal identity resolved (default lease)", { leaseId, clientPid, attempt, terminalPid: termInfo.terminalPid, appName: termInfo.appName });
         return;
       }
@@ -630,6 +652,43 @@ async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: n
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 3_000));
   }
   info("ipc", "terminal identity unresolved (default lease)", { leaseId, clientPid });
+}
+
+/** Record the client's ancestor PID chain on the lease (cache-warm right after the identity walk). */
+async function captureClientAncestry(leaseId: string, clientPid: number): Promise<void> {
+  try {
+    const chain = await getAncestorPidChain(clientPid);
+    leaseManager.setClientAncestry(leaseId, chain);
+  } catch (err) {
+    debug("ipc", "client ancestry capture failed", { leaseId, clientPid, error: String(err) });
+  }
+}
+
+/**
+ * Route a say/react from a lease-less or default-lease caller to the pet of
+ * the session it belongs to. Short-lived helper processes (Claude Code hooks)
+ * share the coding agent's process ancestry with that session's MCP client, so
+ * the caller's PID chain identifies the session. Returns undefined when no
+ * dedicated session pet matches — the caller falls through to the default pet.
+ */
+async function resolveSessionPetTarget(
+  lease: { readonly leaseId: string; readonly targetKind: string } | null | undefined,
+  params: Record<string, unknown>,
+): Promise<PetLease | undefined> {
+  if (lease && lease.targetKind !== "default") return undefined;
+  if (!leaseManager.hasSessionRoutableLeases()) return undefined;
+  let chain: readonly number[] | undefined = lease ? leaseManager.getRawLease(lease.leaseId)?.clientAncestorPids : undefined;
+  if (!chain || chain.length === 0) {
+    const clientPid = typeof params.clientPid === "number" && params.clientPid > 0 ? Math.floor(params.clientPid) : undefined;
+    if (clientPid === undefined) return undefined;
+    try {
+      chain = await getAncestorPidChain(clientPid);
+    } catch {
+      return undefined;
+    }
+  }
+  if (chain.length === 0) return undefined;
+  return leaseManager.findSessionPetLease(chain);
 }
 
 function applyConfinementUpdate(petId: string, info: TerminalWindowInfo): void {
