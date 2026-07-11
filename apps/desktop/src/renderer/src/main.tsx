@@ -116,10 +116,11 @@ type ControlCenterApi = {
 };
 
 
-type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
+type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "doctor-statusline" | "install-statusline" | "uninstall-statusline" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
 type AgentSetupPetOption = { id: string; displayName: string; default: boolean };
 type ClaudeCodeStatus = { state: "detected" | "not_detected" | "configured" | "needs_setup" | "error"; label: string; details: string; claudeCommand?: string; version?: string; mcpListWorks: boolean; openPetsEntry: { present: boolean; verified: boolean; matchesExpected: boolean }; canConfigure: boolean; canReplace: boolean; canRemove: boolean };
 type ClaudeHookDoctorResult = { status: "installed" | "needs_setup" | "error" | "custom" | "conflict"; settingsPath: string; exists: boolean; valid: boolean; message: string; preview: Record<string, unknown>; asyncSupported: boolean; backupPath?: string };
+type ClaudeStatuslineDoctorResult = { status: "not_installed" | "installed" | "needs_update" | "conflict" | "error"; settingsPath: string; exists: boolean; valid: boolean; message: string; preview: Record<string, unknown>; backupPath?: string };
 type ClaudeOpenPetsMemoryStatus = { state: "installed" | "needs_setup" | "error"; label: string; details: string; claudeMdPath: string; openPetsMemoryPath: string; canInstall: boolean };
 type OpenCodeSetupStatus = { state: "configured" | "needs_setup" | "not_detected" | "error"; label: string; details: string; configDir: string; canInstall: boolean; canRemove: boolean };
 type OpenCodeSetupPreview = { global: true; configDir: string; configPath: string; cleanupConfigPaths: string[]; mcpCommand: string[]; plugin: unknown[] | string; instructionPath: string; configPreview: Record<string, unknown> };
@@ -127,7 +128,7 @@ type CursorSetupStatus = { state: "configured" | "needs_setup" | "not_detected" 
 type CursorSetupPreview = { global: true; configPath: string; mcpEntry: Record<string, unknown>; rulesPath: string; rulesContent: string; commandMode: "published" | "local" | "bundled" };
 type AgentSetupCommandPaths = { claude: string; node: string; opencode: string };
 type AgentSetupActionResult = { ok: boolean; action: AgentSetupAction; message: string; changed: boolean };
-type AgentSetupSnapshot = { selectedPetId?: string; commandMode: "published" | "local" | "bundled"; localDevAvailable: boolean; petOptions: AgentSetupPetOption[]; preview: { displayCommand: string; mcpJson: Record<string, unknown> }; status: ClaudeCodeStatus; hookStatus: ClaudeHookDoctorResult; memoryStatus: ClaudeOpenPetsMemoryStatus; opencodeStatus: OpenCodeSetupStatus; opencodePreview: OpenCodeSetupPreview; cursorStatus: CursorSetupStatus; cursorPreview: CursorSetupPreview; commandPaths: AgentSetupCommandPaths; busy: boolean; lastAction?: AgentSetupActionResult };
+type AgentSetupSnapshot = { selectedPetId?: string; commandMode: "published" | "local" | "bundled"; localDevAvailable: boolean; petOptions: AgentSetupPetOption[]; preview: { displayCommand: string; mcpJson: Record<string, unknown> }; status: ClaudeCodeStatus; hookStatus: ClaudeHookDoctorResult; statuslineStatus: ClaudeStatuslineDoctorResult; memoryStatus: ClaudeOpenPetsMemoryStatus; opencodeStatus: OpenCodeSetupStatus; opencodePreview: OpenCodeSetupPreview; cursorStatus: CursorSetupStatus; cursorPreview: CursorSetupPreview; commandPaths: AgentSetupCommandPaths; busy: boolean; lastAction?: AgentSetupActionResult };
 type StatusTone = keyof typeof statusPillToneClass;
 
 const api = (window as unknown as { openPetsControlCenter: ControlCenterApi }).openPetsControlCenter;
@@ -1912,6 +1913,13 @@ function IntegrationIcon({ id }: { id: string }) {
   return <PluginGlyph />;
 }
 
+function statuslineStatusTone(status: ClaudeStatuslineDoctorResult["status"]): StatusTone {
+  if (status === "installed") return "green";
+  if (status === "error") return "red";
+  if (status === "conflict") return "orange";
+  return "blue";
+}
+
 function claudeStatusTone(state: ClaudeCodeStatus["state"]): StatusTone {
   if (state === "configured") return "green";
   if (state === "error") return "red";
@@ -2145,6 +2153,19 @@ function IntegrationsView() {
                     <div className="flex flex-col gap-2">
                       <Button variant="primary" size="compact" icon={<HookIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installingHooks"), "install-hooks")}>{t("integrations.installHooks")}</Button>
                       <Button variant="danger" size="compact" icon={<RemoveIcon />} disabled={isBusy || snapshot.hookStatus.status === "needs_setup"} onClick={() => run(t("integrations.busy.removingHooks"), "uninstall-hooks")}>{t("integrations.removeHooks")}</Button>
+                    </div>
+                  </section>
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>{t("integrations.optional")}</small><strong>{t("integrations.claudeStatusline")}</strong></div>
+                    <div className="flex items-center justify-between mb-2">
+                      <StatusPill tone={statuslineStatusTone(snapshot.statuslineStatus.status)}>{snapshot.statuslineStatus.status}</StatusPill>
+                    </div>
+                    {snapshot.statuslineStatus.status === "conflict" && (
+                      <small className="text-xs text-slatecopy block mb-2">{t("integrations.statuslineConflict")}</small>
+                    )}
+                    <div className="flex flex-col gap-2">
+                      <Button variant="primary" size="compact" icon={<HookIcon />} disabled={isBusy || snapshot.statuslineStatus.status === "conflict" || snapshot.statuslineStatus.status === "installed"} onClick={() => run(t("integrations.busy.installingStatusline"), "install-statusline")}>{t("integrations.installStatusline")}</Button>
+                      <Button variant="danger" size="compact" icon={<RemoveIcon />} disabled={isBusy || (snapshot.statuslineStatus.status !== "installed" && snapshot.statuslineStatus.status !== "needs_update")} onClick={() => run(t("integrations.busy.removingStatusline"), "uninstall-statusline")}>{t("integrations.removeStatusline")}</Button>
                     </div>
                   </section>
                   <section className="plugin-section">
