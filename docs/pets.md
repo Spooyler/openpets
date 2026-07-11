@@ -20,7 +20,7 @@ A pet package is small and asset-driven:
 - **`spritesheet.webp`** — a grid of animation frames. Frames are at least
   `192x208`; thumbnails are derived from the spritesheet.
 
-There are three sources a pet can come from at runtime:
+There are four sources a pet can come from at runtime:
 
 1. **Built-in pet** (`built-in-pet.ts`) — a bundled spritesheet that always
    works as a fallback, even offline with nothing installed.
@@ -29,6 +29,12 @@ There are three sources a pet can come from at runtime:
 3. **Codex pets** — locally-developed pets imported from `~/.codex/pets/`
    (`codex-pets.ts`), the dev workflow for authoring a new pet before
    publishing it.
+4. **Petdex pets** — community pets from the petdex.dev gallery
+   (`petdex-catalog.ts`), browsed via its public manifest and installed through
+   the same Codex-format pipeline. OpenPets never rehosts petdex assets: the
+   manifest, thumbnails, and pet files are fetched from the pinned
+   `assets.petdex.dev` host only when the user browses or installs, and each
+   entry shows its submitter with a link back to its petdex.dev page.
 
 ## Default pet vs agent pets
 
@@ -204,6 +210,19 @@ the catalog. The publishing path (zipping, thumbnailing, uploading to R2,
 regenerating the catalog) lives in `web/`'s sync scripts and is documented in
 `web/docs/pet_publishing.md`; the contract those produce is in [catalog.md](catalog.md).
 
+## Petdex pets (community catalog)
+
+`petdex-catalog.ts` (+ pure `petdex-catalog-core.ts`) fetches the petdex.dev
+manifest (`https://assets.petdex.dev/manifests/petdex-v1.json`), validates every
+entry (safe slug, https URLs pinned to exactly `assets.petdex.dev`), and
+installs a pet by downloading its `pet.json` + spritesheet into a temp folder
+that flows through `installPetFromFolderWithResult` — the same validation and
+atomic-install path as local imports. Thumbnails are generated on demand
+(main-process sharp → data URLs, LRU-cached) for visible gallery rows only, so
+browsing thousands of community pets never bulk-downloads spritesheets. Pet
+assets are owned by their petdex submitters; OpenPets fetches at user action
+and never bundles or rehosts them.
+
 ## Image protocols & CSP
 
 Pet images are served to renderers through internal protocols
@@ -224,6 +243,7 @@ images silently fall back to the default pet. This is the single most common
 | Installing / extracting | `pet-installation.ts`, `zip-safety.ts` |
 | Standalone install | `packages/install-pet/` |
 | Local pet authoring | `codex-pets.ts` |
+| Petdex community catalog | `petdex-catalog.ts`, `petdex-catalog-core.ts` |
 | Movement | `pet-motion-engine.ts` |
 | Display containment / cross-screen | `display.ts`, `confinement-manager.ts` |
 | Topology-change reclamp | `default-pet-controller.ts` → `reclampAllLivePetWindows` |
