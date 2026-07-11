@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import { createRequire } from "node:module";
 
 import { app } from "electron";
-import { buildClaudeMcpGetCommand, buildClaudeMcpPreview, classifyClaudeMcpStatus, createOpenPetsHookSettingsPreview, doctorClaudeHooks, installClaudeHooks, mapAsarPathToUnpacked, uninstallClaudeHooks, type ClaudeCommandSpec, type ClaudeHookDoctorResult, type ClaudeMcpPreview, type OpenPetsCommandMode, type ParsedClaudeMcpEntry } from "@open-pets/claude";
+import { buildClaudeMcpGetCommand, buildClaudeMcpPreview, classifyClaudeMcpStatus, createOpenPetsHookSettingsPreview, doctorClaudeHooks, doctorClaudeStatusline, installClaudeHooks, installClaudeStatusline, mapAsarPathToUnpacked, uninstallClaudeHooks, uninstallClaudeStatusline, type ClaudeCommandSpec, type ClaudeHookDoctorResult, type ClaudeMcpPreview, type ClaudeStatuslineDoctorResult, type OpenPetsCommandMode, type ParsedClaudeMcpEntry } from "@open-pets/claude";
 import { buildCursorRulesPreview, classifyCursorMcpStatus, executeCursorMcpWrite, getCursorGlobalMcpPath, planCursorMcpInstall, planCursorMcpRemove, planCursorMcpReplace, readCursorMcpConfig, type CursorMcpStatusResult } from "@open-pets/cursor";
 import { buildOpenPetsOnlyPreview, type RedactedPreview } from "@open-pets/cursor";
 import { doctorOpenCodeGlobalSetup, getGlobalOpenCodeConfigDir, parseOpenCodeConfig, prepareOpenCodeGlobalRemove, prepareOpenCodeGlobalSetup, writePreparedOpenCodeGlobalRemove, writePreparedOpenCodeGlobalSetup } from "@open-pets/opencode";
@@ -12,7 +12,7 @@ import { doctorOpenCodeGlobalSetup, getGlobalOpenCodeConfigDir, parseOpenCodeCon
 import { getAppStateSnapshot, updatePreferences, type InstalledPetState, type OpenPetsStateV1 } from "./app-state.js";
 import { doctorClaudeOpenPetsMemory, installClaudeOpenPetsMemory, uninstallClaudeOpenPetsMemory, type ClaudeOpenPetsMemoryStatus } from "./claude-memory.js";
 
-export type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
+export type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "doctor-statusline" | "install-statusline" | "uninstall-statusline" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
 export type JournalAction = "configure" | "update" | "replace" | "remove";
 
 export interface AgentSetupPetOption {
@@ -42,6 +42,7 @@ export interface AgentSetupSnapshot {
   readonly preview: ClaudeMcpPreview;
   readonly status: ClaudeCodeStatus;
   readonly hookStatus: ClaudeHookDoctorResult;
+  readonly statuslineStatus: ClaudeStatuslineDoctorResult;
   readonly memoryStatus: ClaudeOpenPetsMemoryStatus;
   readonly opencodeStatus: OpenCodeSetupStatus;
   readonly opencodePreview: OpenCodeSetupPreview;
@@ -136,6 +137,8 @@ export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandMode
   const status = preview.error ? createBundledResourceErrorStatus(preview.error) : await detectClaudeCodeStatus(petId, commandMode);
   const rawHookStatus = preview.error ? createHookErrorStatus(preview.error) : safeDoctorClaudeHooks(commandMode, petId);
   const hookStatus = { ...rawHookStatus, settingsPath: formatUserPath(rawHookStatus.settingsPath) ?? rawHookStatus.settingsPath, backupPath: formatUserPath(rawHookStatus.backupPath) };
+  const rawStatuslineStatus = preview.error ? createStatuslineErrorStatus(preview.error) : safeDoctorClaudeStatusline(commandMode, petId);
+  const statuslineStatus = { ...rawStatuslineStatus, settingsPath: formatUserPath(rawStatuslineStatus.settingsPath) ?? rawStatuslineStatus.settingsPath, backupPath: formatUserPath(rawStatuslineStatus.backupPath) };
   const rawMemoryStatus = doctorClaudeOpenPetsMemory(app.getPath("home"));
   const memoryStatus = { ...rawMemoryStatus, claudeMdPath: formatUserPath(rawMemoryStatus.claudeMdPath) ?? rawMemoryStatus.claudeMdPath, openPetsMemoryPath: formatUserPath(rawMemoryStatus.openPetsMemoryPath) ?? rawMemoryStatus.openPetsMemoryPath };
   const opencode = await getOpenCodeSetup(commandMode, petId);
@@ -149,6 +152,7 @@ export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandMode
     preview: preview.preview,
     status,
     hookStatus,
+    statuslineStatus,
     memoryStatus,
     opencodeStatus: opencode.status,
     opencodePreview: opencode.preview,
@@ -248,6 +252,18 @@ function createHookErrorStatus(message: string): ClaudeHookDoctorResult {
   return { status: "error", settingsPath: "~/.claude/settings.json", exists: false, valid: false, message, preview: {}, asyncSupported: false };
 }
 
+function safeDoctorClaudeStatusline(commandMode: OpenPetsCommandMode, selectedPetId: string | undefined): ClaudeStatuslineDoctorResult {
+  try {
+    return doctorClaudeStatusline(undefined, commandMode, selectedPetId, getPreferredNodeCommand());
+  } catch (error) {
+    return createStatuslineErrorStatus(error instanceof Error ? error.message : "Packaged OpenPets statusline resources are unavailable.");
+  }
+}
+
+function createStatuslineErrorStatus(message: string): ClaudeStatuslineDoctorResult {
+  return { status: "error", settingsPath: "~/.claude/settings.json", exists: false, valid: false, message, preview: {} };
+}
+
 async function runAction(action: AgentSetupAction, selectedPetId: string | undefined, commandMode: OpenPetsCommandMode): Promise<AgentSetupActionResult> {
   if (action === "opencode-install") return installOpenCodeGlobal(selectedPetId, commandMode);
   if (action === "opencode-remove") return removeOpenCodeGlobal();
@@ -268,6 +284,22 @@ async function runAction(action: AgentSetupAction, selectedPetId: string | undef
     }
     const message = result.changed ? `Uninstalled OpenPets Claude hooks. Backup: ${formatUserPath(result.backupPath) ?? "not needed"}` : result.message;
     writeActionJournal({ action: "remove", selectedPetId, command: ["open-pets-claude", "uninstall-hooks"], previousStatus: result.status, success: result.status !== "error", message });
+    return { ok: result.status !== "error", action, message, changed: result.changed };
+  }
+  if (action === "doctor-statusline") {
+    const doctor = safeDoctorClaudeStatusline(commandMode, selectedPetId);
+    writeActionJournal({ action: "update", selectedPetId, command: createStatuslineJournalCommand("doctor-statusline", selectedPetId), previousStatus: doctor.status, success: doctor.status !== "error", message: doctor.message });
+    return { ok: doctor.status !== "error", action, message: doctor.message, changed: false };
+  }
+  if (action === "uninstall-statusline") {
+    let result;
+    try {
+      result = uninstallClaudeStatusline();
+    } catch (error) {
+      return { ok: false, action, message: error instanceof Error ? error.message : "OpenPets statusline uninstall failed.", changed: false };
+    }
+    const message = result.changed ? `Uninstalled the OpenPets Claude statusline. Backup: ${formatUserPath(result.backupPath) ?? "not needed"}` : result.message;
+    writeActionJournal({ action: "remove", selectedPetId, command: ["open-pets-claude", "uninstall-statusline"], previousStatus: result.status, success: result.status !== "error", message });
     return { ok: result.status !== "error", action, message, changed: result.changed };
   }
   if (action === "install-memory") {
@@ -294,6 +326,17 @@ async function runAction(action: AgentSetupAction, selectedPetId: string | undef
     const message = result.changed ? `Installed OpenPets Claude hooks. Backup: ${formatUserPath(result.backupPath) ?? "not needed"}` : result.message;
     writeActionJournal({ action: "update", selectedPetId, command: createHookJournalCommand("install-hooks", selectedPetId), previousStatus: result.status, success: result.status !== "error", message });
     return { ok: result.status !== "error", action, message, changed: result.changed };
+  }
+  if (action === "install-statusline") {
+    let result;
+    try {
+      result = installClaudeStatusline(undefined, commandMode, selectedPetId, getPreferredNodeCommand());
+    } catch (error) {
+      return { ok: false, action, message: error instanceof Error ? error.message : "OpenPets statusline install failed.", changed: false };
+    }
+    const message = result.changed ? `Installed the OpenPets Claude statusline. Backup: ${formatUserPath(result.backupPath) ?? "not needed"}` : result.message;
+    writeActionJournal({ action: "update", selectedPetId, command: createStatuslineJournalCommand("install-statusline", selectedPetId), previousStatus: result.status, success: result.status === "installed", message });
+    return { ok: result.status === "installed", action, message, changed: result.changed };
   }
   const detection = await detectClaudeCodeStatus(selectedPetId, commandMode);
   const previousStatus = detection.label;
@@ -613,6 +656,10 @@ function summarizeMemoryMessages(...messages: readonly string[]): string {
 }
 
 function createHookJournalCommand(command: "doctor-hooks" | "install-hooks", selectedPetId: string | undefined): readonly string[] {
+  return selectedPetId ? ["open-pets-claude", command, "--pet", selectedPetId] : ["open-pets-claude", command];
+}
+
+function createStatuslineJournalCommand(command: "doctor-statusline" | "install-statusline", selectedPetId: string | undefined): readonly string[] {
   return selectedPetId ? ["open-pets-claude", command, "--pet", selectedPetId] : ["open-pets-claude", command];
 }
 
