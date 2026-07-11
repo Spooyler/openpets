@@ -85,6 +85,13 @@ The deepest integration, because Claude Code has a rich hook system.
   maps an event to a reaction: prompt submit → thinking, permission → waiting,
   stop → success, stop-failure → error, and `PreToolUse` is classified by tool
   (Edit/Write/MultiEdit → editing, Bash test commands → testing).
+- **Statusline heartbeat** (`statusline.ts` + `statusline-settings.ts`): an
+  optional `statusLine` entry in `~/.claude/settings.json` renders a minimal
+  OpenPets statusline and sends a throttled (5s) `agent.activity` ping after
+  each assistant message. The ping only re-arms an already-active busy badge —
+  it never creates one, so an idle session can never look busy. Installed only
+  when no custom statusLine exists; a foreign entry reports `conflict` and is
+  never replaced or removed.
 - **Project-local awareness**: if a project defines its own OpenPets hook
   (`.claude/settings.local.json` with `--project-local`), the global hook stands
   down to avoid double-firing.
