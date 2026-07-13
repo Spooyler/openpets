@@ -140,20 +140,4 @@ const appRoot = process.env["OPENPETS_DESKTOP_ROOT"]
   assert.ok(/react\([^)]*\{?[^}]*clientAncestorPids/.test(hookSrc), "(C3) hook react must pass ancestry");
 }
 
-// (C4) tab-level focus: confinement state carries tabShellPid, derived from
-// the lease's ancestry; focusTerminalWindow accepts it for tab switching.
-{
-  const confinementSrc = readFileSync(join(appRoot, "src", "confinement-manager.ts"), "utf-8");
-  assert.ok(confinementSrc.includes("tabShellPid"), "(C4) ConfinementState must carry tabShellPid");
-
-  const ipcSrc = readFileSync(join(appRoot, "src", "local-ipc.ts"), "utf-8");
-  assert.ok(ipcSrc.includes("tabShellPid"), "(C4) local-ipc must compute tabShellPid for confinement");
-
-  const focusSrc = readFileSync(join(appRoot, "src", "terminal-focus.ts"), "utf-8");
-  assert.ok(/focusTerminalWindow\([^)]*tabShellPid/.test(focusSrc), "(C4) focusTerminalWindow must accept tabShellPid");
-
-  const controllerSrc = readFileSync(join(appRoot, "src", "agent-pet-controller.ts"), "utf-8");
-  assert.ok(controllerSrc.includes("confinement.tabShellPid"), "(C4) agent controller must pass tabShellPid to focus");
-}
-
 console.log("session-pet-routing validation passed.");

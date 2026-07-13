@@ -40,19 +40,11 @@ const leaseManager = new LeaseManager({
 
 // The default pet focuses the terminal of the session that most recently
 // interacted with it (say/react), falling back to the freshest heartbeat.
-setSessionTerminalFocusResolver(() => {
-  const lease = leaseManager.getFocusableDefaultLease();
-  if (!lease?.terminalOwnerPid) return undefined;
-  let tabShellPid: number | undefined;
-  if (lease.clientAncestorPids) {
-    const termIdx = lease.clientAncestorPids.indexOf(lease.terminalOwnerPid);
-    if (termIdx > 0) tabShellPid = lease.clientAncestorPids[termIdx - 1];
-  }
-  return { terminalPid: lease.terminalOwnerPid, tabShellPid };
-});
+setSessionTerminalFocusResolver(() => leaseManager.getFocusableDefaultLease()?.terminalOwnerPid);
 
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
 const warnedFallbackPets = new Set<string>();
+
 
 /** PIDs of sessions that had pool pets when pool was disabled. Used to respawn on re-enable. */
 const suspendedPoolSessions = new Map<number, string | undefined>();
@@ -592,7 +584,7 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
       });
       void captureClientAncestry(leaseId, clientPid);
     },
-    applyUpdate: (termInfo) => applyConfinementUpdate(petId, termInfo, leaseId),
+    applyUpdate: (termInfo) => applyConfinementUpdate(petId, termInfo),
     isAlive: () => !!leaseManager.getRawLease(leaseId),
     onDead: () => unsubscribeConfinement(leaseId),
     // Phase 2: Screen Recording permission — macOS only.
@@ -714,22 +706,13 @@ function validateClientAncestorPids(value: unknown): readonly number[] | undefin
   return pids;
 }
 
-function applyConfinementUpdate(petId: string, info: TerminalWindowInfo, leaseId?: string): void {
-  let tabShellPid: number | undefined;
-  if (leaseId) {
-    const lease = leaseManager.getRawLease(leaseId);
-    if (lease?.clientAncestorPids && lease.terminalOwnerPid) {
-      const termIdx = lease.clientAncestorPids.indexOf(lease.terminalOwnerPid);
-      if (termIdx > 0) tabShellPid = lease.clientAncestorPids[termIdx - 1];
-    }
-  }
+function applyConfinementUpdate(petId: string, info: TerminalWindowInfo): void {
   setConfinementState(petId, {
     terminalBounds: info.window?.bounds ?? null,
     terminalMinimized: info.isMinimized,
     terminalOccluded: info.isOccluded,
     terminalOwnerPid: info.terminalPid,
     appName: info.appName,
-    tabShellPid,
   });
   repositionConfinedPet(petId);
 }

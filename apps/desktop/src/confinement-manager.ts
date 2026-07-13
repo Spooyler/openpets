@@ -30,8 +30,6 @@ export interface ConfinementState {
   readonly terminalOwnerPid: number;
   /** Human-readable app name. */
   readonly appName: string;
-  /** PID of the shell process that owns this session's tab inside a tabbed terminal (e.g. Windows Terminal). */
-  readonly tabShellPid?: number;
 }
 
 // ---------------------------------------------------------------------------
