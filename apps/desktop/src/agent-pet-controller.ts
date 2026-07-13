@@ -188,7 +188,7 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
   const focusSessionTerminal = (): void => {
     const confinement = getConfinementState(petId);
     if (confinement?.terminalOwnerPid) {
-      focusTerminalWindow(confinement.terminalOwnerPid).catch((err) => {
+      focusTerminalWindow(confinement.terminalOwnerPid, confinement.tabShellPid).catch((err) => {
         debug("pet.agent", "focus session window failed", { petId, error: String(err) });
       });
     }

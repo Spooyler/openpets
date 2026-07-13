@@ -16,12 +16,12 @@ import { focusTerminalWindow } from "./terminal-focus.js";
 
 let defaultPetWindow: BrowserWindow | null = null;
 
-// Resolves the terminal PID of the session the default pet should focus
+// Resolves the focus target of the session the default pet should focus
 // (registered by local-ipc, which owns the lease manager — the import points
 // the other way, so registration avoids a module cycle).
-let sessionTerminalFocusResolver: (() => number | undefined) | null = null;
+let sessionTerminalFocusResolver: (() => { terminalPid: number; tabShellPid?: number } | undefined) | null = null;
 
-export function setSessionTerminalFocusResolver(resolver: () => number | undefined): void {
+export function setSessionTerminalFocusResolver(resolver: () => { terminalPid: number; tabShellPid?: number } | undefined): void {
   sessionTerminalFocusResolver = resolver;
 }
 
@@ -30,13 +30,13 @@ function hasFocusableSessionTerminal(): boolean {
 }
 
 function focusSessionTerminalFromDefaultPet(trigger: string): void {
-  const terminalPid = sessionTerminalFocusResolver?.();
-  if (!terminalPid) {
+  const target = sessionTerminalFocusResolver?.();
+  if (!target) {
     debug("pet.default", "focus session window skipped", { trigger, reason: "no-focusable-session" });
     return;
   }
-  focusTerminalWindow(terminalPid).catch((err) => {
-    debug("pet.default", "focus session window failed", { trigger, terminalPid, error: String(err) });
+  focusTerminalWindow(target.terminalPid, target.tabShellPid).catch((err) => {
+    debug("pet.default", "focus session window failed", { trigger, terminalPid: target.terminalPid, error: String(err) });
   });
 }
 let paused = false;

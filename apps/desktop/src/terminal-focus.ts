@@ -36,11 +36,14 @@ let accessibilityPromptShown = false;
  * Bring the terminal window owned by `pid` to the front.
  *
  * @param terminalPid - PID of the terminal process (owner of the window).
+ * @param tabShellPid - Optional PID of the shell process in the target tab
+ *   (direct child of the terminal). When provided and the terminal is Windows
+ *   Terminal, the specific tab is focused after bringing the window forward.
  * @returns true if the raise command was dispatched, false otherwise.
  */
-export async function focusTerminalWindow(terminalPid: number): Promise<boolean> {
+export async function focusTerminalWindow(terminalPid: number, tabShellPid?: number): Promise<boolean> {
   if (process.platform === "win32") {
-    return focusTerminalWindowWin32(terminalPid);
+    return focusTerminalWindowWin32(terminalPid, tabShellPid);
   }
 
   if (process.platform !== "darwin") {
@@ -77,11 +80,12 @@ end tell
 /**
  * Windows implementation: restore (if minimized) and raise the main window of
  * the process with the given PID via user32 ShowWindow + SetForegroundWindow.
- * No permission prompt exists on Windows — this either works or fails softly.
+ * When tabShellPid is provided and the terminal is Windows Terminal, the
+ * specific tab is focused via `wt focus-tab` after bringing the window forward.
  */
-async function focusTerminalWindowWin32(terminalPid: number): Promise<boolean> {
+async function focusTerminalWindowWin32(terminalPid: number, tabShellPid?: number): Promise<boolean> {
   try {
-    const script =
+    let script =
       `Add-Type -TypeDefinition '` +
       `using System;` +
       `using System.Runtime.InteropServices;` +
@@ -92,14 +96,24 @@ async function focusTerminalWindowWin32(terminalPid: number): Promise<boolean> {
       `}' -Language CSharp;` +
       `$proc = Get-Process -Id ${terminalPid} -ErrorAction SilentlyContinue;` +
       `if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {` +
-      // SW_RESTORE (9) only when minimized — on a visible maximized window it
-      // would demote it to normal size instead of just raising it.
       `  if ([WinFocus]::IsIconic($proc.MainWindowHandle)) { [WinFocus]::ShowWindow($proc.MainWindowHandle, 9) };` +
-      `  [WinFocus]::SetForegroundWindow($proc.MainWindowHandle)` +
-      `}`;
+      `  [WinFocus]::SetForegroundWindow($proc.MainWindowHandle);`;
+
+    if (tabShellPid) {
+      script +=
+        `  if ($proc.ProcessName -eq 'WindowsTerminal') {` +
+        `    $shells = Get-CimInstance Win32_Process -Filter "ParentProcessId = ${terminalPid}" ` +
+        `      | Where-Object { $_.Name -ne 'OpenConsole.exe' } | Sort-Object CreationDate;` +
+        `    $idx = 0; $found = $false;` +
+        `    foreach ($c in $shells) { if ($c.ProcessId -eq ${tabShellPid}) { $found = $true; break }; $idx++ };` +
+        `    if ($found) { & wt -w 0 focus-tab -t $idx }` +
+        `  }`;
+    }
+
+    script += `}`;
 
     await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-    info("terminal-focus", "focus dispatched (win32)", { terminalPid });
+    info("terminal-focus", "focus dispatched (win32)", { terminalPid, tabShellPid });
     return true;
   } catch (err) {
     logError("terminal-focus", "focus failed (win32)", err instanceof Error ? err : new Error(String(err)));

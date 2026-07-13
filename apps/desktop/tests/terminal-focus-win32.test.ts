@@ -15,6 +15,9 @@
  *   (4) The win32 path interpolates the terminal PID into Get-Process.
  *   (5) SW_RESTORE is guarded by IsIconic so a maximized (non-minimized)
  *       window keeps its maximized state when focused.
+ *   (6) Tab-level focus: when tabShellPid is provided and the terminal is
+ *       Windows Terminal, the script enumerates children (excluding
+ *       OpenConsole.exe) and runs `wt focus-tab` with the matching tab index.
  */
 
 import assert from "node:assert/strict";
@@ -62,6 +65,19 @@ const src = readFileSync(join(appRoot, "src", "terminal-focus.ts"), "utf-8");
     /if \(\[WinFocus\]::IsIconic\([^)]*\)\) \{[^}]*ShowWindow\([^)]*,\s*9\)/.test(src),
     "(5) ShowWindow(SW_RESTORE) must be guarded by IsIconic",
   );
+}
+
+// (6) tab-level focus for Windows Terminal
+{
+  assert.ok(src.includes("tabShellPid"), "(6) must accept tabShellPid parameter");
+  assert.ok(src.includes("WindowsTerminal"), "(6) must check for Windows Terminal process name");
+  assert.ok(src.includes("OpenConsole.exe"), "(6) must filter out OpenConsole.exe children");
+  assert.ok(src.includes("wt -w 0 focus-tab"), "(6) must use wt CLI to switch tabs");
+  // Tab switching must only trigger when tabShellPid is provided
+  const fnStart = src.indexOf("async function focusTerminalWindowWin32");
+  assert.ok(fnStart >= 0, "(6) focusTerminalWindowWin32 must exist");
+  const fn = src.slice(fnStart);
+  assert.ok(/tabShellPid\??\s*:?\s*number/.test(fn) || fn.includes("tabShellPid?"), "(6) tabShellPid must be an optional parameter");
 }
 
 console.log("terminal-focus-win32 validation passed.");
