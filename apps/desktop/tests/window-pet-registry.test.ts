@@ -117,4 +117,41 @@ assert.equal((calls[0]!.args as string[])[2], "window-dead");
   assert.deepEqual(strandedRows, [], "no row stranded in defaultStore for the migrated session");
 }
 
+// sessionFocusTarget: row-level focus must resolve the clicked session's own
+// window, whether it's parked in default coverage or tracked under a binding
+// — not the aggregate target for the pet/default coverage as a whole.
+{
+  const calls3: Call[] = [];
+  const cb3 = {
+    spawnPet: (...args: unknown[]) => calls3.push({ fn: "spawn", args }),
+    closePet: (...args: unknown[]) => calls3.push({ fn: "close", args }),
+    rebindPet: (...args: unknown[]) => calls3.push({ fn: "rebind", args }),
+    sessionEndedNotice: (...args: unknown[]) => calls3.push({ fn: "notice", args }),
+  };
+  const registry3 = new WindowPetRegistry({
+    callbacks: cb3,
+    now: () => now,
+    isPidAlive: () => alive,
+    drawPoolPet: () => null,
+  });
+
+  const s6 = { sessionKey: "600:n6", leaseId: "L6", terminalOwnerPid: 111, terminalWindowId: 22, label: "default-covered" };
+  assert.equal(registry3.onSessionIdentified(s6, undefined, false), null, "no pool, no explicit → default coverage");
+  assert.deepEqual(
+    registry3.sessionFocusTarget("600:n6"),
+    { terminalOwnerPid: 111, terminalWindowId: 22 },
+    "found in default coverage",
+  );
+
+  const s7 = { sessionKey: "700:n7", leaseId: "L7", terminalOwnerPid: 222, terminalWindowId: 33, label: "bound" };
+  assert.equal(registry3.onSessionIdentified(s7, "fox", false), "fox");
+  assert.deepEqual(
+    registry3.sessionFocusTarget("700:n7"),
+    { terminalOwnerPid: 222, terminalWindowId: 33 },
+    "found in a binding's own sessions, independent of the binding's aggregate target",
+  );
+
+  assert.equal(registry3.sessionFocusTarget("unknown-key"), null, "unknown session key returns null");
+}
+
 console.log("Window pet registry passed.");

@@ -94,8 +94,10 @@ async function focusTerminalWindowWin32(terminalPid: number, terminalWindowId?: 
     `  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);` +
     `}' -Language CSharp;`;
 
-  // When we have a precise HWND, try targeting it directly first.
-  if (terminalWindowId !== undefined) {
+  // When we have a precise, finite-integer HWND, try targeting it directly
+  // first. A non-finite value (NaN/Infinity) can't be marshalled into an
+  // IntPtr, so skip straight to the PID/MainWindowHandle path.
+  if (terminalWindowId !== undefined && Number.isFinite(terminalWindowId)) {
     try {
       const hwndScript = addTypeBlock +
         `$hwnd = [IntPtr]${terminalWindowId};` +

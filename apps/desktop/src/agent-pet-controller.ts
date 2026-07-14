@@ -35,6 +35,15 @@ let focusTargetAccessor: ((petId: string) => { terminalOwnerPid: number; termina
 export function setAgentPetFocusTargetAccessor(accessor: (petId: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null): void {
   focusTargetAccessor = accessor;
 }
+
+// Injected by local-ipc.ts: resolves a specific session's own focus target from
+// the window-pet-registry, so clicking a notification row raises the window
+// that actually owns that session (falls back to focusTargetAccessor above).
+let sessionFocusTargetAccessor: ((sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null) | null = null;
+
+export function setAgentSessionFocusTargetAccessor(accessor: (sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null): void {
+  sessionFocusTargetAccessor = accessor;
+}
 const displayGenerations = new Map<string, number>();
 const notificationsOpen = new Set<string>();
 const busyStatusBadgeMs = 120_000;
@@ -241,7 +250,7 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     onCloseRequested: () => dismissAgentPetForActiveLease(petId),
     onBubbleDismissed: (token) => handleBubbleDismissed(petId, token),
     onFocusSessionWindow: focusSessionTerminal,
-    onPetEvent: (name, payload) => {
+    onPetEvent: async (name, payload) => {
       if (name === "pet:doubleClicked") focusSessionTerminal();
       if (name === "pet:notificationsToggle") {
         if (notificationsOpen.has(petId)) notificationsOpen.delete(petId);
@@ -251,9 +260,21 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
       if (name === "pet:notificationFocus") {
         const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");
         if (sessionKey) {
-          // Focus the terminal window for this notification's session, then resolve.
-          focusSessionTerminal();
-          petStoreAccessor?.(petId)?.resolveSession(sessionKey);
+          // Target this specific session's own window first — the pet's aggregate
+          // target can differ when its coverage spans multiple terminal windows.
+          const target = sessionFocusTargetAccessor?.(sessionKey) ?? focusTargetAccessor?.(petId) ?? null;
+          const focusPid = target?.terminalOwnerPid ?? getConfinementState(petId)?.terminalOwnerPid;
+          let focused = false;
+          if (focusPid) {
+            try {
+              focused = await focusTerminalWindow(focusPid, target?.terminalWindowId);
+            } catch (err) {
+              debug("pet.agent", "focus notification session failed", { petId, sessionKey, error: String(err) });
+            }
+          }
+          // Only resolve the row when the focus actually succeeded; otherwise it
+          // stays unresolved so the user can retry.
+          if (focused) petStoreAccessor?.(petId)?.resolveSession(sessionKey);
           refreshAgentPetNotifications(petId);
           // TODO: flash error on focus failure
         }

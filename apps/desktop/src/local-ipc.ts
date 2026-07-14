@@ -3,11 +3,11 @@ import net from "node:net";
 
 import { Notification, shell, systemPreferences } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, showAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, setAgentSessionFocusTargetAccessor, showAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
-import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultSessionFocusTargetAccessor, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager, type PetLease } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
@@ -93,6 +93,10 @@ setSessionTerminalFocusResolver(() => {
 setDefaultNotificationStoreAccessor(() => windowPetRegistry.defaultStore);
 setAgentPetStoreAccessor((petId) => windowPetRegistry.storeForPet(petId));
 setAgentPetFocusTargetAccessor((petId) => windowPetRegistry.focusTargetForPet(petId));
+// Row-level focus: target the clicked session's own window, not the pet's
+// aggregate target — a pet's coverage can span multiple terminal windows.
+setAgentSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
+setDefaultSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
 
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
 const warnedFallbackPets = new Set<string>();

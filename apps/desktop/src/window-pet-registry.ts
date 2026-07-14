@@ -217,6 +217,23 @@ export class WindowPetRegistry {
     return this.#focusTarget(this.defaultStore, this.#defaultSessions);
   }
 
+  /**
+   * Look up the specific session's own focus target, regardless of which
+   * pet (or default coverage) it currently belongs to. Used for row-level
+   * "focus this notification" actions so the click raises the window that
+   * actually owns that session — not just the aggregate target for the pet,
+   * which can differ when a pet's coverage spans multiple terminal windows.
+   */
+  sessionFocusTarget(sessionKey: string): { terminalOwnerPid: number; terminalWindowId?: number } | null {
+    const parked = this.#defaultSessions.get(sessionKey);
+    if (parked) return { terminalOwnerPid: parked.terminalOwnerPid, terminalWindowId: parked.terminalWindowId };
+    for (const binding of this.#bindings.values()) {
+      const info = binding.sessions.get(sessionKey);
+      if (info) return { terminalOwnerPid: info.terminalOwnerPid, terminalWindowId: info.terminalWindowId };
+    }
+    return null;
+  }
+
   boundPetIds(): readonly string[] {
     return [...this.#bindings.values()].map((binding) => binding.petId);
   }
