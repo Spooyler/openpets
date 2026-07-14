@@ -102,12 +102,14 @@ async function focusTerminalWindowWin32(terminalPid: number, terminalWindowId?: 
       const hwndScript = addTypeBlock +
         `$hwnd = [IntPtr]${terminalWindowId};` +
         `if ([WinFocus]::IsIconic($hwnd)) { [WinFocus]::ShowWindow($hwnd, 9) | Out-Null };` +
-        `[WinFocus]::SetForegroundWindow($hwnd) | Out-Null`;
+        `$ok = [WinFocus]::SetForegroundWindow($hwnd);` +
+        `if (-not $ok) { exit 1 }`;
       await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", hwndScript]);
       info("terminal-focus", "focus dispatched (win32 hwnd)", { terminalPid, terminalWindowId });
       return true;
     } catch (err) {
-      // HWND path failed — fall through to PID/MainWindowHandle path.
+      // HWND path failed (SetForegroundWindow returned false or script error)
+      // — fall through to PID/MainWindowHandle path.
       debug("terminal-focus", "hwnd focus failed, falling back to pid path", { terminalPid, terminalWindowId, error: String(err) });
     }
   }

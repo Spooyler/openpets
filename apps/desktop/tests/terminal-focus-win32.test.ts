@@ -64,4 +64,37 @@ const src = readFileSync(join(appRoot, "src", "terminal-focus.ts"), "utf-8");
   );
 }
 
+// (6) HWND path: when terminalWindowId is provided, script references the HWND
+{
+  // The hwndScript builds `$hwnd = [IntPtr]${terminalWindowId}` — assert the
+  // source interpolates the terminalWindowId value.
+  assert.ok(
+    src.includes("[IntPtr]${terminalWindowId}"),
+    "(6) HWND path must interpolate terminalWindowId into [IntPtr]",
+  );
+  // The HWND path must check SetForegroundWindow result and exit 1 on failure.
+  assert.ok(
+    src.includes("$ok = [WinFocus]::SetForegroundWindow($hwnd)"),
+    "(6) HWND path must capture SetForegroundWindow result",
+  );
+  assert.ok(
+    src.includes("if (-not $ok) { exit 1 }"),
+    "(6) HWND path must exit 1 when SetForegroundWindow fails",
+  );
+}
+
+// (7) HWND fallback: when terminalWindowId is NaN, HWND path is skipped
+{
+  // The guard `Number.isFinite(terminalWindowId)` must be present so NaN skips
+  // the HWND path and falls through to the PID/MainWindowHandle path.
+  assert.ok(
+    src.includes("Number.isFinite(terminalWindowId)"),
+    "(7) NaN guard must use Number.isFinite(terminalWindowId)",
+  );
+  // The PID path (fallback) uses Get-Process — verify it exists after the HWND block.
+  const hwndBlockEnd = src.indexOf("if (-not $ok) { exit 1 }");
+  const pidPathStart = src.indexOf("Get-Process -Id ${terminalPid}", hwndBlockEnd);
+  assert.ok(pidPathStart > hwndBlockEnd, "(7) PID path must exist after HWND block as fallback");
+}
+
 console.log("terminal-focus-win32 validation passed.");

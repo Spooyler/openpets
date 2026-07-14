@@ -371,4 +371,35 @@ console.log("T3 (routing guard): SKIPPED — covered by local-ipc-confinement.te
   console.log("T7 (onExpired fires from get()'s internal release): PASS");
 }
 
+// ---------------------------------------------------------------------------
+// T8: onExpired NOT fired for acquire reuse-mismatch release (session lives on)
+// ---------------------------------------------------------------------------
+{
+  let now = 1_000;
+  const expired: PetLease[] = [];
+  const nonce = randomUUID();
+
+  const mgr = new LeaseManager({
+    ttlMs: 10_000,
+    now: () => now,
+    resolveTarget: (id) => id ? { targetKind: "explicit", actualPetId: id } : { targetKind: "default", actualPetId: "builtin" },
+    getDefaultPetId: () => "builtin",
+    getPetDisplayName: (petId) => petId,
+    onExpired: (lease) => expired.push(lease),
+  });
+
+  // First acquire: explicit pet "rex"
+  const s1 = mgr.acquire("rex", 9999, nonce);
+  assert.equal(s1.targetKind, "explicit", "T8: first acquire should be explicit");
+
+  now += 100;
+  // Second acquire: same pid+nonce but DIFFERENT requestedPetId → reuse-mismatch
+  // release of old lease + fresh acquire. The session lives on — onExpired must NOT fire.
+  const s2 = mgr.acquire("kitty", 9999, nonce);
+  assert.notEqual(s2.leaseId, s1.leaseId, "T8: reuse-mismatch must produce fresh leaseId");
+  assert.equal(expired.length, 0, "T8: onExpired must NOT fire for reuse-mismatch release (session lives on)");
+
+  console.log("T8 (onExpired NOT fired for reuse-mismatch release): PASS");
+}
+
 console.log("\nAll lease-manager-fixes tests passed.");

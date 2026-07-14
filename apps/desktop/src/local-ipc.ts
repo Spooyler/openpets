@@ -688,10 +688,21 @@ function registerIdentifiedSession(leaseId: string): string | null {
 }
 
 /** The pet currently bound to the lease's terminal window, or null (anonymous
- *  caller, unresolved identity, or default coverage). */
+ *  caller, unresolved identity, or default coverage).
+ *
+ *  Grace-window fallback: when the window identity hasn't resolved yet (no
+ *  terminalOwnerPid) but the lease targets an explicit pet, fall back to
+ *  lease.actualPetId so the already-visible grace-spawned pet receives the
+ *  say/react instead of misrouting to the default pet. */
 function displayPetForLease(lease: PetLease | null | undefined): string | null {
   const windowKey = lease?.terminalOwnerPid ? windowKeyForIdentity(lease.terminalWindowId, lease.terminalOwnerPid) : undefined;
-  return windowKey ? windowPetRegistry.petForWindow(windowKey) : null;
+  const registryPet = windowKey ? windowPetRegistry.petForWindow(windowKey) : null;
+  if (registryPet) return registryPet;
+  // Explicit lease during pre-identity grace window: the pet was spawned by
+  // the 3s grace timer but identity hasn't resolved yet so no registry binding
+  // exists. Route to the explicit pet directly.
+  if (lease && lease.targetKind === "explicit" && lease.actualPetId) return lease.actualPetId;
+  return null;
 }
 
 /**
@@ -821,9 +832,13 @@ async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: n
         });
         void captureClientAncestry(leaseId, clientPid);
         // Identity resolved → register with the registry (pool draw / default
-        // coverage). Default/pool leases run no confinement poller.
-        registerIdentifiedSession(leaseId);
-        info("ipc", "terminal identity resolved (default lease)", { leaseId, clientPid, attempt, terminalPid: termInfo.terminalPid, appName: termInfo.appName });
+        // coverage).
+        const boundPetId = registerIdentifiedSession(leaseId);
+        info("ipc", "terminal identity resolved (default lease)", { leaseId, clientPid, attempt, terminalPid: termInfo.terminalPid, appName: termInfo.appName, boundPetId });
+        // Pool-drawn pets need confinement tracking just like explicit-lease pets.
+        if (boundPetId) {
+          void subscribePoolConfinement(leaseId, clientPid, boundPetId);
+        }
         return;
       }
     } catch (err) {
@@ -833,6 +848,55 @@ async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: n
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 3_000));
   }
   info("ipc", "terminal identity unresolved (default lease)", { leaseId, clientPid });
+}
+
+/**
+ * Subscribe a pool-drawn pet to the confinement poller so it tracks its
+ * terminal window bounds. Mirrors the explicit-lease path in
+ * resolveTerminalIdentity but starts after identity is already resolved.
+ */
+async function subscribePoolConfinement(leaseId: string, clientPid: number, petId: string): Promise<void> {
+  const deps: ConfinementPollerDeps = {
+    findTerminal: (pid) => findTerminalWindowForPid(pid),
+    subscribe: (id, pid, onFound, onNull) => subscribeWindowTracking(id, pid, onFound, onNull),
+    setIdentity: (termInfo) => {
+      leaseManager.setTerminalIdentity(leaseId, {
+        terminalOwnerPid: termInfo.terminalPid,
+        terminalAppName: termInfo.appName,
+        terminalWindowId: termInfo.window?.id,
+      });
+    },
+    applyUpdate: (termInfo) => {
+      const windowKey = windowKeyForIdentity(termInfo.window?.id, termInfo.terminalPid);
+      applyConfinementUpdate(windowPetRegistry.petForWindow(windowKey) ?? petId, termInfo);
+    },
+    isAlive: () => !!leaseManager.getRawLease(leaseId),
+    onDead: () => unsubscribeConfinement(leaseId),
+    getScreenPermissionStatus: () =>
+      process.platform === "darwin"
+        ? systemPreferences.getMediaAccessStatus("screen")
+        : "granted",
+    promptScreenPermission: () => {
+      if (process.platform === "darwin") {
+        void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture");
+      }
+    },
+    notifyScreenPermission: (onAction) => {
+      if (process.platform !== "darwin") return;
+      if (!Notification.isSupported()) return;
+      const title = t("confinement.screenPermission.title");
+      const body = t("confinement.screenPermission.body");
+      const n = new Notification({ title, body, silent: true });
+      n.on("click", onAction);
+      n.show();
+    },
+  };
+
+  try {
+    await resolveAndSubscribe(leaseId, clientPid, deps, confinementUnsubscribers);
+  } catch (err) {
+    info("ipc", "pool confinement subscription error", { leaseId, clientPid, petId, error: String(err) });
+  }
 }
 
 /** Record the client's ancestor PID chain on the lease (cache-warm right after the identity walk). */

@@ -16,6 +16,7 @@ export interface PetNotificationsView {
     message: string;
     ageText: string;
     state: "unresolved" | "resolved";
+    error?: boolean;
   }[];
 }
 
@@ -47,6 +48,7 @@ export function buildNotificationsView(
   open: boolean,
   now: number,
   t: (key: string, vars?: Record<string, string | number>) => string,
+  errorSessionKeys?: ReadonlySet<string>,
 ): PetNotificationsView {
   let unresolvedCount = 0;
   const rows: PetNotificationsView["rows"][number][] = [];
@@ -60,6 +62,7 @@ export function buildNotificationsView(
         message: entry.message,
         ageText: ageText(entry.updatedAt, now, t),
         state: entry.state as "unresolved" | "resolved",
+        error: errorSessionKeys?.has(entry.sessionKey) || undefined,
       });
     }
   }
@@ -84,7 +87,8 @@ export function createNotificationsMarkup(
     const rowsHtml = view.rows.length > 0
       ? view.rows.map((row) => {
           const stateClass = row.state === "unresolved" ? " is-unresolved" : "";
-          return `<div class="notify-row${stateClass}" data-notify-row data-session-key="${escapeHtml(row.sessionKey)}"><span class="notify-dot"></span><span class="notify-label">${escapeHtml(row.label)}</span><span class="notify-message">${escapeHtml(row.message)}</span><span class="notify-age">${escapeHtml(row.ageText)}</span></div>`;
+          const errorClass = row.error ? " is-error" : "";
+          return `<div class="notify-row${stateClass}${errorClass}" data-notify-row data-session-key="${escapeHtml(row.sessionKey)}"><span class="notify-dot"></span><span class="notify-label">${escapeHtml(row.label)}</span><span class="notify-message">${escapeHtml(row.message)}</span><span class="notify-age">${escapeHtml(row.ageText)}</span></div>`;
         }).join("")
       : `<div class="notify-empty">${escapeHtml(t("pet.notify.empty"))}</div>`;
 
@@ -96,6 +100,6 @@ export function createNotificationsMarkup(
 
 export function notificationsCacheKey(view: PetNotificationsView | null | undefined): string {
   if (!view) return "n:none";
-  const rowKeys = view.rows.map((r) => `${r.sessionKey}:${r.state}:${r.ageText}`).join(",");
+  const rowKeys = view.rows.map((r) => `${r.sessionKey}:${r.state}:${r.ageText}${r.error ? ":err" : ""}`).join(",");
   return `n:${view.open}:${view.unresolvedCount}:${rowKeys}`;
 }

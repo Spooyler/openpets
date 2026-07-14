@@ -67,6 +67,8 @@ let transientDisplayTimeout: NodeJS.Timeout | null = null;
 let transientAnimationTimeout: NodeJS.Timeout | null = null;
 let statusBadgeTimeout: NodeJS.Timeout | null = null;
 let displayGeneration = 0;
+/** Session keys with an active focus-failure error flash (auto-cleared after 2s). */
+const focusErrorSessions = new Set<string>();
 const busyStatusBadgeMs = 120_000;
 const maxPluginMoveDistance = 160;
 const minPluginMoveDurationMs = 250;
@@ -179,7 +181,7 @@ function getDefaultNotificationsView(): PetNotificationsView | null {
   if (!store) return null;
   const entries = store.rows();
   if (entries.length === 0 && !defaultNotificationsOpen) return null;
-  return buildNotificationsView(entries, defaultNotificationsOpen, Date.now(), t as (key: string, vars?: Record<string, string | number>) => string);
+  return buildNotificationsView(entries, defaultNotificationsOpen, Date.now(), t as (key: string, vars?: Record<string, string | number>) => string, focusErrorSessions.size > 0 ? focusErrorSessions : undefined);
 }
 
 /** Toggle the notifications flyout (shared by the badge click and the right-click menu item). */
@@ -381,9 +383,17 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
           }
           // Only resolve the row when the focus actually succeeded; otherwise it
           // stays unresolved so the user can retry.
-          if (focused) defaultNotificationStoreAccessor?.()?.resolveSession(sessionKey);
+          if (focused) {
+            defaultNotificationStoreAccessor?.()?.resolveSession(sessionKey);
+          } else {
+            // Flash a brief red tint on the row to signal focus failure.
+            focusErrorSessions.add(sessionKey);
+            setTimeout(() => {
+              focusErrorSessions.delete(sessionKey);
+              refreshDefaultPetNotifications();
+            }, 2_000);
+          }
           refreshDefaultPetNotifications();
-          // TODO: flash error on focus failure
         }
       }
       if (name === "pet:notificationDismiss") {

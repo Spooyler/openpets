@@ -1301,6 +1301,8 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .notify-flyout { position: absolute; left: 50%; bottom: ${bubbleBottom}px; z-index: 5; width: 300px; max-height: 240px; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; padding: 6px 0; background: linear-gradient(135deg, rgba(255, 255, 255, 0.97), rgba(248, 250, 252, 0.95)); border: 1px solid rgba(255, 255, 255, 0.78); border-radius: 14px; box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16), 0 2px 5px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.82); transform: translateX(-50%); pointer-events: auto; -webkit-app-region: no-drag; animation: bubble-in 180ms cubic-bezier(0.2, 0, 0, 1); }
     .notify-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; cursor: default; opacity: 0.6; font: 700 10.5px/13px Inter, ui-sans-serif, system-ui, sans-serif; color: #475569; transition: opacity 120ms ease, background 120ms ease; }
     .notify-row.is-unresolved { opacity: 1; color: #172033; }
+    .notify-row.is-error { background: rgba(220,38,38,0.12); animation: error-flash 2s ease-out forwards; }
+    @keyframes error-flash { from { background: rgba(220,38,38,0.12); } to { background: transparent; } }
     .notify-row:hover { background: rgba(30, 58, 138, 0.06); }
     .notify-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 999px; background: transparent; }
     .notify-row.is-unresolved .notify-dot { background: #176df2; animation: notify-pulse 1.6s ease-in-out infinite; }

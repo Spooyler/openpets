@@ -104,6 +104,24 @@ const closedWithCountMarkup = createNotificationsMarkup(closedWithCount, t);
 assert.ok(closedWithCountMarkup.badge.includes("notify-badge"), "badge shown when count>0");
 assert.equal(closedWithCountMarkup.flyout, "", "no flyout when closed");
 
+// --- createNotificationsMarkup: error row ---
+
+{
+  const errorEntries: readonly NotificationEntry[] = [
+    { sessionKey: "e1", kind: "waiting", message: "needs focus", label: "err-proj", updatedAt: baseTime, firstUnresolvedAt: baseTime, state: "unresolved" },
+    { sessionKey: "e2", kind: "message", message: "ok", label: "ok-proj", updatedAt: baseTime, firstUnresolvedAt: baseTime, state: "unresolved" },
+  ];
+  const errorKeys = new Set(["e1"]);
+  const errorView = buildNotificationsView(errorEntries, true, baseTime, t, errorKeys);
+  assert.equal(errorView.rows[0]!.error, true, "error flag set on matching row");
+  assert.equal(errorView.rows[1]!.error, undefined, "error flag absent on non-matching row");
+  const errorMarkup = createNotificationsMarkup(errorView, t);
+  assert.ok(errorMarkup.flyout.includes("is-error"), "is-error class rendered on error row");
+  // Count: exactly one error row
+  const errorRowCount = (errorMarkup.flyout.match(/is-error/g) || []).length;
+  assert.equal(errorRowCount, 1, "exactly one row has is-error class");
+}
+
 // --- notificationsCacheKey ---
 
 assert.equal(notificationsCacheKey(null), "n:none");

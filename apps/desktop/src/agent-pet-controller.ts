@@ -66,6 +66,8 @@ export function setAgentPetUserClosedAccessor(accessor: (petId: string) => boole
 
 const displayGenerations = new Map<string, number>();
 const notificationsOpen = new Set<string>();
+/** Session keys with an active focus-failure error flash (auto-cleared after 2s). */
+const focusErrorSessions = new Set<string>();
 const busyStatusBadgeMs = 120_000;
 
 export function showAgentPet(petId: string): boolean {
@@ -263,7 +265,7 @@ function getAgentNotificationsView(petId: string): PetNotificationsView | null {
   if (!store) return null;
   const entries = store.rows();
   if (entries.length === 0 && !notificationsOpen.has(petId)) return null;
-  return buildNotificationsView(entries, notificationsOpen.has(petId), Date.now(), t as (key: string, vars?: Record<string, string | number>) => string);
+  return buildNotificationsView(entries, notificationsOpen.has(petId), Date.now(), t as (key: string, vars?: Record<string, string | number>) => string, focusErrorSessions.size > 0 ? focusErrorSessions : undefined);
 }
 
 export function refreshAgentPetNotifications(petId: string): void {
@@ -359,9 +361,17 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
           }
           // Only resolve the row when the focus actually succeeded; otherwise it
           // stays unresolved so the user can retry.
-          if (focused) petStoreAccessor?.(petId)?.resolveSession(sessionKey);
+          if (focused) {
+            petStoreAccessor?.(petId)?.resolveSession(sessionKey);
+          } else {
+            // Flash a brief red tint on the row to signal focus failure.
+            focusErrorSessions.add(sessionKey);
+            setTimeout(() => {
+              focusErrorSessions.delete(sessionKey);
+              refreshAgentPetNotifications(petId);
+            }, 2_000);
+          }
           refreshAgentPetNotifications(petId);
-          // TODO: flash error on focus failure
         }
       }
       if (name === "pet:notificationDismiss") {
