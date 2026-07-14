@@ -22,9 +22,9 @@ let defaultPetWindow: BrowserWindow | null = null;
 // Resolves the focus target of the session the default pet should focus
 // (registered by local-ipc, which owns the lease manager — the import points
 // the other way, so registration avoids a module cycle).
-let sessionTerminalFocusResolver: (() => number | undefined) | null = null;
+let sessionTerminalFocusResolver: (() => { terminalOwnerPid: number; terminalWindowId?: number } | null) | null = null;
 
-export function setSessionTerminalFocusResolver(resolver: () => number | undefined): void {
+export function setSessionTerminalFocusResolver(resolver: () => { terminalOwnerPid: number; terminalWindowId?: number } | null): void {
   sessionTerminalFocusResolver = resolver;
 }
 
@@ -37,17 +37,17 @@ export function setDefaultNotificationStoreAccessor(accessor: () => Notification
 }
 
 function hasFocusableSessionTerminal(): boolean {
-  return sessionTerminalFocusResolver?.() !== undefined;
+  return sessionTerminalFocusResolver?.() !== null;
 }
 
 function focusSessionTerminalFromDefaultPet(trigger: string): void {
-  const terminalPid = sessionTerminalFocusResolver?.();
-  if (!terminalPid) {
+  const target = sessionTerminalFocusResolver?.();
+  if (!target) {
     debug("pet.default", "focus session window skipped", { trigger, reason: "no-focusable-session" });
     return;
   }
-  focusTerminalWindow(terminalPid).catch((err) => {
-    debug("pet.default", "focus session window failed", { trigger, terminalPid, error: String(err) });
+  focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId).catch((err) => {
+    debug("pet.default", "focus session window failed", { trigger, terminalOwnerPid: target.terminalOwnerPid, error: String(err) });
   });
 }
 let paused = false;
@@ -352,10 +352,11 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
       if (name === "pet:notificationFocus") {
         const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");
         if (sessionKey) {
+          focusSessionTerminalFromDefaultPet(`notification:${sessionKey}`);
           defaultNotificationStoreAccessor?.()?.resolveSession(sessionKey);
           refreshDefaultPetNotifications();
+          // TODO: flash error on focus failure
         }
-        // Task 6 adds focus routing here
       }
       if (name === "pet:notificationDismiss") {
         const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");

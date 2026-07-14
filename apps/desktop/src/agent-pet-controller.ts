@@ -27,6 +27,14 @@ let petStoreAccessor: ((petId: string) => NotificationStore | null) | null = nul
 export function setAgentPetStoreAccessor(accessor: (petId: string) => NotificationStore | null): void {
   petStoreAccessor = accessor;
 }
+
+// Injected by local-ipc.ts: resolves the focus target for an agent pet from the
+// window-pet-registry (oldest unresolved → freshest activity).
+let focusTargetAccessor: ((petId: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null) | null = null;
+
+export function setAgentPetFocusTargetAccessor(accessor: (petId: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null): void {
+  focusTargetAccessor = accessor;
+}
 const displayGenerations = new Map<string, number>();
 const notificationsOpen = new Set<string>();
 const busyStatusBadgeMs = 120_000;
@@ -215,9 +223,10 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
   const display = transientDisplays.get(petId) ?? null;
   const badge = statusBadges.get(petId) ?? null;
   const focusSessionTerminal = (): void => {
-    const confinement = getConfinementState(petId);
-    if (confinement?.terminalOwnerPid) {
-      focusTerminalWindow(confinement.terminalOwnerPid).catch((err) => {
+    const target = focusTargetAccessor?.(petId);
+    const focusPid = target?.terminalOwnerPid ?? getConfinementState(petId)?.terminalOwnerPid;
+    if (focusPid) {
+      focusTerminalWindow(focusPid, target?.terminalWindowId).catch((err) => {
         debug("pet.agent", "focus session window failed", { petId, error: String(err) });
       });
     }
@@ -242,10 +251,12 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
       if (name === "pet:notificationFocus") {
         const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");
         if (sessionKey) {
+          // Focus the terminal window for this notification's session, then resolve.
+          focusSessionTerminal();
           petStoreAccessor?.(petId)?.resolveSession(sessionKey);
           refreshAgentPetNotifications(petId);
+          // TODO: flash error on focus failure
         }
-        // Task 6 adds focus routing here
       }
       if (name === "pet:notificationDismiss") {
         const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");

@@ -36,11 +36,15 @@ let accessibilityPromptShown = false;
  * Bring the terminal window owned by `pid` to the front.
  *
  * @param terminalPid - PID of the terminal process (owner of the window).
+ * @param terminalWindowId - Optional HWND (window id from get-windows). When
+ *   present on Windows, targets that specific window handle instead of the
+ *   process's MainWindowHandle, enabling precise focus when multiple windows
+ *   share one process (e.g. Windows Terminal tabs). Ignored on macOS.
  * @returns true if the raise command was dispatched, false otherwise.
  */
-export async function focusTerminalWindow(terminalPid: number): Promise<boolean> {
+export async function focusTerminalWindow(terminalPid: number, terminalWindowId?: number): Promise<boolean> {
   if (process.platform === "win32") {
-    return focusTerminalWindowWin32(terminalPid);
+    return focusTerminalWindowWin32(terminalPid, terminalWindowId);
   }
 
   if (process.platform !== "darwin") {
@@ -79,17 +83,35 @@ end tell
  * the process with the given PID via user32 ShowWindow + SetForegroundWindow.
  * No permission prompt exists on Windows — this either works or fails softly.
  */
-async function focusTerminalWindowWin32(terminalPid: number): Promise<boolean> {
+async function focusTerminalWindowWin32(terminalPid: number, terminalWindowId?: number): Promise<boolean> {
+  const addTypeBlock =
+    `Add-Type -TypeDefinition '` +
+    `using System;` +
+    `using System.Runtime.InteropServices;` +
+    `public class WinFocus {` +
+    `  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);` +
+    `  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);` +
+    `  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);` +
+    `}' -Language CSharp;`;
+
+  // When we have a precise HWND, try targeting it directly first.
+  if (terminalWindowId !== undefined) {
+    try {
+      const hwndScript = addTypeBlock +
+        `$hwnd = [IntPtr]${terminalWindowId};` +
+        `if ([WinFocus]::IsIconic($hwnd)) { [WinFocus]::ShowWindow($hwnd, 9) | Out-Null };` +
+        `[WinFocus]::SetForegroundWindow($hwnd) | Out-Null`;
+      await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", hwndScript]);
+      info("terminal-focus", "focus dispatched (win32 hwnd)", { terminalPid, terminalWindowId });
+      return true;
+    } catch (err) {
+      // HWND path failed — fall through to PID/MainWindowHandle path.
+      debug("terminal-focus", "hwnd focus failed, falling back to pid path", { terminalPid, terminalWindowId, error: String(err) });
+    }
+  }
+
   try {
-    const script =
-      `Add-Type -TypeDefinition '` +
-      `using System;` +
-      `using System.Runtime.InteropServices;` +
-      `public class WinFocus {` +
-      `  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);` +
-      `  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);` +
-      `  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);` +
-      `}' -Language CSharp;` +
+    const script = addTypeBlock +
       `$proc = Get-Process -Id ${terminalPid} -ErrorAction SilentlyContinue;` +
       `if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {` +
       `  if ([WinFocus]::IsIconic($proc.MainWindowHandle)) { [WinFocus]::ShowWindow($proc.MainWindowHandle, 9) };` +

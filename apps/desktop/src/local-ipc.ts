@@ -3,7 +3,7 @@ import net from "node:net";
 
 import { Notification, shell, systemPreferences } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, setAgentPetStoreAccessor, showAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, showAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
@@ -17,7 +17,7 @@ import { installPet, installPetFromFolderWithResult, installPetFromZipFileWithRe
 import { clearConfinementState, setConfinementState } from "./confinement-manager.js";
 import { isConfinementSupported } from "./capabilities.js";
 import { resolveAndSubscribe, type ConfinementPollerDeps } from "./confinement-poller.js";
-import { findTerminalWindowForPid, getAncestorPidChain, subscribeWindowTracking, type TerminalWindowInfo } from "./window-tracker.js";
+import { findTerminalWindowForPid, getAncestorPidChain, subscribeActiveWindowTracking, subscribeWindowTracking, type TerminalWindowInfo } from "./window-tracker.js";
 import { warnPetFallback } from "./pet-fallback-notify.js";
 import { getEligiblePoolPetIds } from "./pet-pool.js";
 import { t } from "./i18n/index.js";
@@ -82,9 +82,17 @@ export function getWindowPetRegistry(): WindowPetRegistry {
 
 // The default pet focuses the terminal of the session that most recently
 // interacted with it (say/react), falling back to the freshest heartbeat.
-setSessionTerminalFocusResolver(() => leaseManager.getFocusableDefaultLease()?.terminalOwnerPid);
+setSessionTerminalFocusResolver(() => {
+  const target = windowPetRegistry.focusTargetForDefault();
+  if (target) return target;
+  // Legacy fallback: lease manager's focusable default lease (pre-registry path).
+  const lease = leaseManager.getFocusableDefaultLease();
+  if (!lease?.terminalOwnerPid) return null;
+  return { terminalOwnerPid: lease.terminalOwnerPid, terminalWindowId: lease.terminalWindowId };
+});
 setDefaultNotificationStoreAccessor(() => windowPetRegistry.defaultStore);
 setAgentPetStoreAccessor((petId) => windowPetRegistry.storeForPet(petId));
+setAgentPetFocusTargetAccessor((petId) => windowPetRegistry.focusTargetForPet(petId));
 
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
 const warnedFallbackPets = new Set<string>();
@@ -134,6 +142,17 @@ export async function startLocalIpcServer(): Promise<void> {
     cleanupReleasedLeases(leaseManager.checkPidLiveness(), sessionKeys);
   }, 5_000);
   leaseCleanupTimer.unref?.();
+
+  // Auto-resolve: when the user focuses a terminal window, resolve any
+  // unresolved notification rows keyed to that window and refresh the view.
+  subscribeActiveWindowTracking((win) => {
+    if (!win) return;
+    for (const key of [windowKeyForIdentity(win.id, win.ownerPid), windowKeyForIdentity(undefined, win.ownerPid)]) {
+      for (const petId of windowPetRegistry.resolveWindowFocus(key)) refreshAgentPetNotifications(petId);
+    }
+    refreshDefaultPetNotifications();
+  });
+
   info("ipc", "server started", { endpointKind: endpointConfig.bindEndpoint.kind, bindEndpoint: formatEndpoint(endpointConfig.bindEndpoint), advertisedEndpoint: listeningEndpoint, discoveryPath: getDiscoveryFilePath() });
   console.log(`OpenPets local IPC listening at ${listeningEndpoint}.`);
 }

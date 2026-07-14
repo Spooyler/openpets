@@ -277,6 +277,64 @@ export async function isTerminalOnScreen(terminalPid: number): Promise<boolean> 
 }
 
 // ---------------------------------------------------------------------------
+// Active-window tracking (piggybacks on the existing poller)
+// ---------------------------------------------------------------------------
+
+type ActiveWindowCallback = (win: { id: number; ownerPid: number } | null) => void;
+
+let activeWindowModule: { activeWindow: () => Promise<unknown> } | null = null;
+
+async function getActiveWindow(): Promise<{ id: number; ownerPid: number } | null> {
+  if (!activeWindowModule) {
+    const mod = await import("get-windows");
+    activeWindowModule = mod as { activeWindow: () => Promise<unknown> };
+  }
+  try {
+    const raw = await activeWindowModule.activeWindow();
+    if (!isGetWindowsEntry(raw)) return null;
+    return { id: raw.id, ownerPid: raw.owner.processId };
+  } catch {
+    return null;
+  }
+}
+
+const activeWindowSubscriptions = new Map<string, ActiveWindowCallback>();
+let activeWindowSubCounter = 0;
+let activeWindowTickCounter = 0;
+let lastActiveWindowId: number | null = null;
+
+/**
+ * Subscribe to active-window changes. The callback fires when the foreground
+ * window changes (checked every ~2s — every 4th poller tick). Active-window
+ * subscribers count toward the poller's subscriber gate (the poller only runs
+ * while subscriptions exist).
+ *
+ * @returns An unsubscribe function.
+ */
+export function subscribeActiveWindowTracking(
+  cb: (win: { id: number; ownerPid: number } | null) => void,
+): () => void {
+  const subId = `__activeWindow_${++activeWindowSubCounter}`;
+  activeWindowSubscriptions.set(subId, cb);
+  startPollerIfNeeded();
+  return () => {
+    activeWindowSubscriptions.delete(subId);
+    if (pollerSubscriptions.size === 0 && activeWindowSubscriptions.size === 0) stopPoller();
+  };
+}
+
+async function pollActiveWindow(): Promise<void> {
+  if (activeWindowSubscriptions.size === 0) return;
+  const win = await getActiveWindow();
+  const newId = win?.id ?? null;
+  if (newId === lastActiveWindowId) return;
+  lastActiveWindowId = newId;
+  for (const cb of activeWindowSubscriptions.values()) {
+    try { cb(win); } catch { /* subscriber errors are non-fatal */ }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Polling manager (singleton)
 // ---------------------------------------------------------------------------
 
@@ -304,12 +362,21 @@ export function subscribeWindowTracking(
   startPollerIfNeeded();
   return () => {
     pollerSubscriptions.delete(subscriptionId);
-    if (pollerSubscriptions.size === 0) stopPoller();
+    if (pollerSubscriptions.size === 0 && activeWindowSubscriptions.size === 0) stopPoller();
   };
 }
 
 async function pollAll(): Promise<void> {
-  if (pollerSubscriptions.size === 0) { stopPoller(); return; }
+  if (pollerSubscriptions.size === 0 && activeWindowSubscriptions.size === 0) { stopPoller(); return; }
+
+  // Active-window check every 4th tick (~2s).
+  activeWindowTickCounter++;
+  if (activeWindowTickCounter >= 4) {
+    activeWindowTickCounter = 0;
+    await pollActiveWindow();
+  }
+
+  if (pollerSubscriptions.size === 0) return;
   // Batch: one openWindows() call, share result across all subscriptions.
   let windows: TrackedWindow[];
   try {
