@@ -70,6 +70,7 @@ const behaviorTests = [
   ".test-dist/tests/pet-window-wayland-predicate.test.js",
   ".test-dist/tests/lease-cwd.test.js",
   ".test-dist/tests/notification-store.test.js",
+  ".test-dist/tests/window-pet-registry.test.js",
 ];
 const contractTests = [
   ".test-dist/contracts/local-ipc-protocol.contract.js",
