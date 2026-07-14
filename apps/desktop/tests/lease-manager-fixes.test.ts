@@ -1,12 +1,15 @@
 /**
  * Tests for Fix 1/M1 (idempotent per-clientPid+sessionNonce lease reuse),
- * Fix L1 (re-validate eligible target on reuse), and
- * Fix 4 (terminalOwnerPid liveness check in checkPidLiveness).
+ * Fix L1 (re-validate eligible target on reuse),
+ * Fix 4 (terminalOwnerPid liveness check in checkPidLiveness), and
+ * onExpired (notify caller when heartbeat()/get() internally release an
+ * expired lease, so window-registry teardown isn't skipped between the 5s
+ * cleanup ticks).
  */
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
-import { LeaseManager } from "../src/lease-manager.js";
+import { LeaseManager, type PetLease } from "../src/lease-manager.js";
 
 // ---------------------------------------------------------------------------
 // T1: Fix 1/M1 — same clientPid + same nonce re-acquires same lease
@@ -314,6 +317,58 @@ console.log("T3 (routing guard): SKIPPED — covered by local-ipc-confinement.te
   assert.equal(lastClosed.join(","), "rex", "T5: onLastExplicitLease should still fire");
 
   console.log("T5 (Fix 4 — heartbeat does not defeat owner-death): PASS");
+}
+
+// ---------------------------------------------------------------------------
+// T6: onExpired fires when heartbeat() internally releases an expired lease
+// ---------------------------------------------------------------------------
+{
+  let now = 1_000;
+  const expired: PetLease[] = [];
+
+  const mgr = new LeaseManager({
+    ttlMs: 100,
+    now: () => now,
+    resolveTarget: (id) => id ? { targetKind: "explicit", actualPetId: id } : { targetKind: "default", actualPetId: "builtin" },
+    getDefaultPetId: () => "builtin",
+    getPetDisplayName: (petId) => petId,
+    onExpired: (lease) => expired.push(lease),
+  });
+
+  const snap = mgr.acquire("rex", 4242, randomUUID());
+  now += 200; // now past ttlMs (100) — lease is expired but the 5s cleanup tick hasn't run yet
+
+  assert.throws(() => mgr.heartbeat(snap.leaseId), /unknown_lease/, "T6: heartbeat on an expired lease must throw unknown_lease");
+  assert.equal(expired.length, 1, "T6: onExpired must fire exactly once from heartbeat()'s internal release");
+  assert.equal(expired[0]?.leaseId, snap.leaseId, "T6: onExpired must receive the expired lease with the matching leaseId");
+
+  console.log("T6 (onExpired fires from heartbeat()'s internal release): PASS");
+}
+
+// ---------------------------------------------------------------------------
+// T7: onExpired fires when get() internally releases an expired lease
+// ---------------------------------------------------------------------------
+{
+  let now = 1_000;
+  const expired: PetLease[] = [];
+
+  const mgr = new LeaseManager({
+    ttlMs: 100,
+    now: () => now,
+    resolveTarget: (id) => id ? { targetKind: "explicit", actualPetId: id } : { targetKind: "default", actualPetId: "builtin" },
+    getDefaultPetId: () => "builtin",
+    getPetDisplayName: (petId) => petId,
+    onExpired: (lease) => expired.push(lease),
+  });
+
+  const snap = mgr.acquire("rex", 4343, randomUUID());
+  now += 200; // now past ttlMs (100) — lease is expired but the 5s cleanup tick hasn't run yet
+
+  assert.equal(mgr.get(snap.leaseId), null, "T7: get() on an expired lease must return null");
+  assert.equal(expired.length, 1, "T7: onExpired must fire exactly once from get()'s internal release");
+  assert.equal(expired[0]?.leaseId, snap.leaseId, "T7: onExpired must receive the expired lease with the matching leaseId");
+
+  console.log("T7 (onExpired fires from get()'s internal release): PASS");
 }
 
 console.log("\nAll lease-manager-fixes tests passed.");

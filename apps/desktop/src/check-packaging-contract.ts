@@ -211,8 +211,8 @@ assert.match(agentPetControllerSource, /dismissedAgentPets = new Set<string>/, "
 assert.match(agentPetControllerSource, /dismissAgentPetForActiveLease/, "agent pet context-menu close must dismiss the pet for the active lease.");
 assert.match(agentPetControllerSource, /dismissedAgentPets\.has\(petId\)/, "dismissed agent pets must not reopen on later same-lease reactions.");
 assert.match(agentPetControllerSource, /function clearAgentPetLeaseState/, "agent pet lease cleanup must clear dismissal, timers, and hidden transient state.");
-assert.match(localIpcSource, /handleLastExplicitLease/, "agent pet dismissal must clear when the explicit lease group ends.");
-assert.match(localIpcSource, /clearAgentPetLeaseState\(petId\)/, "last explicit lease cleanup must reset dismissed agent pet state.");
+assert.match(localIpcSource, /closePet[\s\S]*?clearAgentPetLeaseState/, "agent pet dismissal must clear when the window registry tears down an explicit pet.");
+assert.match(localIpcSource, /clearAgentPetLeaseState\(petId\)/, "registry-driven pet teardown must reset dismissed agent pet state.");
 assert.match(localIpcSource, /reason: applied\.reason/, "IPC responses must report dismissed explicit pet events as not shown.");
 assert.match(updateCheckerSource, /alvinunreal\/openpets/, "GitHub release notice must check the public OpenPets repository.");
 assert.match(updateCheckerSource, /api\.github\.com\/repos\/\$\{githubRepository\}\/releases\/latest/, "update checker must use GitHub latest release API.");

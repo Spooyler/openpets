@@ -65,6 +65,17 @@ export interface LeaseManagerOptions {
   readonly getPetDisplayName?: (petId: string, targetKind: LeaseTargetKind) => string;
   readonly onFirstExplicitLease?: (petId: string) => void;
   readonly onLastExplicitLease?: (petId: string) => void;
+  /**
+   * Fired when heartbeat() or get() discovers a lease has expired and releases
+   * it internally, ahead of the periodic cleanup tick (e.g. after laptop
+   * sleep). Callers that need to notify downstream state (e.g. the window
+   * registry) on lease teardown must hook this — release() alone does not
+   * distinguish an internal expiry release from other release paths.
+   * NOT fired from acquire()'s reuse-mismatch/ineligible release (the session
+   * lives on there — an adopt/pet-switch, not a teardown) or from
+   * cleanupExpired() (its snapshots are already handled by the caller).
+   */
+  readonly onExpired?: (lease: PetLease) => void;
   readonly onLog?: (level: "debug" | "info", message: string, fields?: Record<string, unknown>) => void;
   /**
    * Optional seam to re-validate that an explicit target pet is still
@@ -88,6 +99,7 @@ export class LeaseManager {
   readonly #getPetDisplayName: (petId: string, targetKind: LeaseTargetKind) => string;
   readonly #onFirstExplicitLease: (petId: string) => void;
   readonly #onLastExplicitLease: (petId: string) => void;
+  readonly #onExpired: (lease: PetLease) => void;
   readonly #onLog: (level: "debug" | "info", message: string, fields?: Record<string, unknown>) => void;
   readonly #isPetEligible: ((petId: string) => boolean) | undefined;
 
@@ -99,6 +111,7 @@ export class LeaseManager {
     this.#getPetDisplayName = options.getPetDisplayName ?? ((petId) => petId);
     this.#onFirstExplicitLease = options.onFirstExplicitLease ?? (() => {});
     this.#onLastExplicitLease = options.onLastExplicitLease ?? (() => {});
+    this.#onExpired = options.onExpired ?? (() => {});
     this.#onLog = options.onLog ?? (() => {});
     this.#isPetEligible = options.isPetEligible;
   }
@@ -173,6 +186,7 @@ export class LeaseManager {
     if (lease.expiresAt <= now) {
       this.#onLog("info", "heartbeat expired", { leaseId, actualPetId: lease.actualPetId, targetKind: lease.targetKind, expiresAt: lease.expiresAt, now });
       this.release(leaseId);
+      this.#onExpired(lease);
       throw new Error("unknown_lease");
     }
     const next: PetLease = { ...lease, lastHeartbeatAt: now, expiresAt: now + this.#ttlMs };
@@ -199,6 +213,7 @@ export class LeaseManager {
     const lease = this.#leases.get(leaseId);
     if (lease && lease.expiresAt <= this.#now()) {
       this.release(leaseId);
+      this.#onExpired(lease);
       return null;
     }
     return lease ? this.snapshot(lease) : null;

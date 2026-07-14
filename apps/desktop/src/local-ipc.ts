@@ -36,6 +36,11 @@ const leaseManager = new LeaseManager({
   getPetDisplayName: (petId, targetKind) => targetKind === "default" ? getCurrentDefaultPet().displayName : getPetDisplayName(petId),
   onLog: (level, message, fields) => level === "debug" ? debug("lease", message, fields) : info("lease", message, fields),
   isPetEligible,
+  // heartbeat()/get() release a stale lease internally when it's already past
+  // expiry (e.g. after laptop sleep), ahead of the next 5s cleanup tick. Notify
+  // the registry the same way the cleanup pass does so the pet binding doesn't
+  // leak until the tick catches up.
+  onExpired: (lease) => notifyLeaseGone(lease, sessionKeyForLease(lease)),
 });
 
 // Pet lifecycle is driven by window→pet bindings, not lease counts: the registry
@@ -585,14 +590,25 @@ function captureSessionKeysByLeaseId(): Map<string, string> {
   return map;
 }
 
+/**
+ * Shared teardown notification for a lease that has left the LeaseManager:
+ * unsubscribe confinement tracking for explicit leases, and tell the window
+ * registry the session is gone when a sessionKey is known. Used by the
+ * periodic cleanup pass (cleanupReleasedLeases) and by the LeaseManager's
+ * onExpired hook (heartbeat()/get() releasing a stale lease internally,
+ * ahead of the next cleanup tick).
+ */
+function notifyLeaseGone(lease: { readonly leaseId: string; readonly targetKind: string }, sessionKey: string | null): void {
+  if (lease.targetKind === "explicit") unsubscribeConfinement(lease.leaseId);
+  if (sessionKey) windowPetRegistry.onSessionGone(sessionKey);
+}
+
 function cleanupReleasedLeases(
   leases: readonly { readonly leaseId: string; readonly targetKind: string }[],
   sessionKeys?: ReadonlyMap<string, string>,
 ): void {
   for (const lease of leases) {
-    if (lease.targetKind === "explicit") unsubscribeConfinement(lease.leaseId);
-    const sessionKey = sessionKeys?.get(lease.leaseId);
-    if (sessionKey) windowPetRegistry.onSessionGone(sessionKey);
+    notifyLeaseGone(lease, sessionKeys?.get(lease.leaseId) ?? null);
   }
 }
 
