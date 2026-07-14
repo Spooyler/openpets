@@ -7,12 +7,15 @@ import { motionMoveTo } from "./pet-motion-engine.js";
 import { registerRoamingPet } from "./pet-roaming-controller.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
-import { clearTransientReaction, createDefaultPetWindow, getSafeDefaultPetPosition, getTransientDisplayDurationMs, getTransientReactionAnimationMs, isPetWindowDragging, loadDefaultPetContent, mergePetTransientDisplay, readWindowPosition, recoverPetMouseInterop, setPetReactionState, type PetPluginBubbles, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
+import { clearTransientReaction, createDefaultPetWindow, getSafeDefaultPetPosition, getTransientDisplayDurationMs, getTransientReactionAnimationMs, isPetWindowDragging, loadDefaultPetContent, markNotifyDismiss, mergePetTransientDisplay, readWindowPosition, recoverPetMouseInterop, setPetReactionState, type PetPluginBubbles, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
 import { PetBubbleArbiter, type ActiveBubble, type PetBubbleSink } from "./plugin-bubble-arbiter.js";
 import { publishPluginPetEvent } from "./plugin-events-source.js";
 import { reclampAgentPetWindows } from "./agent-pet-controller.js";
 import { reclampPluginPetWindows } from "./plugin-pet-registry.js";
 import { focusTerminalWindow } from "./terminal-focus.js";
+import { buildNotificationsView, type PetNotificationsView } from "./notification-view.js";
+import { t } from "./i18n/index.js";
+import type { NotificationStore } from "./notification-store.js";
 
 let defaultPetWindow: BrowserWindow | null = null;
 
@@ -23,6 +26,14 @@ let sessionTerminalFocusResolver: (() => number | undefined) | null = null;
 
 export function setSessionTerminalFocusResolver(resolver: () => number | undefined): void {
   sessionTerminalFocusResolver = resolver;
+}
+
+// Injected by local-ipc.ts to avoid a module cycle (same pattern as
+// sessionTerminalFocusResolver).
+let defaultNotificationStoreAccessor: (() => NotificationStore) | null = null;
+
+export function setDefaultNotificationStoreAccessor(accessor: () => NotificationStore): void {
+  defaultNotificationStoreAccessor = accessor;
 }
 
 function hasFocusableSessionTerminal(): boolean {
@@ -51,6 +62,7 @@ const maxPluginMoveDistance = 160;
 const minPluginMoveDurationMs = 250;
 const maxPluginMoveDurationMs = 1_500;
 let movementInProgress = false;
+let defaultNotificationsOpen = false;
 
 export type PetMoveOptions = { readonly x: number; readonly y: number; readonly durationMs?: number };
 export type PetWanderOptions = { readonly distance?: number; readonly durationMs?: number };
@@ -141,7 +153,7 @@ export function setDefaultPetPaused(nextPaused: boolean): void {
     return;
   }
 
-  void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge, getCurrentDismissToken(), getDefaultPetPluginBubbles());
+  void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge, getCurrentDismissToken(), getDefaultPetPluginBubbles(), getDefaultNotificationsView());
 }
 
 export function getDefaultPetPaused(): boolean {
@@ -152,6 +164,20 @@ export function getDefaultPetWindowForPlugins(): BrowserWindow | null {
   return defaultPetWindow && !defaultPetWindow.isDestroyed() ? defaultPetWindow : null;
 }
 
+function getDefaultNotificationsView(): PetNotificationsView | null {
+  const store = defaultNotificationStoreAccessor?.();
+  if (!store) return null;
+  const entries = store.rows();
+  if (entries.length === 0 && !defaultNotificationsOpen) return null;
+  return buildNotificationsView(entries, defaultNotificationsOpen, Date.now(), t as (key: string, vars?: Record<string, string | number>) => string);
+}
+
+export function refreshDefaultPetNotifications(): void {
+  if (!defaultPetWindow || defaultPetWindow.isDestroyed()) return;
+  const view = getDefaultNotificationsView();
+  void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge, getCurrentDismissToken(), getDefaultPetPluginBubbles(), view);
+}
+
 export function refreshDefaultPetContent(): void {
   if (!defaultPetWindow || defaultPetWindow.isDestroyed()) {
     debug("pet.default", "refresh skipped", { reason: "no-window" });
@@ -159,7 +185,7 @@ export function refreshDefaultPetContent(): void {
   }
 
   debug("pet.default", "refresh content", { windowId: defaultPetWindow.id, paused, hasDisplay: Boolean(transientDisplay), badge: statusBadge, petId: getAppStateSnapshot().preferences.defaultPetId });
-  void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge, getCurrentDismissToken(), getDefaultPetPluginBubbles());
+  void loadDefaultPetContent(defaultPetWindow, paused, transientDisplay, statusBadge, getCurrentDismissToken(), getDefaultPetPluginBubbles(), getDefaultNotificationsView());
 }
 
 export function recoverDefaultPetMouseInterop(reason: string): void {
@@ -291,7 +317,7 @@ function handleBubbleDismissed(dismissToken: string): void {
   }
   clearDefaultPetDisplayTimers();
   if (defaultPetWindow && !defaultPetWindow.isDestroyed()) {
-    void loadDefaultPetContent(defaultPetWindow, paused, null, null, undefined, getDefaultPetPluginBubbles());
+    void loadDefaultPetContent(defaultPetWindow, paused, null, null, undefined, getDefaultPetPluginBubbles(), getDefaultNotificationsView());
   }
 }
 
@@ -319,6 +345,26 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
     onBubbleSubmit: (token, values) => defaultPetBubbleArbiter.handleSubmit(token, values),
     onPetEvent: (name, payload) => {
       if (name === "pet:doubleClicked") focusSessionTerminalFromDefaultPet("double-click");
+      if (name === "pet:notificationsToggle") {
+        defaultNotificationsOpen = !defaultNotificationsOpen;
+        refreshDefaultPetNotifications();
+      }
+      if (name === "pet:notificationFocus") {
+        const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");
+        if (sessionKey) {
+          defaultNotificationStoreAccessor?.()?.resolveSession(sessionKey);
+          refreshDefaultPetNotifications();
+        }
+        // Task 6 adds focus routing here
+      }
+      if (name === "pet:notificationDismiss") {
+        const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");
+        if (sessionKey) {
+          defaultNotificationStoreAccessor?.()?.dismissSession(sessionKey);
+          if (defaultPetWindow && !defaultPetWindow.isDestroyed()) markNotifyDismiss(defaultPetWindow);
+          refreshDefaultPetNotifications();
+        }
+      }
       publishPluginPetEvent("default", name, payload);
     },
     onFocusSessionWindow: () => focusSessionTerminalFromDefaultPet("context-menu"),

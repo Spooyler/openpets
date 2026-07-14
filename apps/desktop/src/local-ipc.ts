@@ -3,11 +3,11 @@ import net from "node:net";
 
 import { Notification, shell, systemPreferences } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, setAgentPetStoreAccessor, showAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
-import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager, type PetLease } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
@@ -64,7 +64,7 @@ const windowPetRegistry = new WindowPetRegistry({
     },
     sessionEndedNotice: (label, petId) => {
       windowPetRegistry.defaultStore.record({ sessionKey: `ended:${petId}:${Date.now()}`, kind: "message", message: t("pet.notify.sessionEnded", { label }), label });
-      // Task 5 adds refreshDefaultPetNotifications() here; omit the call in this task.
+      refreshDefaultPetNotifications();
     },
   },
   drawPoolPet: (occupied) => {
@@ -83,6 +83,8 @@ export function getWindowPetRegistry(): WindowPetRegistry {
 // The default pet focuses the terminal of the session that most recently
 // interacted with it (say/react), falling back to the freshest heartbeat.
 setSessionTerminalFocusResolver(() => leaseManager.getFocusableDefaultLease()?.terminalOwnerPid);
+setDefaultNotificationStoreAccessor(() => windowPetRegistry.defaultStore);
+setAgentPetStoreAccessor((petId) => windowPetRegistry.storeForPet(petId));
 
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
 const warnedFallbackPets = new Set<string>();
@@ -481,7 +483,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const petId = lease?.actualTargetPetId ?? getCurrentDefaultPet().id;
     debug("ipc", "pet react requested", { requestId: request.id, reaction, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
     if (lease?.targetKind === "explicit") {
-      recordSessionNotification(rawLease, reaction, reaction); // Task 5 swaps this for localized reaction blips
+      recordSessionNotification(rawLease, reaction, t(("pet.notify.reaction." + reaction) as import("./i18n/index.js").MessageKey));
       const displayPet = displayPetForLease(rawLease);
       const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
       safeRecordOpenPetsActivity({ kind: "react", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
@@ -491,7 +493,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const sessionPet = await resolveSessionPetTarget(lease, params);
     if (sessionPet) {
       leaseManager.touchActivity(sessionPet.leaseId);
-      recordSessionNotification(sessionPet, reaction, reaction); // Task 5 swaps this for localized reaction blips
+      recordSessionNotification(sessionPet, reaction, t(("pet.notify.reaction." + reaction) as import("./i18n/index.js").MessageKey));
       const displayPet = displayPetForLease(sessionPet);
       debug("ipc", "react routed to session pet", { requestId: request.id, petId: sessionPet.actualPetId, sessionLeaseId: sessionPet.leaseId });
       const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
@@ -499,7 +501,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: "session-routed", shown: applied.shown, reason: applied.reason });
       return { ok: true, reaction, shown: applied.shown, reason: applied.reason };
     }
-    recordSessionNotification(rawLease, reaction, reaction); // Task 5 swaps this for localized reaction blips
+    recordSessionNotification(rawLease, reaction, t(("pet.notify.reaction." + reaction) as import("./i18n/index.js").MessageKey));
     const displayPet = displayPetForLease(rawLease);
     const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
     safeRecordOpenPetsActivity({ kind: "react", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
@@ -662,6 +664,9 @@ function recordSessionNotification(lease: PetLease | null, kind: string, message
   const label = sessionLabelFromCwd(lease?.cwd, lease?.terminalAppName ?? "session");
   windowPetRegistry.storeForSession(sessionKey).record({ sessionKey, windowKey, kind, message, label });
   windowPetRegistry.touchSessionActivity(sessionKey);
+  const displayPet = displayPetForLease(lease);
+  if (displayPet) refreshAgentPetNotifications(displayPet);
+  else refreshDefaultPetNotifications();
 }
 
 async function resolveTerminalIdentity(leaseId: string, clientPid: number): Promise<void> {

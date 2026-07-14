@@ -46,6 +46,23 @@ export const en = {
 
   // --- Pet notifications (main process) ---
   "pet.notify.sessionEnded": "Session ended in {label}",
+  "pet.notify.badgeLabel": "{count} sessions need attention",
+  "pet.notify.empty": "All quiet",
+  "pet.notify.ageNow": "now",
+  "pet.notify.ageMinutes": "{m}m",
+  "pet.notify.ageHours": "{h}h",
+  "pet.notify.reaction.thinking": "thinking…",
+  "pet.notify.reaction.working": "working…",
+  "pet.notify.reaction.editing": "editing…",
+  "pet.notify.reaction.running": "running…",
+  "pet.notify.reaction.testing": "testing…",
+  "pet.notify.reaction.waiting": "waiting on you",
+  "pet.notify.reaction.waving": "waving",
+  "pet.notify.reaction.success": "done",
+  "pet.notify.reaction.error": "error",
+  "pet.notify.reaction.celebrating": "celebrating",
+  "pet.notify.reaction.idle": "idle",
+  "pet.menu.notifications": "Notifications",
 
   // --- Confinement / Screen Recording permission (main process) ---
   "confinement.screenPermission.title": "Screen Recording permission needed",

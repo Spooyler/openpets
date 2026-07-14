@@ -23,7 +23,7 @@ const dismissBubble = (event) => {
   bubble.remove();
 
   const newTarget = document.elementFromPoint(event.clientX, event.clientY);
-  const stillInteractive = Boolean(newTarget && newTarget.closest(".pet-hitbox, .pet-shell, .bubble")) || dragging;
+  const stillInteractive = Boolean(newTarget && newTarget.closest(".pet-hitbox, .pet-shell, .bubble, .notify-badge, .notify-flyout")) || dragging;
   reportInteractiveHit(stillInteractive, "bubble-dismiss", true);
 
   ipcRenderer.send("openpets:bubble-dismissed", dismissToken);
@@ -80,7 +80,7 @@ ipcRenderer.on("openpets:pet-content-state", (_event, state) => {
 
 const getInteractiveTarget = (event) => {
   const target = document.elementFromPoint(event.clientX, event.clientY);
-  return target && target.closest(".pet-hitbox, .pet-shell, .bubble");
+  return target && target.closest(".pet-hitbox, .pet-shell, .bubble, .notify-badge, .notify-flyout");
 };
 
 const reportInteractiveHit = (interactive, source, force = false) => {
@@ -103,7 +103,7 @@ ipcRenderer.on("openpets:pet-probe-hit-test", (_event, point) => {
   const clientX = point.clientX;
   const clientY = point.clientY;
   const target = document.elementFromPoint(clientX, clientY);
-  reportInteractiveHit(Boolean(target && target.closest(".pet-hitbox, .pet-shell, .bubble")) || dragging, typeof point.reason === "string" ? point.reason.slice(0, 80) : "probe", true);
+  reportInteractiveHit(Boolean(target && target.closest(".pet-hitbox, .pet-shell, .bubble, .notify-badge, .notify-flyout")) || dragging, typeof point.reason === "string" ? point.reason.slice(0, 80) : "probe", true);
 });
 
 // --- Plugin bubble interactions (actions, inline inputs) -------------------
@@ -154,14 +154,40 @@ const installPetSenses = () => {
     if (event.button !== 0) return;
     const target = event.target;
     if (!(target instanceof Element)) return;
+    // Badge click toggles the notification flyout.
+    if (target.closest(".notify-badge")) {
+      event.preventDefault();
+      event.stopPropagation();
+      sendPetEvent("pet:notificationsToggle", {});
+      return;
+    }
     if (!target.closest(".pet-hitbox, .pet-shell")) return;
     if (Date.now() < suppressClickUntil) return;
     sendPetEvent("pet:clicked", {});
   });
   document.addEventListener("dblclick", (event) => {
     const target = event.target;
-    if (!(target instanceof Element) || !target.closest(".pet-hitbox, .pet-shell")) return;
+    if (!(target instanceof Element)) return;
+    // Row double-click sends notificationFocus INSTEAD of pet:doubleClicked.
+    const row = target.closest("[data-notify-row]");
+    if (row) {
+      event.preventDefault();
+      event.stopPropagation();
+      sendPetEvent("pet:notificationFocus", { sessionKey: row.dataset.sessionKey });
+      return;
+    }
+    if (!target.closest(".pet-hitbox, .pet-shell")) return;
     sendPetEvent("pet:doubleClicked", {});
+  });
+  // Row right-click dismisses the notification row.
+  document.addEventListener("contextmenu", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const row = target.closest("[data-notify-row]");
+    if (!row) return;
+    event.preventDefault();
+    event.stopPropagation();
+    sendPetEvent("pet:notificationDismiss", { sessionKey: row.dataset.sessionKey });
   });
   document.addEventListener("mouseover", (event) => {
     const target = event.target;

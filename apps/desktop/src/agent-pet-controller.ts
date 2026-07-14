@@ -6,8 +6,11 @@ import { clampToTerminalBounds, getConfinementState, getEffectiveConfinementBoun
 import { defaultPetWindowSize, clampToVisibleWorkArea, getDefaultPetInitialPosition } from "./display.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
-import { clearTransientReaction, createAgentPetWindow, getTransientDisplayDurationMs, getTransientReactionAnimationMs, loadExplicitPetContent, mergePetTransientDisplay, readWindowPosition, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
+import { clearTransientReaction, createAgentPetWindow, getTransientDisplayDurationMs, getTransientReactionAnimationMs, loadExplicitPetContent, markNotifyDismiss, mergePetTransientDisplay, readWindowPosition, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
 import { focusTerminalWindow } from "./terminal-focus.js";
+import { buildNotificationsView, type PetNotificationsView } from "./notification-view.js";
+import { t } from "./i18n/index.js";
+import type { NotificationStore } from "./notification-store.js";
 
 const agentPetWindows = new Map<string, BrowserWindow>();
 const transientDisplays = new Map<string, PetTransientDisplay>();
@@ -16,7 +19,16 @@ const transientTimers = new Map<string, NodeJS.Timeout>();
 const transientAnimationTimers = new Map<string, NodeJS.Timeout>();
 const statusBadgeTimers = new Map<string, NodeJS.Timeout>();
 const dismissedAgentPets = new Set<string>();
+
+// Injected by local-ipc.ts to avoid a module cycle (local-ipc already
+// imports from this file; importing local-ipc here would be circular).
+let petStoreAccessor: ((petId: string) => NotificationStore | null) | null = null;
+
+export function setAgentPetStoreAccessor(accessor: (petId: string) => NotificationStore | null): void {
+  petStoreAccessor = accessor;
+}
 const displayGenerations = new Map<string, number>();
+const notificationsOpen = new Set<string>();
 const busyStatusBadgeMs = 120_000;
 
 export function showAgentPet(petId: string): boolean {
@@ -125,7 +137,7 @@ export function refreshAgentPetContent(): void {
     if (!window.isDestroyed()) {
       const display = transientDisplays.get(petId) ?? null;
       const badge = statusBadges.get(petId) ?? null;
-      void loadExplicitPetContent(window, petId, display, badge, getCurrentDismissToken(petId, display, badge), scale);
+      void loadExplicitPetContent(window, petId, display, badge, getCurrentDismissToken(petId, display, badge), scale, null, getAgentNotificationsView(petId));
     }
   }
 }
@@ -147,6 +159,23 @@ export function reclampAgentPetWindows(): void {
   }
 }
 
+function getAgentNotificationsView(petId: string): PetNotificationsView | null {
+  const store = petStoreAccessor?.(petId) ?? null;
+  if (!store) return null;
+  const entries = store.rows();
+  if (entries.length === 0 && !notificationsOpen.has(petId)) return null;
+  return buildNotificationsView(entries, notificationsOpen.has(petId), Date.now(), t as (key: string, vars?: Record<string, string | number>) => string);
+}
+
+export function refreshAgentPetNotifications(petId: string): void {
+  const window = agentPetWindows.get(petId);
+  if (!window || window.isDestroyed()) return;
+  const display = transientDisplays.get(petId) ?? null;
+  const badge = statusBadges.get(petId) ?? null;
+  const view = getAgentNotificationsView(petId);
+  void loadExplicitPetContent(window, petId, display, badge, getCurrentDismissToken(petId, display, badge), getPreferredPetScale(), null, view);
+}
+
 function handleBubbleDismissed(petId: string, dismissToken: string): void {
   const currentGeneration = displayGenerations.get(petId) ?? 0;
   debug("pet.agent", "bubble dismissed callback", { petId, windowId: agentPetWindows.get(petId)?.id, dismissToken, currentGeneration });
@@ -157,7 +186,7 @@ function handleBubbleDismissed(petId: string, dismissToken: string): void {
   clearAgentDisplay(petId);
   const window = agentPetWindows.get(petId);
   if (window && !window.isDestroyed()) {
-    void loadExplicitPetContent(window, petId, null, null, undefined, getPreferredPetScale());
+    void loadExplicitPetContent(window, petId, null, null, undefined, getPreferredPetScale(), null, getAgentNotificationsView(petId));
   }
 }
 
@@ -203,8 +232,31 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     onCloseRequested: () => dismissAgentPetForActiveLease(petId),
     onBubbleDismissed: (token) => handleBubbleDismissed(petId, token),
     onFocusSessionWindow: focusSessionTerminal,
-    onPetEvent: (name) => {
+    onPetEvent: (name, payload) => {
       if (name === "pet:doubleClicked") focusSessionTerminal();
+      if (name === "pet:notificationsToggle") {
+        if (notificationsOpen.has(petId)) notificationsOpen.delete(petId);
+        else notificationsOpen.add(petId);
+        refreshAgentPetNotifications(petId);
+      }
+      if (name === "pet:notificationFocus") {
+        const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");
+        if (sessionKey) {
+          petStoreAccessor?.(petId)?.resolveSession(sessionKey);
+          refreshAgentPetNotifications(petId);
+        }
+        // Task 6 adds focus routing here
+      }
+      if (name === "pet:notificationDismiss") {
+        const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");
+        if (sessionKey) {
+          petStoreAccessor?.(petId)?.dismissSession(sessionKey);
+          // Set suppress flag for context-menu (the dismiss was via right-click).
+          const win = agentPetWindows.get(petId);
+          if (win && !win.isDestroyed()) markNotifyDismiss(win);
+          refreshAgentPetNotifications(petId);
+        }
+      }
     },
   }, getCurrentDismissToken(petId, display, badge));
   const windowId = window.id;
@@ -258,12 +310,12 @@ function setAgentDisplay(petId: string, display: PetTransientDisplay): void {
     const window = agentPetWindows.get(petId);
     if (window && !window.isDestroyed()) {
       const badge = statusBadges.get(petId) ?? null;
-      void loadExplicitPetContent(window, petId, null, badge, getCurrentDismissToken(petId, null, badge), getPreferredPetScale());
+      void loadExplicitPetContent(window, petId, null, badge, getCurrentDismissToken(petId, null, badge), getPreferredPetScale(), null, getAgentNotificationsView(petId));
     }
   }, displayDurationMs);
   transientTimers.set(petId, timer);
   const window = agentPetWindows.get(petId);
-  if (window && !window.isDestroyed()) void loadExplicitPetContent(window, petId, preparedDisplay, statusBadges.get(petId) ?? null, preparedDisplay.dismissToken, getPreferredPetScale());
+  if (window && !window.isDestroyed()) void loadExplicitPetContent(window, petId, preparedDisplay, statusBadges.get(petId) ?? null, preparedDisplay.dismissToken, getPreferredPetScale(), null, getAgentNotificationsView(petId));
 }
 
 function clearAgentDisplay(petId: string): void {
@@ -307,7 +359,7 @@ function setStatusBadge(petId: string, reaction: OpenPetsReaction): void {
     const window = agentPetWindows.get(petId);
     if (window && !window.isDestroyed()) {
       const display = transientDisplays.get(petId) ?? null;
-      void loadExplicitPetContent(window, petId, display, null, getCurrentDismissToken(petId, display, null), getPreferredPetScale());
+      void loadExplicitPetContent(window, petId, display, null, getCurrentDismissToken(petId, display, null), getPreferredPetScale(), null, getAgentNotificationsView(petId));
     }
   }, isBusyStatusBadgeReaction(reaction) ? busyStatusBadgeMs : transientDisplayMs);
   statusBadgeTimers.set(petId, timer);
