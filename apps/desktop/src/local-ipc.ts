@@ -677,15 +677,22 @@ async function resolveSessionPetTarget(
   params: Record<string, unknown>,
 ): Promise<PetLease | undefined> {
   if (lease && lease.targetKind !== "default") return undefined;
-  if (!leaseManager.hasSessionRoutableLeases()) return undefined;
+  if (!leaseManager.hasSessionRoutableLeases()) {
+    debug("ipc", "session routing skipped — no routable leases");
+    return undefined;
+  }
   // Preference order: ancestry supplied by the caller (short-lived hooks — the
   // only chance to observe a process that dies right after this request),
   // then ancestry stored on the lease, then a live walk of the caller's pid.
   let chain: readonly number[] | undefined = validateClientAncestorPids(params.clientAncestorPids);
+  const chainSource = chain ? "caller-supplied" : "none";
   if (!chain) chain = lease ? leaseManager.getRawLease(lease.leaseId)?.clientAncestorPids : undefined;
   if (!chain || chain.length === 0) {
     const clientPid = typeof params.clientPid === "number" && params.clientPid > 0 ? Math.floor(params.clientPid) : undefined;
-    if (clientPid === undefined) return undefined;
+    if (clientPid === undefined) {
+      debug("ipc", "session routing failed — no ancestry chain", { chainSource, hasClientPid: false });
+      return undefined;
+    }
     try {
       chain = await getAncestorPidChain(clientPid);
     } catch {
@@ -693,7 +700,11 @@ async function resolveSessionPetTarget(
     }
   }
   if (chain.length === 0) return undefined;
-  return leaseManager.findSessionPetLease(chain);
+  const match = leaseManager.findSessionPetLease(chain);
+  if (!match) {
+    debug("ipc", "session routing — no match", { chainSource, chainLength: chain.length, chainHead: chain.slice(0, 5) });
+  }
+  return match;
 }
 
 function validateClientAncestorPids(value: unknown): readonly number[] | undefined {
