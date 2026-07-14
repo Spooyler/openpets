@@ -19,8 +19,10 @@ import { isConfinementSupported } from "./capabilities.js";
 import { resolveAndSubscribe, type ConfinementPollerDeps } from "./confinement-poller.js";
 import { findTerminalWindowForPid, getAncestorPidChain, subscribeWindowTracking, type TerminalWindowInfo } from "./window-tracker.js";
 import { warnPetFallback } from "./pet-fallback-notify.js";
-import { getEligiblePoolPetIds, resolvePoolAssignment } from "./pet-pool.js";
+import { getEligiblePoolPetIds } from "./pet-pool.js";
 import { t } from "./i18n/index.js";
+import { WindowPetRegistry, windowKeyForIdentity } from "./window-pet-registry.js";
+import { sessionLabelFromCwd } from "./notification-store.js";
 
 let ipcServer: net.Server | null = null;
 let ipcDiscovery: OpenPetsDiscoveryFile | null = null;
@@ -32,11 +34,46 @@ const leaseManager = new LeaseManager({
   resolveTarget: resolveLeaseTarget,
   getDefaultPetId: () => getCurrentDefaultPet().id,
   getPetDisplayName: (petId, targetKind) => targetKind === "default" ? getCurrentDefaultPet().displayName : getPetDisplayName(petId),
-  onFirstExplicitLease: showAgentPet,
-  onLastExplicitLease: handleLastExplicitLease,
   onLog: (level, message, fields) => level === "debug" ? debug("lease", message, fields) : info("lease", message, fields),
   isPetEligible,
 });
+
+// Pet lifecycle is driven by window→pet bindings, not lease counts: the registry
+// decides when to spawn/close/rebind pets as sessions resolve their terminal
+// identity. Side effects run through injected callbacks (agent-pet-controller /
+// confinement); pool assignment happens here per-window at identity-resolve time.
+const windowPetRegistry = new WindowPetRegistry({
+  callbacks: {
+    spawnPet: (_windowKey, petId) => { clearAgentPetDismissal(petId); showAgentPet(petId); },
+    closePet: (_windowKey, petId, _reason) => {
+      // Task 7 will swap the "session-ended" reason for scheduleFarewellClose(petId);
+      // until then every close reason tears the pet down immediately.
+      clearAgentPetLeaseState(petId);
+      clearConfinementState(petId);
+    },
+    rebindPet: (_windowKey, fromPetId, toPetId) => {
+      clearAgentPetLeaseState(fromPetId);
+      clearConfinementState(fromPetId);
+      clearAgentPetDismissal(toPetId);
+      showAgentPet(toPetId);
+    },
+    sessionEndedNotice: (label, petId) => {
+      windowPetRegistry.defaultStore.record({ sessionKey: `ended:${petId}:${Date.now()}`, kind: "message", message: t("pet.notify.sessionEnded", { label }), label });
+      // Task 5 adds refreshDefaultPetNotifications() here; omit the call in this task.
+    },
+  },
+  drawPoolPet: (occupied) => {
+    const state = getAppStateSnapshot();
+    const eligible = getEligiblePoolPetIds(state.pets.installed, builtInPet.id, getCurrentDefaultPet().id).filter((id) => !occupied.has(id));
+    const pool = state.preferences.petPoolOrder ?? [];
+    for (const petId of pool) if (eligible.includes(petId)) return petId;
+    return null;
+  },
+});
+
+export function getWindowPetRegistry(): WindowPetRegistry {
+  return windowPetRegistry;
+}
 
 // The default pet focuses the terminal of the session that most recently
 // interacted with it (say/react), falling back to the freshest heartbeat.
@@ -44,10 +81,6 @@ setSessionTerminalFocusResolver(() => leaseManager.getFocusableDefaultLease()?.t
 
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
 const warnedFallbackPets = new Set<string>();
-
-
-/** PIDs of sessions that had pool pets when pool was disabled. Used to respawn on re-enable. */
-const suspendedPoolSessions = new Map<number, string | undefined>();
 
 const safePetIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
@@ -86,8 +119,12 @@ export async function startLocalIpcServer(): Promise<void> {
   const listeningEndpoint = getListeningEndpoint(server, endpointConfig);
   ipcDiscovery = writeDiscoveryFile(listeningEndpoint, token);
   leaseCleanupTimer = setInterval(() => {
-    cleanupReleasedLeases(leaseManager.cleanupExpired());
-    cleanupReleasedLeases(leaseManager.checkPidLiveness());
+    // Capture leaseId→sessionKey BEFORE the cleanup passes release the leases —
+    // once released, a lease's raw record (and its sessionNonce) is gone, so the
+    // returned snapshots can no longer be turned into a registry sessionKey.
+    const sessionKeys = captureSessionKeysByLeaseId();
+    cleanupReleasedLeases(leaseManager.cleanupExpired(), sessionKeys);
+    cleanupReleasedLeases(leaseManager.checkPidLiveness(), sessionKeys);
   }, 5_000);
   leaseCleanupTimer.unref?.();
   info("ipc", "server started", { endpointKind: endpointConfig.bindEndpoint.kind, bindEndpoint: formatEndpoint(endpointConfig.bindEndpoint), advertisedEndpoint: listeningEndpoint, discoveryPath: getDiscoveryFilePath() });
@@ -115,39 +152,13 @@ export function stopLocalIpcServer(): void {
 
 /**
  * Handle petPoolEnabled toggle: despawn all active pool pets on disable,
- * respawn pets for still-alive sessions on re-enable.
+ * respawn pets for still-alive sessions' windows on re-enable.
+ * Pool lifecycle now lives in the window registry, keyed by window.
  * Must be called AFTER the preference has been updated in app state.
  */
 export function dispatchPoolToggle(enabled: boolean): void {
-  if (!enabled) {
-    // Despawn all active pool pets and remember their PIDs for respawn.
-    const explicitLeases = leaseManager.getExplicitLeaseSnapshots();
-    for (const lease of explicitLeases) {
-      const rawLease = leaseManager.getRawLease(lease.leaseId);
-      if (!rawLease || rawLease.requestedPetId !== undefined) continue;
-      if (lease.clientPid && lease.clientPid > 0) {
-        suspendedPoolSessions.set(lease.clientPid, rawLease.sessionNonce);
-      }
-      releaseExplicitLease(lease.leaseId);
-    }
-  } else {
-    // Re-enable: spawn pets for suspended sessions whose PIDs are still alive.
-    const sessionsToRespawn = [...suspendedPoolSessions];
-    suspendedPoolSessions.clear();
-    for (const [pid, sessionNonce] of sessionsToRespawn) {
-      try {
-        process.kill(pid, 0);
-      } catch {
-        continue; // Dead process — skip.
-      }
-      try {
-        leaseManager.acquire(undefined, pid, sessionNonce);
-        info("ipc", "respawned pool pet for suspended session", { pid });
-      } catch (err) {
-        debug("ipc", "pool respawn acquire failed", { pid, error: err instanceof Error ? err.message : String(err) });
-      }
-    }
-  }
+  if (enabled) windowPetRegistry.onPoolEnabled();
+  else windowPetRegistry.onPoolDisabled();
 }
 
 function handleSocket(socket: net.Socket, token: string, endpointConfig: IpcEndpointConfig): void {
@@ -391,12 +402,22 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const cwd = validateCwd(params.cwd);
     debug("ipc", "lease acquire requested", { requestId: request.id, requestedPetId, clientPid, sessionNonce });
     const lease = leaseManager.acquire(requestedPetId, clientPid, sessionNonce, cwd);
-    // A fresh explicit lease must always surface its pet, even when the pet
-    // window was dismissed under an earlier lease (e.g. a mid-session adopt
-    // joining an already-leased pet — the 0→1 show hook never fires then).
+    // Spawning now happens when the session's terminal identity resolves (via
+    // the registry). Identity can lag a beat, so give an explicit lease a 3s
+    // grace: if no window has bound its pet by then and the lease is still live,
+    // surface it anyway so it is visible before identity lands. The later
+    // onSessionIdentified spawn is then a no-op (the registry returns the current
+    // pet and the existing window is reused).
     if (lease.targetKind === "explicit") {
-      clearAgentPetDismissal(lease.actualTargetPetId);
-      showAgentPet(lease.actualTargetPetId);
+      const gracePetId = lease.actualTargetPetId;
+      const graceLeaseId = lease.leaseId;
+      const graceTimer = setTimeout(() => {
+        if (windowPetRegistry.windowForPet(gracePetId) === null && leaseManager.get(graceLeaseId)) {
+          clearAgentPetDismissal(gracePetId);
+          showAgentPet(gracePetId);
+        }
+      }, 3_000);
+      graceTimer.unref?.();
     }
     trackDesktopEvent("desktop_lease_acquired", { requested_pet: requestedPetId ? "explicit" : "default", target_kind: lease.targetKind, fallback_reason: lease.fallbackReason });
     warnPetFallback(requestedPetId, lease.fallbackReason, warnedFallbackPets);
@@ -423,12 +444,17 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const params = isRecord(request.params) ? request.params : {};
     const leaseId = validateRequiredLeaseId(params.leaseId);
     debug("ipc", "lease release requested", { requestId: request.id, leaseId });
-    // Clean up confinement subscription for this lease if one exists.
+    // Explicit leases clean up their confinement subscription in
+    // releaseExplicitLease; both paths notify the registry the session is gone
+    // (sessionKey captured before release, since release drops the raw lease).
     const rawLease = leaseManager.getRawLease(leaseId);
     if (rawLease?.targetKind === "explicit") {
       return releaseExplicitLease(leaseId);
     }
-    return leaseManager.release(leaseId);
+    const sessionKey = rawLease ? sessionKeyForLease(rawLease) : null;
+    const result = leaseManager.release(leaseId);
+    if (sessionKey) windowPetRegistry.onSessionGone(sessionKey);
+    return result;
   }
 
   if (request.method === "agent.activity") {
@@ -446,25 +472,32 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const reaction = validateReaction(params.reaction);
     const lease = getLeaseTarget(params.leaseId);
     if (lease) leaseManager.touchActivity(lease.leaseId);
+    const rawLease = lease ? leaseManager.getRawLease(lease.leaseId) : null;
     const petId = lease?.actualTargetPetId ?? getCurrentDefaultPet().id;
     debug("ipc", "pet react requested", { requestId: request.id, reaction, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
     if (lease?.targetKind === "explicit") {
-      const applied = applyAgentPetReaction(lease.actualTargetPetId, reaction);
-      safeRecordOpenPetsActivity({ kind: "react", reaction, petId, surface: "agent" });
+      recordSessionNotification(rawLease, reaction, reaction); // Task 5 swaps this for localized reaction blips
+      const displayPet = displayPetForLease(rawLease);
+      const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
+      safeRecordOpenPetsActivity({ kind: "react", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
       trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason });
       return { ok: true, reaction, shown: applied.shown, reason: applied.reason, leaseId: lease.leaseId };
     }
     const sessionPet = await resolveSessionPetTarget(lease, params);
     if (sessionPet) {
       leaseManager.touchActivity(sessionPet.leaseId);
+      recordSessionNotification(sessionPet, reaction, reaction); // Task 5 swaps this for localized reaction blips
+      const displayPet = displayPetForLease(sessionPet);
       debug("ipc", "react routed to session pet", { requestId: request.id, petId: sessionPet.actualPetId, sessionLeaseId: sessionPet.leaseId });
-      const applied = applyAgentPetReaction(sessionPet.actualPetId, reaction);
-      safeRecordOpenPetsActivity({ kind: "react", reaction, petId: sessionPet.actualPetId, surface: "agent" });
+      const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
+      safeRecordOpenPetsActivity({ kind: "react", reaction, petId: displayPet ?? sessionPet.actualPetId, surface: displayPet ? "agent" : "default" });
       trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: "session-routed", shown: applied.shown, reason: applied.reason });
       return { ok: true, reaction, shown: applied.shown, reason: applied.reason };
     }
-    const applied = applyExternalPetReaction(reaction);
-    safeRecordOpenPetsActivity({ kind: "react", reaction, petId, surface: "default" });
+    recordSessionNotification(rawLease, reaction, reaction); // Task 5 swaps this for localized reaction blips
+    const displayPet = displayPetForLease(rawLease);
+    const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
+    safeRecordOpenPetsActivity({ kind: "react", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
     trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason });
     return { ok: true, reaction, shown: applied.shown, reason: applied.reason };
   }
@@ -474,25 +507,32 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
   const reaction = params.reaction === undefined ? undefined : validateReaction(params.reaction);
   const lease = getLeaseTarget(params.leaseId);
   if (lease) leaseManager.touchActivity(lease.leaseId);
+  const rawLease = lease ? leaseManager.getRawLease(lease.leaseId) : null;
   const petId = lease?.actualTargetPetId ?? getCurrentDefaultPet().id;
   debug("ipc", "pet say requested", { requestId: request.id, reaction, messageLength: message.length, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
   if (lease?.targetKind === "explicit") {
-    const applied = applyAgentPetSay(lease.actualTargetPetId, message, reaction);
-    safeRecordOpenPetsActivity({ kind: "say", reaction, petId, surface: "agent" });
+    recordSessionNotification(rawLease, reaction ?? "message", message);
+    const displayPet = displayPetForLease(rawLease);
+    const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : applyExternalPetSay(message, reaction);
+    safeRecordOpenPetsActivity({ kind: "say", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
     trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
     return { ok: true, shown: applied.shown, reason: applied.reason, reaction, leaseId: lease.leaseId };
   }
   const sessionPet = await resolveSessionPetTarget(lease, params);
   if (sessionPet) {
     leaseManager.touchActivity(sessionPet.leaseId);
+    recordSessionNotification(sessionPet, reaction ?? "message", message);
+    const displayPet = displayPetForLease(sessionPet);
     debug("ipc", "say routed to session pet", { requestId: request.id, petId: sessionPet.actualPetId, sessionLeaseId: sessionPet.leaseId });
-    const applied = applyAgentPetSay(sessionPet.actualPetId, message, reaction);
-    safeRecordOpenPetsActivity({ kind: "say", reaction, petId: sessionPet.actualPetId, surface: "agent" });
+    const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : applyExternalPetSay(message, reaction);
+    safeRecordOpenPetsActivity({ kind: "say", reaction, petId: displayPet ?? sessionPet.actualPetId, surface: displayPet ? "agent" : "default" });
     trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: "session-routed", shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
     return { ok: true, shown: applied.shown, reason: applied.reason, reaction };
   }
-  const applied = applyExternalPetSay(message, reaction);
-  safeRecordOpenPetsActivity({ kind: "say", reaction, petId, surface: "default" });
+  recordSessionNotification(rawLease, reaction ?? "message", message);
+  const displayPet = displayPetForLease(rawLease);
+  const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : applyExternalPetSay(message, reaction);
+  safeRecordOpenPetsActivity({ kind: "say", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
   trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
   return { ok: true, shown: applied.shown, reason: applied.reason, reaction };
 }
@@ -525,21 +565,87 @@ function getLeaseTarget(value: unknown) {
   return lease;
 }
 
-function handleLastExplicitLease(petId: string): void {
-  info("ipc", "last explicit lease ended", { petId });
-  clearAgentPetLeaseState(petId);
-  clearConfinementState(petId);
+/** `${clientPid}:${sessionNonce}` for a lease, or null when either is missing. */
+export function sessionKeyForLease(lease: PetLease): string | null {
+  return lease.clientPid && lease.sessionNonce ? `${lease.clientPid}:${lease.sessionNonce}` : null;
 }
 
-function cleanupReleasedLeases(leases: readonly { readonly leaseId: string; readonly targetKind: string }[]): void {
+/**
+ * Snapshot leaseId→sessionKey for every identified lease (those with a resolved
+ * terminal identity — exactly the sessions the registry tracks). Taken BEFORE a
+ * cleanup pass releases leases, so cleanupReleasedLeases can still map a released
+ * snapshot back to its registry sessionKey.
+ */
+function captureSessionKeysByLeaseId(): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const lease of leaseManager.getConfinedLeases()) {
+    const sessionKey = sessionKeyForLease(lease);
+    if (sessionKey) map.set(lease.leaseId, sessionKey);
+  }
+  return map;
+}
+
+function cleanupReleasedLeases(
+  leases: readonly { readonly leaseId: string; readonly targetKind: string }[],
+  sessionKeys?: ReadonlyMap<string, string>,
+): void {
   for (const lease of leases) {
     if (lease.targetKind === "explicit") unsubscribeConfinement(lease.leaseId);
+    const sessionKey = sessionKeys?.get(lease.leaseId);
+    if (sessionKey) windowPetRegistry.onSessionGone(sessionKey);
   }
 }
 
 function releaseExplicitLease(leaseId: string): { readonly released: boolean } {
+  const raw = leaseManager.getRawLease(leaseId);
+  const sessionKey = raw ? sessionKeyForLease(raw) : null;
   unsubscribeConfinement(leaseId);
-  return leaseManager.release(leaseId);
+  const result = leaseManager.release(leaseId);
+  if (sessionKey) windowPetRegistry.onSessionGone(sessionKey);
+  return result;
+}
+
+/**
+ * Register a session with the window registry once its terminal identity has
+ * resolved. The registry binds/spawns the pet (explicit request, pool draw, or
+ * default coverage) and returns the pet now bound to the session's window, or
+ * null when the session stays on the default pet or isn't fully identified yet.
+ */
+function registerIdentifiedSession(leaseId: string): string | null {
+  const raw = leaseManager.getRawLease(leaseId);
+  if (!raw?.clientPid || !raw.sessionNonce || !raw.terminalOwnerPid) return null;
+  return windowPetRegistry.onSessionIdentified(
+    {
+      sessionKey: `${raw.clientPid}:${raw.sessionNonce}`,
+      leaseId,
+      terminalOwnerPid: raw.terminalOwnerPid,
+      terminalWindowId: raw.terminalWindowId,
+      label: sessionLabelFromCwd(raw.cwd, raw.terminalAppName ?? "session"),
+    },
+    raw.targetKind === "explicit" ? raw.actualPetId : undefined,
+    getAppStateSnapshot().preferences.petPoolEnabled === true,
+  );
+}
+
+/** The pet currently bound to the lease's terminal window, or null (anonymous
+ *  caller, unresolved identity, or default coverage). */
+function displayPetForLease(lease: PetLease | null | undefined): string | null {
+  const windowKey = lease?.terminalOwnerPid ? windowKeyForIdentity(lease.terminalWindowId, lease.terminalOwnerPid) : undefined;
+  return windowKey ? windowPetRegistry.petForWindow(windowKey) : null;
+}
+
+/**
+ * Record a say/react into the notification store that owns the caller's session
+ * (its binding store, else the default store) and mark the session active.
+ * Anonymous callers (no clientPid+sessionNonce) animate the pet but write no row.
+ */
+function recordSessionNotification(lease: PetLease | null, kind: string, message: string): void {
+  const sessionKey = lease?.clientPid && lease.sessionNonce ? `${lease.clientPid}:${lease.sessionNonce}` : undefined;
+  if (!sessionKey) return;
+  const windowKey = lease?.terminalOwnerPid ? windowKeyForIdentity(lease.terminalWindowId, lease.terminalOwnerPid) : undefined;
+  const label = sessionLabelFromCwd(lease?.cwd, lease?.terminalAppName ?? "session");
+  windowPetRegistry.storeForSession(sessionKey).record({ sessionKey, windowKey, kind, message, label });
+  windowPetRegistry.touchSessionActivity(sessionKey);
 }
 
 async function resolveTerminalIdentity(leaseId: string, clientPid: number): Promise<void> {
@@ -584,8 +690,15 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
         terminalWindowId: termInfo.window?.id,
       });
       void captureClientAncestry(leaseId, clientPid);
+      // Identity resolved → let the registry bind/spawn the pet for this window.
+      registerIdentifiedSession(leaseId);
     },
-    applyUpdate: (termInfo) => applyConfinementUpdate(petId, termInfo),
+    // Confinement follows the registry's bound pet for this window (falling back
+    // to the explicit lease pet during the pre-identity grace window).
+    applyUpdate: (termInfo) => {
+      const windowKey = windowKeyForIdentity(termInfo.window?.id, termInfo.terminalPid);
+      applyConfinementUpdate(windowPetRegistry.petForWindow(windowKey) ?? petId, termInfo);
+    },
     isAlive: () => !!leaseManager.getRawLease(leaseId),
     onDead: () => unsubscribeConfinement(leaseId),
     // Phase 2: Screen Recording permission — macOS only.
@@ -644,6 +757,9 @@ async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: n
           terminalWindowId: termInfo.window?.id,
         });
         void captureClientAncestry(leaseId, clientPid);
+        // Identity resolved → register with the registry (pool draw / default
+        // coverage). Default/pool leases run no confinement poller.
+        registerIdentifiedSession(leaseId);
         info("ipc", "terminal identity resolved (default lease)", { leaseId, clientPid, attempt, terminalPid: termInfo.terminalPid, appName: termInfo.appName });
         return;
       }
@@ -747,12 +863,9 @@ function resolveLeaseTarget(requestedPetId: string | undefined): { readonly targ
   const defaultPet = getCurrentDefaultPetWithFallback();
 
   if (!requestedPetId) {
-    // No explicit pet requested — check pool before falling back to default.
-    // INVARIANT: tryResolveFromPool() and the subsequent lease registration in
-    // LeaseManager.acquire() MUST remain synchronous (no await between them);
-    // otherwise two concurrent acquire(undefined) calls could claim the same slot.
-    const poolResult = tryResolveFromPool();
-    if (poolResult) return { targetKind: "explicit", actualPetId: poolResult.petId };
+    // No explicit pet requested → default target. Pool assignment no longer
+    // happens here: it is a per-window draw performed by the registry's
+    // drawPoolPet callback at terminal-identity-resolve time.
     return { targetKind: "default", actualPetId: defaultPet.id, fallbackReason: defaultPet.fallbackReason };
   }
 
@@ -769,24 +882,6 @@ function resolveLeaseTarget(requestedPetId: string | undefined): { readonly targ
   if (!pet) return { targetKind: "default", actualPetId: defaultPet.id, fallbackReason: "pet_not_installed" };
   if (pet.broken) return { targetKind: "default", actualPetId: defaultPet.id, fallbackReason: "pet_broken" };
   return { targetKind: "explicit", actualPetId: pet.id };
-}
-
-function tryResolveFromPool(): { readonly petId: string } | null {
-  const state = getAppStateSnapshot();
-  // Master toggle: when disabled, ignore the pool entirely (legacy shared-default behaviour).
-  // Platform-independent — this resolution path runs identically on macOS, Windows and Linux,
-  // and for any MCP client (Claude Code CLI, opencode, Cursor, …) that acquires a no-pet lease.
-  if (!state.preferences.petPoolEnabled) return null;
-  const pool = state.preferences.petPoolOrder;
-  if (!pool || pool.length === 0) return null;
-
-  const defaultPet = getCurrentDefaultPet();
-  const eligiblePetIds = getEligiblePoolPetIds(state.pets.installed, builtInPet.id, defaultPet.id);
-  return resolvePoolAssignment({
-    orderedPool: pool,
-    eligiblePetIds,
-    countActiveExplicit: (petId) => leaseManager.countExplicitLeases(petId),
-  });
 }
 
 function getCurrentDefaultPet(): { readonly id: string; readonly displayName: string } {

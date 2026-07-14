@@ -44,6 +44,9 @@ export const en = {
   "pet.fallback.unavailableTitle": "Pet \"{petId}\" unavailable",
   "pet.fallback.unavailableBody": "{petId} isn't installed, so the default pet is being used. Window confinement only works with an installed pet — run: openpets mcp --pet <installed-pet-id>",
 
+  // --- Pet notifications (main process) ---
+  "pet.notify.sessionEnded": "Session ended in {label}",
+
   // --- Confinement / Screen Recording permission (main process) ---
   "confinement.screenPermission.title": "Screen Recording permission needed",
   "confinement.screenPermission.body": "OpenPets needs Screen Recording access to keep your pet inside its window. Click to open System Settings.",

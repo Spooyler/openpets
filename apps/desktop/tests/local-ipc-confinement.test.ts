@@ -224,10 +224,10 @@ function makeDeps(overrides: Partial<ConfinementPollerDeps> = {}): ConfinementPo
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const src = readFileSync(join(__dirname, "../../src/local-ipc.ts"), "utf-8");
 
-  // Extract the explicit-lease block for pet.react (up to applyAgentPetReaction call).
-  const reactExplicitBlock = src.match(/if \(lease\?\.targetKind === "explicit"\)[\s\S]*?const applied = applyAgentPetReaction/);
-  // Extract the explicit-lease block for pet.say (up to applyAgentPetSay call).
-  const sayExplicitBlock = src.match(/if \(lease\?\.targetKind === "explicit"\)[\s\S]*?const applied = applyAgentPetSay/);
+  // Extract the explicit-lease block for pet.react (up to the applyAgentPetReaction call).
+  const reactExplicitBlock = src.match(/if \(lease\?\.targetKind === "explicit"\)[\s\S]*?applyAgentPetReaction/);
+  // Extract the explicit-lease block for pet.say (up to the applyAgentPetSay call).
+  const sayExplicitBlock = src.match(/if \(lease\?\.targetKind === "explicit"\)[\s\S]*?applyAgentPetSay/);
 
   assert.ok(reactExplicitBlock !== null, "react explicit-lease block must be present in local-ipc.ts");
   assert.ok(

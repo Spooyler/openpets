@@ -2,8 +2,12 @@
  * Tests that acquiring an explicit lease always surfaces the pet window.
  *
  * Regression: adopting a pet whose window was dismissed under an earlier
- * lease produced no visible pet — the show hook only fires on the 0→1
- * explicit-lease transition, and showAgentPet() skips dismissed pets.
+ * lease produced no visible pet — and showAgentPet() skips dismissed pets.
+ *
+ * Spawning now happens when the session's terminal identity resolves (via the
+ * window registry), but a 3-second grace timer on the explicit acquire still
+ * clears any stale dismissal and shows the pet if no window has bound it yet —
+ * preserving the reshow guarantee before identity lands.
  *
  * local-ipc.ts imports Electron, so the wiring is pinned with source-regex
  * assertions (capabilities-win32.test.ts pattern).
@@ -24,9 +28,10 @@ assert.ok(acquireStart >= 0 && heartbeatStart > acquireStart, "lease.acquire han
 const acquireHandler = src.slice(acquireStart, heartbeatStart);
 
 // (1) explicit acquisitions clear any stale dismissal and show the pet
+//     (via the 3s grace timer, keyed on the lease's actualTargetPetId)
 {
   assert.ok(
-    /if \(lease\.targetKind === "explicit"\) \{[^}]*clearAgentPetDismissal\(lease\.actualTargetPetId\);[^}]*showAgentPet\(lease\.actualTargetPetId\);/s.test(acquireHandler),
+    /if \(lease\.targetKind === "explicit"\)[\s\S]*?const gracePetId = lease\.actualTargetPetId;[\s\S]*?clearAgentPetDismissal\(gracePetId\);[\s\S]*?showAgentPet\(gracePetId\);/.test(acquireHandler),
     "(1) lease.acquire must clear dismissal and show the pet for explicit leases",
   );
 }
