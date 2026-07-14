@@ -19,6 +19,7 @@ const transientTimers = new Map<string, NodeJS.Timeout>();
 const transientAnimationTimers = new Map<string, NodeJS.Timeout>();
 const statusBadgeTimers = new Map<string, NodeJS.Timeout>();
 const dismissedAgentPets = new Set<string>();
+const farewellTimers = new Map<string, NodeJS.Timeout>();
 
 // Injected by local-ipc.ts to avoid a module cycle (local-ipc already
 // imports from this file; importing local-ipc here would be circular).
@@ -49,6 +50,7 @@ const notificationsOpen = new Set<string>();
 const busyStatusBadgeMs = 120_000;
 
 export function showAgentPet(petId: string): boolean {
+  cancelFarewellClose(petId);
   if (dismissedAgentPets.has(petId)) {
     info("pet.agent", "show skipped", { petId, reason: "dismissed", activeWindows: agentPetWindows.size });
     return false;
@@ -116,6 +118,23 @@ export function clearAgentPetLeaseState(petId: string): void {
   clearAgentDisplay(petId);
 }
 
+/** Session ended but its window is still alive: say goodbye, then close after 5s. */
+export function scheduleFarewellClose(petId: string): void {
+  if (farewellTimers.has(petId)) return;
+  applyAgentPetSay(petId, t("pet.notify.farewell"), "waving");
+  const timer = setTimeout(() => {
+    farewellTimers.delete(petId);
+    clearAgentPetLeaseState(petId);
+  }, 5_000);
+  farewellTimers.set(petId, timer);
+}
+
+/** A new binding for this pet cancels a pending farewell (re-adopt during grace). */
+export function cancelFarewellClose(petId: string): void {
+  const timer = farewellTimers.get(petId);
+  if (timer) { clearTimeout(timer); farewellTimers.delete(petId); }
+}
+
 export function applyAgentPetReaction(petId: string, reaction: OpenPetsReaction): { readonly shown: boolean; readonly reason?: string } {
   debug("pet.agent", "reaction apply", { petId, reaction });
   setAgentDisplay(petId, { reaction });
@@ -145,6 +164,8 @@ export function closeAllAgentPets(): void {
     closeAgentPetIfOpen(petId);
   }
   clearAllAgentDisplayTimers();
+  for (const timer of farewellTimers.values()) clearTimeout(timer);
+  farewellTimers.clear();
 }
 
 export function refreshAgentPetContent(): void {

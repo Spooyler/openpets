@@ -3,7 +3,7 @@ import net from "node:net";
 
 import { Notification, shell, systemPreferences } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, setAgentSessionFocusTargetAccessor, showAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, scheduleFarewellClose, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, setAgentSessionFocusTargetAccessor, showAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
@@ -50,9 +50,15 @@ const leaseManager = new LeaseManager({
 const windowPetRegistry = new WindowPetRegistry({
   callbacks: {
     spawnPet: (_windowKey, petId) => { clearAgentPetDismissal(petId); showAgentPet(petId); },
-    closePet: (_windowKey, petId, _reason) => {
-      // Task 7 will swap the "session-ended" reason for scheduleFarewellClose(petId);
-      // until then every close reason tears the pet down immediately.
+    closePet: (_windowKey, petId, reason) => {
+      // Session ended but its window is still alive: say goodbye and close after
+      // a short grace period instead of tearing the pet down immediately. Every
+      // other close reason (window closed, user dismissed, rebind, pool disabled)
+      // still tears down right away.
+      if (reason === "session-ended") {
+        scheduleFarewellClose(petId);
+        return;
+      }
       clearAgentPetLeaseState(petId);
       clearConfinementState(petId);
     },

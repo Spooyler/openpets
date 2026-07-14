@@ -46,6 +46,7 @@ export const en = {
 
   // --- Pet notifications (main process) ---
   "pet.notify.sessionEnded": "Session ended in {label}",
+  "pet.notify.farewell": "All done here — bye!",
   "pet.notify.badgeLabel": "{count} sessions need attention",
   "pet.notify.empty": "All quiet",
   "pet.notify.ageNow": "now",
