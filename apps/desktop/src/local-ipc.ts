@@ -12,7 +12,7 @@ import { createStaleLeaseStatus, LeaseManager, type PetLease } from "./lease-man
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
 import { stat } from "node:fs/promises";
-import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, okResponse, parseIpcRequest, validateInstallLocalKind, validateInstallLocalPath, validateInstallPetId, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
+import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, okResponse, parseIpcRequest, validateCwd, validateInstallLocalKind, validateInstallLocalPath, validateInstallPetId, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
 import { installPet, installPetFromFolderWithResult, installPetFromZipFileWithResult } from "./pet-installation.js";
 import { clearConfinementState, setConfinementState } from "./confinement-manager.js";
 import { isConfinementSupported } from "./capabilities.js";
@@ -388,8 +388,9 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const requestedPetId = validateRequestedPetId(params.requestedPetId);
     const clientPid = typeof params.clientPid === "number" && params.clientPid > 0 ? params.clientPid : undefined;
     const sessionNonce = validateSessionNonce(params.sessionNonce);
+    const cwd = validateCwd(params.cwd);
     debug("ipc", "lease acquire requested", { requestId: request.id, requestedPetId, clientPid, sessionNonce });
-    const lease = leaseManager.acquire(requestedPetId, clientPid, sessionNonce);
+    const lease = leaseManager.acquire(requestedPetId, clientPid, sessionNonce, cwd);
     // A fresh explicit lease must always surface its pet, even when the pet
     // window was dismissed under an earlier lease (e.g. a mid-session adopt
     // joining an already-leased pet — the 0→1 show hook never fires then).

@@ -68,6 +68,7 @@ const behaviorTests = [
   ".test-dist/tests/preference-patch.test.js",
   ".test-dist/tests/plugin-agent-activity.test.js",
   ".test-dist/tests/pet-window-wayland-predicate.test.js",
+  ".test-dist/tests/lease-cwd.test.js",
 ];
 const contractTests = [
   ".test-dist/contracts/local-ipc-protocol.contract.js",

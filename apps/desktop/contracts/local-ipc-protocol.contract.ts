@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { errorResponse, maxIpcMessageBytes, parseIpcRequest, validateReaction, validateSayMessage, validateInstallLocalKind, validateInstallLocalPath } from "../src/local-ipc-protocol.js";
+import { errorResponse, maxIpcMessageBytes, parseIpcRequest, validateReaction, validateSayMessage, validateInstallLocalKind, validateInstallLocalPath, validateCwd } from "../src/local-ipc-protocol.js";
 
 const token = "test-token";
 const valid = {
@@ -54,5 +54,14 @@ const response = errorResponse("1", new Error("boom"));
 if (response.ok || response.error?.code !== "internal_error") {
   throw new Error("Failed to create structured error response.");
 }
+
+// --- validateCwd (optional, tolerant — mirrors validateSessionNonce) ---
+assert.equal(validateCwd(undefined), undefined, "cwd absent is fine");
+assert.equal(validateCwd(42), undefined, "non-string cwd ignored");
+assert.equal(validateCwd("  "), undefined, "blank cwd ignored");
+assert.equal(validateCwd("C:\\Users\\me\\fraud_project"), "C:\\Users\\me\\fraud_project");
+assert.equal(validateCwd("/home/me/api-fix"), "/home/me/api-fix");
+assert.equal(validateCwd("x".repeat(1025)), undefined, "cwd >1024 chars ignored");
+assert.equal(validateCwd("bad\u0000path"), undefined, "control chars rejected");
 
 console.log("Local IPC protocol validation passed.");

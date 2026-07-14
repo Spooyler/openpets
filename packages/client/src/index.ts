@@ -103,7 +103,7 @@ export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenP
       }
       return parsePetInstallResult(await sendDiscoveredRequest("pets.install-local", { path: trimmedPath, kind: installOptions.kind }, { ...options, responseTimeoutMs: options.responseTimeoutMs ?? 60_000 }));
     },
-    acquireLease: (leaseOptions) => sendDiscoveredRequest("lease.acquire", { requestedPetId: leaseOptions?.requestedPetId, clientPid: process.pid, sessionNonce: SESSION_NONCE }, options),
+    acquireLease: (leaseOptions) => sendDiscoveredRequest("lease.acquire", { requestedPetId: leaseOptions?.requestedPetId, clientPid: process.pid, sessionNonce: SESSION_NONCE, cwd: process.cwd() }, options),
     heartbeatLease: (leaseId) => sendDiscoveredRequest("lease.heartbeat", { leaseId }, options),
     releaseLease: (leaseId) => sendDiscoveredRequest("lease.release", { leaseId }, options),
     react: (reaction, reactOptions) => sendDiscoveredRequest("pet.react", { reaction: validateReaction(reaction), leaseId: reactOptions?.leaseId, clientPid: process.pid, clientAncestorPids: reactOptions?.clientAncestorPids }, options),

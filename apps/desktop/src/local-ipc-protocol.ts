@@ -128,6 +128,17 @@ export function validateSessionNonce(value: unknown): string | undefined {
   return trimmed;
 }
 
+/** Optional working-directory string on lease.acquire. Tolerant: returns
+ * undefined for anything malformed instead of throwing. */
+export function validateCwd(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 1024) return undefined;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f]/.test(trimmed)) return undefined;
+  return trimmed;
+}
+
 export function okResponse(id: string | null, result: unknown): OpenPetsIpcResponse {
   return { id, ok: true, result };
 }

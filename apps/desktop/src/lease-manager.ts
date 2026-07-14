@@ -22,6 +22,8 @@ export interface PetLease {
    * PID will carry a different nonce, preventing stale-lease reuse.
    */
   readonly sessionNonce?: string;
+  /** Client's working directory at acquire time, used to label notification rows. */
+  readonly cwd?: string;
   /** PID of the terminal emulator process hosting the client (resolved async). */
   readonly terminalOwnerPid?: number;
   /** Human-readable terminal app name, e.g. "Ghostty" or "Terminal". */
@@ -101,7 +103,7 @@ export class LeaseManager {
     this.#isPetEligible = options.isPetEligible;
   }
 
-  acquire(requestedPetId?: string, clientPid?: number, sessionNonce?: string): LeaseSnapshot {
+  acquire(requestedPetId?: string, clientPid?: number, sessionNonce?: string, cwd?: string): LeaseSnapshot {
     const now = this.#now();
 
     // FIX M1 + FIX 1: Idempotent per-clientPid lease reuse, guarded by sessionNonce.
@@ -154,6 +156,7 @@ export class LeaseManager {
       expiresAt: now + this.#ttlMs,
       clientPid,
       sessionNonce,
+      cwd,
     };
 
     const hadExplicitLease = lease.targetKind === "explicit" && this.countExplicitLeases(lease.actualPetId) > 0;
