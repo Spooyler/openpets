@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 
 import { app } from "electron";
 
-import { defaultPetScale, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetGravityEnabled, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
+import { defaultPetScale, markOnboardingCompleted, normalizeNotificationPolicy, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetGravityEnabled, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
 import { builtInPet } from "./built-in-pet.js";
 import type { Point } from "./display.js";
 import { isSupportedLocale, type LocalePreference } from "./i18n/catalog.js";
@@ -71,6 +71,10 @@ export interface OpenPetsStateV1 {
      * pet (default + agent). When false (default), no gravity is applied — the
      * Walkabout plugin's per-session physics path governs gravity instead. */
     readonly petGravityEnabled: boolean;
+    /** Per-notification-kind policy map. Keys are notification kinds (e.g. "waiting", "working", "idle").
+     * Values are modes: "persistent" (always show), "fade" (auto-resolve after delay), "off" (ignore).
+     * Defaults to {} (everything persistent). Future settings UI will allow per-kind configuration. */
+    readonly notificationPolicy: Record<string, "persistent" | "fade" | "off">;
   };
   readonly pets: {
     readonly installed: readonly InstalledPetState[];
@@ -605,6 +609,7 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
     petConfinementEnabled: normalizePetConfinementEnabled(value.petConfinementEnabled, defaultState.preferences.petConfinementEnabled),
     petCrossDisplayEnabled: normalizePetCrossDisplayEnabled(value.petCrossDisplayEnabled, defaultState.preferences.petCrossDisplayEnabled),
     petGravityEnabled: normalizePetGravityEnabled(value.petGravityEnabled, defaultState.preferences.petGravityEnabled),
+    notificationPolicy: normalizeNotificationPolicy(value.notificationPolicy),
   };
 }
 
@@ -683,6 +688,7 @@ function createDefaultState(): OpenPetsStateV1 {
       petConfinementEnabled: true,
       petCrossDisplayEnabled: false,
       petGravityEnabled: false,
+      notificationPolicy: {},
     },
     pets: {
       installed: [builtInPet],

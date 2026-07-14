@@ -22,7 +22,7 @@ import { warnPetFallback } from "./pet-fallback-notify.js";
 import { getEligiblePoolPetIds } from "./pet-pool.js";
 import { t } from "./i18n/index.js";
 import { WindowPetRegistry, windowKeyForIdentity } from "./window-pet-registry.js";
-import { sessionLabelFromCwd } from "./notification-store.js";
+import { NotificationStore, sessionLabelFromCwd } from "./notification-store.js";
 
 let ipcServer: net.Server | null = null;
 let ipcDiscovery: OpenPetsDiscoveryFile | null = null;
@@ -80,6 +80,9 @@ const windowPetRegistry = new WindowPetRegistry({
     for (const petId of pool) if (eligible.includes(petId)) return petId;
     return null;
   },
+  storeFactory: () => new NotificationStore({
+    policy: (kind) => getAppStateSnapshot().preferences.notificationPolicy?.[kind] ?? "persistent",
+  }),
 });
 
 export function getWindowPetRegistry(): WindowPetRegistry {

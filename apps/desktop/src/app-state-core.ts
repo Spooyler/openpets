@@ -68,3 +68,29 @@ export function normalizePetCrossDisplayEnabled(value: unknown, defaultValue = f
 export function normalizePetGravityEnabled(value: unknown, defaultValue = false): boolean {
   return typeof value === "boolean" ? value : defaultValue;
 }
+
+/**
+ * Normalize the notificationPolicy preference value.
+ * Filters to keep only valid mode strings ("persistent", "fade", "off") and string keys.
+ * Drops numeric keys (e.g. { 123: "fade" }). Returns {} for garbage input (non-object, null, number, array, etc).
+ */
+export function normalizeNotificationPolicy(value: unknown): Record<string, "persistent" | "fade" | "off"> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const validModes = new Set(["persistent", "fade", "off"]);
+  const result: Record<string, "persistent" | "fade" | "off"> = {};
+
+  for (const [key, mode] of Object.entries(value)) {
+    // Skip numeric keys (JavaScript converts { 123: "x" } to { "123": "x" }, so detect that)
+    const parsed = parseInt(key, 10);
+    if (!isNaN(parsed) && String(parsed) === key) {
+      continue;
+    }
+
+    if (typeof mode === "string" && validModes.has(mode)) {
+      result[key] = mode as "persistent" | "fade" | "off";
+    }
+  }
+
+  return result;
+}
