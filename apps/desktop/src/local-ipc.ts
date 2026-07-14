@@ -3,7 +3,7 @@ import net from "node:net";
 
 import { Notification, shell, systemPreferences } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, scheduleFarewellClose, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, setAgentSessionFocusTargetAccessor, showAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, scheduleFarewellClose, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, setAgentPetUserClosedAccessor, setAgentSessionFocusTargetAccessor, showAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
@@ -103,6 +103,16 @@ setAgentPetFocusTargetAccessor((petId) => windowPetRegistry.focusTargetForPet(pe
 // aggregate target — a pet's coverage can span multiple terminal windows.
 setAgentSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
 setDefaultSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
+// Menu "Close pet": route through the registry so the window's sessions drop
+// onto the default pet's flyout, same as any other registry-driven close.
+// Returns false for pets with no registry binding (e.g. plugin-spawned pets),
+// so the caller falls back to the legacy lease-based dismissal.
+setAgentPetUserClosedAccessor((petId) => {
+  const windowKey = windowPetRegistry.windowForPet(petId);
+  if (windowKey === null) return false;
+  windowPetRegistry.onUserClosedPet(windowKey);
+  return true;
+});
 
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
 const warnedFallbackPets = new Set<string>();

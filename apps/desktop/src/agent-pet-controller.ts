@@ -20,6 +20,12 @@ const transientAnimationTimers = new Map<string, NodeJS.Timeout>();
 const statusBadgeTimers = new Map<string, NodeJS.Timeout>();
 const dismissedAgentPets = new Set<string>();
 const farewellTimers = new Map<string, NodeJS.Timeout>();
+// Hidden = window hidden but binding/store still active (menu: Hide pet /
+// tray: Show hidden pets). Distinct from dismissedAgentPets, which tears the
+// pet down entirely. In-memory only: window keys and petIds are not stable
+// across app restarts, so hidden state does not persist (deliberate deviation
+// from a "persisted" spec line).
+const hiddenAgentPets = new Set<string>();
 
 // Injected by local-ipc.ts to avoid a module cycle (local-ipc already
 // imports from this file; importing local-ipc here would be circular).
@@ -45,6 +51,19 @@ let sessionFocusTargetAccessor: ((sessionKey: string) => { terminalOwnerPid: num
 export function setAgentSessionFocusTargetAccessor(accessor: (sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null): void {
   sessionFocusTargetAccessor = accessor;
 }
+
+// Injected by local-ipc.ts (which owns the window-pet-registry — the import
+// points the other way, so registration avoids a module cycle): attempts a
+// registry-aware user-close for this pet's window binding, dropping its
+// sessions onto the default pet's flyout. Returns true when a binding was
+// found and closed; false means the caller must fall back to the legacy
+// lease-based dismissal (e.g. a plugin-spawned or otherwise unbound pet).
+let userClosedPetAccessor: ((petId: string) => boolean) | null = null;
+
+export function setAgentPetUserClosedAccessor(accessor: (petId: string) => boolean): void {
+  userClosedPetAccessor = accessor;
+}
+
 const displayGenerations = new Map<string, number>();
 const notificationsOpen = new Set<string>();
 const busyStatusBadgeMs = 120_000;
@@ -56,16 +75,47 @@ export function showAgentPet(petId: string): boolean {
     return false;
   }
   const window = getOrCreateAgentPetWindow(petId);
-  info("pet.agent", "show requested", { petId, windowId: window.id, visible: window.isVisible(), minimized: window.isMinimized(), activeWindows: agentPetWindows.size });
+  info("pet.agent", "show requested", { petId, windowId: window.id, visible: window.isVisible(), minimized: window.isMinimized(), activeWindows: agentPetWindows.size, hidden: hiddenAgentPets.has(petId) });
   if (window.isMinimized()) window.restore();
   // Pull the pet into its terminal window bounds if confinement is active.
   repositionConfinedPet(petId, window);
-  window.showInactive();
+  // While the user has hidden this pet, keep its content updating in the
+  // background (the calls above and getOrCreateAgentPetWindow's render still
+  // run) but do not bring the window back on screen — only "Show hidden pets"
+  // does that.
+  if (!hiddenAgentPets.has(petId)) window.showInactive();
   const shownWin = agentPetWindows.get(petId);
   if (shownWin && !shownWin.isDestroyed()) {
     registerRoamingPet(petId, () => agentPetWindows.get(petId) ?? null);
   }
   return true;
+}
+
+/** Hide the pet window while keeping its binding/store active (menu: Hide pet). */
+export function hideAgentPet(petId: string): void {
+  const window = agentPetWindows.get(petId);
+  if (!window || window.isDestroyed()) return;
+  hiddenAgentPets.add(petId);
+  info("pet.agent", "hide requested", { petId, windowId: window.id });
+  window.hide();
+  // Tray labels are rendered eagerly; nudge it to show "Show hidden pets".
+  void import("./tray.js").then(({ refreshTrayMenu }) => refreshTrayMenu());
+}
+
+/** True when at least one agent pet is currently hidden (tray "Show hidden pets" visibility). */
+export function hasHiddenAgentPets(): boolean {
+  return hiddenAgentPets.size > 0;
+}
+
+/** Reveal every hidden agent pet (tray: Show hidden pets). */
+export function showHiddenAgentPets(): void {
+  const petIds = [...hiddenAgentPets];
+  hiddenAgentPets.clear();
+  for (const petId of petIds) {
+    const window = agentPetWindows.get(petId);
+    if (window && !window.isDestroyed()) window.showInactive();
+  }
+  info("pet.agent", "show hidden pets", { count: petIds.length });
 }
 
 /**
@@ -96,8 +146,12 @@ export function closeAgentPetIfOpen(petId: string): void {
   agentPetWindows.delete(petId);
   clearAgentDisplay(petId);
   unregisterRoamingPet(petId);
+  const wasHidden = hiddenAgentPets.delete(petId);
   window.setIgnoreMouseEvents(false);
   window.destroy();
+  if (wasHidden && hiddenAgentPets.size === 0) {
+    void import("./tray.js").then(({ refreshTrayMenu }) => refreshTrayMenu());
+  }
 }
 
 export function dismissAgentPetForActiveLease(petId: string): void {
@@ -197,6 +251,13 @@ export function reclampAgentPetWindows(): void {
   }
 }
 
+/** Toggle the notifications flyout (shared by the badge click and the right-click menu item). */
+export function toggleAgentPetNotifications(petId: string): void {
+  if (notificationsOpen.has(petId)) notificationsOpen.delete(petId);
+  else notificationsOpen.add(petId);
+  refreshAgentPetNotifications(petId);
+}
+
 function getAgentNotificationsView(petId: string): PetNotificationsView | null {
   const store = petStoreAccessor?.(petId) ?? null;
   if (!store) return null;
@@ -268,15 +329,18 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     position: { x: initial.x, y: initial.y },
     display,
     badge,
-    onCloseRequested: () => dismissAgentPetForActiveLease(petId),
+    onCloseRequested: () => {
+      const handled = userClosedPetAccessor?.(petId) ?? false;
+      if (!handled) dismissAgentPetForActiveLease(petId);
+    },
+    onHideRequested: () => hideAgentPet(petId),
+    onToggleNotifications: () => toggleAgentPetNotifications(petId),
     onBubbleDismissed: (token) => handleBubbleDismissed(petId, token),
     onFocusSessionWindow: focusSessionTerminal,
     onPetEvent: async (name, payload) => {
       if (name === "pet:doubleClicked") focusSessionTerminal();
       if (name === "pet:notificationsToggle") {
-        if (notificationsOpen.has(petId)) notificationsOpen.delete(petId);
-        else notificationsOpen.add(petId);
-        refreshAgentPetNotifications(petId);
+        toggleAgentPetNotifications(petId);
       }
       if (name === "pet:notificationFocus") {
         const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");

@@ -19,6 +19,7 @@ export const en = {
   "tray.plugins": "Plugins...",
   "tray.settings": "Settings...",
   "tray.openLogsFolder": "Open Logs Folder...",
+  "tray.showHiddenPets": "Show hidden pets",
   "tray.quit": "Quit OpenPets",
 
   // --- Shared ---
@@ -38,6 +39,7 @@ export const en = {
   "pet.status.hi": "Hi",
   "pet.menu.hidePet": "Hide pet",
   "pet.menu.closePet": "Close pet",
+  "pet.menu.scurry": "Scurry to edge",
   "pet.menu.openControlCenter": "Open Control Center",
   "pet.menu.focusSessionWindow": "Focus session window",
   "pet.menu.focusSessionWindowNoA11y": "Focus session window (needs Accessibility)",

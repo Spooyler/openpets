@@ -63,6 +63,7 @@ const behaviorTests = [
   ".test-dist/tests/pet-motion-engine-hidden-move.test.js",
   ".test-dist/tests/pet-motion-engine-nan-guard.test.js",
   ".test-dist/tests/pet-roaming-controller.test.js",
+  ".test-dist/tests/scurry-target.test.js",
   ".test-dist/tests/display.test.js",
   ".test-dist/tests/renderer-toggles.test.js",
   ".test-dist/tests/preference-patch.test.js",

@@ -1,5 +1,6 @@
 import { Menu, shell, Tray, type MenuItemConstructorOptions } from "electron";
 
+import { hasHiddenAgentPets, showHiddenAgentPets } from "./agent-pet-controller.js";
 import { getAppStateSnapshot } from "./app-state.js";
 import { createTrayIcon } from "./assets.js";
 import { hideDefaultPet, isDefaultPetVisible, setDefaultPetPaused, showDefaultPet } from "./default-pet-controller.js";
@@ -58,6 +59,7 @@ export function refreshTrayMenu(): void {
         refreshTrayMenu();
       },
     },
+    ...createShowHiddenPetsMenuItems(),
     {
       label: shellState.paused ? t("tray.resumeAllPets") : t("tray.pauseAllPets"),
       click: () => {
@@ -106,6 +108,19 @@ export function refreshTrayMenu(): void {
   ]);
 
   tray.setContextMenu(menu);
+}
+
+function createShowHiddenPetsMenuItems(): MenuItemConstructorOptions[] {
+  if (!hasHiddenAgentPets()) return [];
+  return [
+    {
+      label: t("tray.showHiddenPets"),
+      click: () => {
+        showHiddenAgentPets();
+        refreshTrayMenu();
+      },
+    },
+  ];
 }
 
 function createUpdateMenuItems(): MenuItemConstructorOptions[] {

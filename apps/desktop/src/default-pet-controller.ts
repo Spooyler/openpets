@@ -182,6 +182,12 @@ function getDefaultNotificationsView(): PetNotificationsView | null {
   return buildNotificationsView(entries, defaultNotificationsOpen, Date.now(), t as (key: string, vars?: Record<string, string | number>) => string);
 }
 
+/** Toggle the notifications flyout (shared by the badge click and the right-click menu item). */
+export function toggleDefaultPetNotifications(): void {
+  defaultNotificationsOpen = !defaultNotificationsOpen;
+  refreshDefaultPetNotifications();
+}
+
 export function refreshDefaultPetNotifications(): void {
   if (!defaultPetWindow || defaultPetWindow.isDestroyed()) return;
   const view = getDefaultNotificationsView();
@@ -356,8 +362,7 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
     onPetEvent: async (name, payload) => {
       if (name === "pet:doubleClicked") focusSessionTerminalFromDefaultPet("double-click");
       if (name === "pet:notificationsToggle") {
-        defaultNotificationsOpen = !defaultNotificationsOpen;
-        refreshDefaultPetNotifications();
+        toggleDefaultPetNotifications();
       }
       if (name === "pet:notificationFocus") {
         const sessionKey = String((payload as Record<string, unknown>).sessionKey ?? "");
@@ -393,6 +398,7 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
     },
     onFocusSessionWindow: () => focusSessionTerminalFromDefaultPet("context-menu"),
     hasFocusableSessionTerminal,
+    onToggleNotifications: toggleDefaultPetNotifications,
   }, getCurrentDismissToken());
   const windowId = defaultPetWindow.id;
   info("pet.default", "created", { windowId, position, paused, petId: getAppStateSnapshot().preferences.defaultPetId });

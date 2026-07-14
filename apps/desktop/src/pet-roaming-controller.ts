@@ -15,7 +15,7 @@
 
 import { createRequire } from "node:module";
 
-import { motionSetPhysics, motionStop, registerPet, unregisterPet, type WindowAccessor } from "./pet-motion-engine.js";
+import { motionMoveTo, motionSetPhysics, motionStop, registerPet, unregisterPet, type WindowAccessor } from "./pet-motion-engine.js";
 
 // createRequire lets us lazy-load app-state (which imports Electron) only at
 // runtime — not at module-load time — so unit tests can import this module
@@ -92,6 +92,36 @@ export function applyRoamingToPet(petId: string, accessor: WindowAccessor): void
  */
 export function stopRoamingForPet(petId: string): void {
   motionStop(petId);
+}
+
+/**
+ * Pure edge-target math for the "Scurry to edge" menu action. Compares the
+ * window's horizontal center against the work area's horizontal midpoint:
+ * left of midpoint walks to the left edge, right of (or exactly at) midpoint
+ * walks to the right edge. The y coordinate is left unchanged.
+ */
+export function computeScurryTarget(
+  bounds: { x: number; y: number; width: number; height: number },
+  workArea: { x: number; y: number; width: number; height: number },
+): { x: number; y: number } {
+  const centerX = bounds.x + bounds.width / 2;
+  const midpoint = workArea.x + workArea.width / 2;
+  const x = centerX < midpoint ? workArea.x : workArea.x + workArea.width - bounds.width;
+  return { x, y: bounds.y };
+}
+
+/** Send every visible pet walking to the nearest side edge of its display. */
+export function scurryAllPetsToEdge(): void {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { screen } = require("electron") as typeof import("electron");
+  for (const [petId, accessor] of livePets) {
+    const window = accessor();
+    if (!window || window.isDestroyed() || !window.isVisible()) continue;
+    const bounds = window.getBounds();
+    const workArea = screen.getDisplayMatching(bounds).workArea;
+    const target = computeScurryTarget(bounds, workArea);
+    void motionMoveTo(petId, accessor, target, { durationMs: 900, easing: "easeOut" });
+  }
 }
 
 /** ONLY call from unit tests. Clears the livePets registry (for test isolation). */

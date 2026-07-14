@@ -20,6 +20,7 @@ import { isFocusActionAvailable } from "./capabilities.js";
 import { computeEffectiveWaylandBackend, shouldPetWindowBeFocusable } from "./wayland-backend.js";
 import type { PetNotificationsView } from "./notification-view.js";
 import { createNotificationsMarkup, notificationsCacheKey } from "./notification-view.js";
+import { scurryAllPetsToEdge } from "./pet-roaming-controller.js";
 
 export interface PetWindowInteractionHooks {
   readonly onBubbleDismissed?: (dismissToken: string) => void;
@@ -47,6 +48,8 @@ export interface DefaultPetWindowOptions extends PetWindowInteractionHooks {
   readonly onFocusSessionWindow?: () => void;
   /** Whether a session terminal is currently available to focus. */
   readonly hasFocusableSessionTerminal?: () => boolean;
+  /** Toggles the notifications flyout (menu mirrors the badge-click behavior). */
+  readonly onToggleNotifications?: () => void;
 }
 
 export interface AgentPetWindowOptions extends PetWindowInteractionHooks {
@@ -58,6 +61,13 @@ export interface AgentPetWindowOptions extends PetWindowInteractionHooks {
   readonly badge: PetStatusBadgeReaction | null;
   readonly notifications?: PetNotificationsView | null;
   readonly onCloseRequested: () => void;
+  /**
+   * Hide the pet window while keeping its binding/store active (Show hidden
+   * pets brings it back). Omitted for plugin-spawned pets, which manage their
+   * own visibility via the plugin SDK — the menu skips the Hide item when
+   * this is not provided.
+   */
+  readonly onHideRequested?: () => void;
   /** Skip the right-click plugin command section (plugin-spawned pets). */
   readonly plainContextMenu?: boolean;
   /**
@@ -65,6 +75,8 @@ export interface AgentPetWindowOptions extends PetWindowInteractionHooks {
    * When provided, a "Focus session window" item is added to the right-click menu.
    */
   readonly onFocusSessionWindow?: () => void;
+  /** Toggles the notifications flyout (menu mirrors the badge-click behavior). */
+  readonly onToggleNotifications?: () => void;
 }
 
 /** Plugin-arbiter bubble content for one pet surface (both slots). */
@@ -151,7 +163,7 @@ export function createDefaultPetWindow(options: DefaultPetWindowOptions, dismiss
   info("pet.window", "default window create", { windowId: window.id, position: options.position, paused: options.paused, hasDisplay: Boolean(options.display), badge: options.badge });
   installMousePassthroughAndDrag(window, options);
   installMotionStatePublisher(window);
-  installPetContextMenu(window, { label: t("pet.menu.hidePet"), click: options.onHideRequested, defaultPet: true, focusSessionWindow: options.onFocusSessionWindow, hasFocusableSessionTerminal: options.hasFocusableSessionTerminal });
+  installPetContextMenu(window, { label: t("pet.menu.hidePet"), click: options.onHideRequested, defaultPet: true, focusSessionWindow: options.onFocusSessionWindow, hasFocusableSessionTerminal: options.hasFocusableSessionTerminal, onToggleNotifications: options.onToggleNotifications });
 
   const savePosition = debounce(() => {
     if (window.isDestroyed()) {
@@ -178,7 +190,7 @@ export function createAgentPetWindow(options: AgentPetWindowOptions, dismissToke
   info("pet.window", "agent window create", { windowId: window.id, petId: options.petId, displayName: options.displayName, position: options.position, hasDisplay: Boolean(options.display), badge: options.badge });
   installMousePassthroughAndDrag(window, options);
   installMotionStatePublisher(window);
-  installPetContextMenu(window, { label: t("pet.menu.closePet"), click: options.onCloseRequested, focusSessionWindow: options.onFocusSessionWindow });
+  installPetContextMenu(window, { label: t("pet.menu.closePet"), click: options.onCloseRequested, focusSessionWindow: options.onFocusSessionWindow, onToggleNotifications: options.onToggleNotifications, onHideRequested: options.onHideRequested });
   void loadExplicitPetContent(window, options.petId, options.display, options.badge, dismissToken, options.scale);
   return window;
 }
@@ -194,7 +206,18 @@ export function recoverPetMouseInterop(window: BrowserWindow, reason: string): v
   debug("pet.window", "mouse interop recovery skipped", { windowId: window.id, reason, skippedReason: "unregistered-window" });
 }
 
-function installPetContextMenu(window: BrowserWindow, action: { readonly label: string; readonly click: () => void; readonly defaultPet?: boolean; readonly focusSessionWindow?: () => void; readonly hasFocusableSessionTerminal?: () => boolean }): void {
+interface PetContextMenuAction {
+  readonly label: string;
+  readonly click: () => void;
+  readonly defaultPet?: boolean;
+  readonly focusSessionWindow?: () => void;
+  readonly hasFocusableSessionTerminal?: () => boolean;
+  readonly onToggleNotifications?: () => void;
+  /** Agent pets only: hides the window while keeping its binding/store alive. */
+  readonly onHideRequested?: () => void;
+}
+
+function installPetContextMenu(window: BrowserWindow, action: PetContextMenuAction): void {
   const webContents = window.webContents;
   const handleContextMenu = (event: Electron.Event): void => {
     event.preventDefault();
@@ -213,7 +236,7 @@ function installPetContextMenu(window: BrowserWindow, action: { readonly label: 
   });
 }
 
-async function buildPetContextMenuTemplate(action: { readonly label: string; readonly click: () => void; readonly defaultPet?: boolean; readonly focusSessionWindow?: () => void; readonly hasFocusableSessionTerminal?: () => boolean }): Promise<Electron.MenuItemConstructorOptions[]> {
+async function buildPetContextMenuTemplate(action: PetContextMenuAction): Promise<Electron.MenuItemConstructorOptions[]> {
   if (!action.defaultPet) {
     const template: Electron.MenuItemConstructorOptions[] = [];
     if (action.focusSessionWindow) {
@@ -223,6 +246,9 @@ async function buildPetContextMenuTemplate(action: { readonly label: string; rea
         : t("pet.menu.focusSessionWindowNoA11y");
       template.push({ label: focusLabel, click: action.focusSessionWindow }, { type: "separator" });
     }
+    if (action.onToggleNotifications) template.push({ label: t("pet.menu.notifications"), click: action.onToggleNotifications });
+    template.push({ label: t("pet.menu.scurry"), click: () => scurryAllPetsToEdge() });
+    if (action.onHideRequested) template.push({ label: t("pet.menu.hidePet"), click: action.onHideRequested });
     template.push({ label: action.label, click: action.click });
     return template;
   }
@@ -255,7 +281,9 @@ async function buildPetContextMenuTemplate(action: { readonly label: string; rea
   }
   if (topLevel.length > 0) template.push(...topLevel.slice(0, 8), { type: "separator" });
   if (plugins.size > 0) template.push(...[...plugins.values()].map((plugin) => ({ label: plugin.name, submenu: plugin.commands })), { type: "separator" });
-  template.push({ label: t("pet.menu.openControlCenter"), click: () => { import("./windows.js").then(({ openControlCenterWindow }) => openControlCenterWindow()).catch((error) => logError("pet.window", "open control center failed", error)); } }, { label: action.label, click: action.click });
+  template.push({ label: t("pet.menu.openControlCenter"), click: () => { import("./windows.js").then(({ openControlCenterWindow }) => openControlCenterWindow()).catch((error) => logError("pet.window", "open control center failed", error)); } });
+  if (action.onToggleNotifications) template.push({ label: t("pet.menu.notifications"), click: action.onToggleNotifications });
+  template.push({ label: t("pet.menu.scurry"), click: () => scurryAllPetsToEdge() }, { label: action.label, click: action.click });
   return template;
 }
 
