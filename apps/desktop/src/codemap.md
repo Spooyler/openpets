@@ -10,7 +10,7 @@ Core TypeScript source for the OpenPets desktop application. Organized into: lif
 - **Protocol-First IPC**: Versioned JSON protocol over TCP/Unix sockets with token auth
 - **Defensive I/O**: All file operations use temp+rename for atomicity, path traversal validation, symlink checks
 - **Validation at Boundaries**: Catalog, ZIP entries, pet metadata, and IPC params all strictly validated
-- **Lease Pattern**: Agent pets use expiring leases (15s TTL) with heartbeats; default pet is persistent
+- **Lease Pattern**: Agent pets use expiring leases (15s TTL) with heartbeats; default pet is persistent; pet lifecycle is driven by window-keyed bindings (window-pet-registry.ts) rather than lease counts
 - **Sandboxed Renderers**: Control Center loads the Vite React/Tailwind bundle through a hardened BrowserWindow and narrow preload bridge; transparent pet windows and plugin SDK host windows stay separate
 - **Structured Logging**: Scoped logging (app, ipc, lease, pet.*, state, tray, ui) with log rotation and redaction
 - **Reaction Animation Mapping**: User-configurable mapping from reaction types to sprite animation states
@@ -40,10 +40,14 @@ local-ipc.ts → parseIpcRequest() → handleRequest()
 ├── hello/status/pets.list/pets.install
 └── lease.acquire/heartbeat/release
     └── lease-manager.ts
-        ├── resolveTarget() (default vs explicit pet)
-        ├── onFirstExplicitLease → agent-pet-controller.showAgentPet()
-        └── onLastExplicitLease → agent-pet-controller.closeAgentPetIfOpen()
+        ├── resolveTarget() (default pet for all non-explicit acquires)
+        ├── onExpired → notifyLeaseGone() (internal release teardown)
         └── Logging via logger.ts (ipc, lease scopes)
+    └── window-pet-registry.ts (window-keyed pet lifecycle)
+        ├── onSessionIdentified() after terminal identity resolution
+        ├── onSessionGone() on release/expiry/PID-death
+        ├── Per-binding NotificationStore for badge/flyout
+        └── Pool draw at identity time (per-window, not per-session)
 ```
 
 **Pet Display Flow**:
@@ -170,7 +174,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `lifecycle.ts`: App event handlers (quit, window-all-closed, second-instance) with logging; stops plugin service, IPC, and pet windows on quit
 - `state.ts`: Simple shell pause state
 - `app-state.ts`: Persistent JSON state with V1 schema, atomic writes, reaction animation overrides
-- `app-state-core.ts`: Pet scale options, onboarding normalization
+- `app-state-core.ts`: Pet scale options, onboarding normalization, notification policy normalization
 - `logger.ts`: Structured logging with scopes (app, ipc, lease, pet.default, pet.agent, pet.window, state, tray, ui), log rotation, redaction
 
 **UI**:
@@ -185,7 +189,10 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 **Pets**:
 - `pet-window.ts`: Window creation (transparent, frameless, always-on-top), HTML/CSS generation, sprite animation states, speech bubbles, status badges, transient displays
 - `default-pet-controller.ts`: Default pet visibility, position persistence, transient reactions, status badges, logging
-- `agent-pet-controller.ts`: Lease-triggered pet windows, dismissal tracking, transient displays, status badges, logging
+- `agent-pet-controller.ts`: Registry-triggered pet windows, dismissal/hide tracking, farewell close, notification flyout toggle, transient displays, status badges, logging
+- `window-pet-registry.ts`: Window-keyed pet binding registry (one pet per OS window), per-binding notification stores, pool draw at identity time, session lifecycle events, focus-target resolution
+- `notification-store.ts`: Pure per-pet notification state (one row per session, upsert on record, policy-driven persistence/fade/off, oldest-unresolved ordering)
+- `notification-view.ts`: Pure notification view builders (badge count, flyout markup, age text, HTML escaping, 12-row cap)
 - `pet-motion-engine.ts`: Interpolated movement vector/tick engine for plugin-driven pet motion and target-following behavior
 - `built-in-pet.ts`: Built-in pet constant
 - `reaction-messages.ts`: Message pools for each reaction type
