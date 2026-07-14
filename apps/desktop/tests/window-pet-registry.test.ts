@@ -80,4 +80,41 @@ registry.onSessionGone("400:n4");
 assert.deepEqual(calls.map((c) => c.fn), ["close"]);
 assert.equal((calls[0]!.args as string[])[2], "window-dead");
 
+// Regression: identity change (stale window detach) must keep the session's
+// notification row following its coverage — not stranded in defaultStore.
+{
+  const calls2: Call[] = [];
+  const cb2 = {
+    spawnPet: (...args: unknown[]) => calls2.push({ fn: "spawn", args }),
+    closePet: (...args: unknown[]) => calls2.push({ fn: "close", args }),
+    rebindPet: (...args: unknown[]) => calls2.push({ fn: "rebind", args }),
+    sessionEndedNotice: (...args: unknown[]) => calls2.push({ fn: "notice", args }),
+  };
+  const registry2 = new WindowPetRegistry({
+    callbacks: cb2,
+    now: () => now,
+    isPidAlive: () => alive,
+    drawPoolPet: () => null,
+  });
+
+  const s5 = { sessionKey: "500:n5", leaseId: "L5", terminalOwnerPid: 700, terminalWindowId: 77, label: "fraud_project" };
+  assert.equal(registry2.onSessionIdentified(s5, "cat", false), "cat");
+  registry2.storeForSession("500:n5").record({ sessionKey: "500:n5", windowKey: "w:77", kind: "waiting", message: "needs permission", label: "fraud_project" });
+  assert.equal(registry2.storeForPet("cat")?.unresolvedCount(), 1);
+
+  // Same sessionKey re-identified with a different terminalWindowId → new windowKey.
+  const s5moved = { ...s5, terminalWindowId: 78 };
+  assert.equal(registry2.onSessionIdentified(s5moved, "cat", false), "cat");
+
+  assert.equal(registry2.petForWindow("w:78"), "cat", "pet moved to the new window key");
+  assert.equal(registry2.petForWindow("w:77"), null, "old window key unbound");
+  const movedRows = registry2.storeForPet("cat")?.rows() ?? [];
+  assert.ok(
+    movedRows.some((row) => row.sessionKey === "500:n5"),
+    "notification row followed the session into the new binding store",
+  );
+  const strandedRows = registry2.defaultStore.rows().filter((row) => row.sessionKey === "500:n5");
+  assert.deepEqual(strandedRows, [], "no row stranded in defaultStore for the migrated session");
+}
+
 console.log("Window pet registry passed.");

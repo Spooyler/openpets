@@ -118,7 +118,10 @@ export class WindowPetRegistry {
       return;
     }
     const windowKey = this.#sessionWindows.get(sessionKey);
-    if (windowKey === undefined) return;
+    if (windowKey === undefined) {
+      this.defaultStore.removeSession(sessionKey);
+      return;
+    }
     this.#sessionWindows.delete(sessionKey);
     const binding = this.#bindings.get(windowKey);
     if (!binding) return;
@@ -302,7 +305,9 @@ export class WindowPetRegistry {
     this.#sessionWindows.delete(sessionKey);
     const binding = this.#bindings.get(previous);
     if (!binding) return;
+    const tracked = binding.sessions.get(sessionKey);
     binding.sessions.delete(sessionKey);
+    if (tracked) this.#defaultSessions.set(sessionKey, tracked);
     const entry = binding.store.removeSession(sessionKey);
     if (entry) this.defaultStore.adoptEntries([entry]);
     if (binding.sessions.size === 0) {
