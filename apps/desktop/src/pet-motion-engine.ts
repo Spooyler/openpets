@@ -93,6 +93,8 @@ type MotionState = {
   /** Sub-pixel fractional accumulator to prevent rounding-induced stall. */
   fracX: number;
   fracY: number;
+  /** When true, the tick loop skips position clamping (set by scurry, cleared on drag or new clamped move). */
+  skipClamp: boolean;
 };
 
 const motionStates = new Map<string, { accessor: WindowAccessor; state: MotionState }>();
@@ -125,7 +127,7 @@ function tickAll(): void {
 function stateFor(petHandleId: string, accessor: WindowAccessor): MotionState {
   let entry = motionStates.get(petHandleId);
   if (!entry) {
-    entry = { accessor, state: { follow: null, physics: null, loop: null, moveGeneration: 0, moveTarget: null, fracX: 0, fracY: 0 } };
+    entry = { accessor, state: { follow: null, physics: null, loop: null, moveGeneration: 0, moveTarget: null, fracX: 0, fracY: 0, skipClamp: false } };
     motionStates.set(petHandleId, entry);
   }
   entry.accessor = accessor;
@@ -160,21 +162,22 @@ export function unregisterPet(petHandleId: string): void {
   }
 }
 
-export async function motionMoveTo(petHandleId: string, accessor: WindowAccessor, target: Point, opts: { durationMs?: number; easing?: string } = {}): Promise<void> {
+export async function motionMoveTo(petHandleId: string, accessor: WindowAccessor, target: Point, opts: { durationMs?: number; easing?: string; skipClamp?: boolean } = {}): Promise<void> {
   const state = stateFor(petHandleId, accessor);
   const window = accessor();
   if (!window || window.isDestroyed()) return;
   const generation = ++state.moveGeneration;
   const durationMs = Math.min(Math.max(opts.durationMs ?? 700, 100), 10_000);
   const easing = opts.easing ?? "ease-in-out";
+  state.skipClamp = opts.skipClamp ?? false;
 
   // If a continuous loop is running (follow or physics), store the target
   // in MotionState and let syncLoop handle interpolation. This avoids the
   // competing-writer race that causes jitter.
   if (state.follow !== null || state.physics !== null) {
     const [startX, startY] = window.getPosition();
-    const clamped = clampPosition(petHandleId, target);
-    state.moveTarget = { x: clamped.x, y: clamped.y, startX, startY, elapsed: 0, durationMs, easing };
+    const resolved = opts.skipClamp ? { x: Math.round(target.x), y: Math.round(target.y) } : clampPosition(petHandleId, target);
+    state.moveTarget = { x: resolved.x, y: resolved.y, startX, startY, elapsed: 0, durationMs, easing };
     // Return a promise that resolves when the generation changes (move completes or is superseded).
     return new Promise<void>((resolve) => {
       const check = () => {
@@ -187,7 +190,7 @@ export async function motionMoveTo(petHandleId: string, accessor: WindowAccessor
 
   // No continuous loop — drive it ourselves (legacy step loop).
   const [startX, startY] = window.getPosition();
-  const clamped = clampPosition(petHandleId, target);
+  const clamped = opts.skipClamp ? { x: Math.round(target.x), y: Math.round(target.y) } : clampPosition(petHandleId, target);
   const steps = Math.max(4, Math.round(durationMs / 33));
   for (let step = 1; step <= steps; step += 1) {
     const live = accessor();
@@ -222,6 +225,7 @@ export function motionStop(petHandleId: string): void {
   entry.state.moveTarget = null;
   entry.state.fracX = 0;
   entry.state.fracY = 0;
+  entry.state.skipClamp = false;
   if (entry.state.loop) { clearInterval(entry.state.loop); entry.state.loop = null; }
 }
 
@@ -333,9 +337,9 @@ function tickPet(petHandleId: string, accessor: WindowAccessor, state: MotionSta
   state.fracY = nextYFull - nextY;
 
   if (nextX !== x || nextY !== y) {
-    const clamped = clampPosition(petHandleId, { x: nextX, y: nextY });
-    if (!Number.isFinite(clamped.x) || !Number.isFinite(clamped.y)) return;  // skip write when clamp produces NaN (e.g. from NaN workArea on monitor disconnect)
-    window.setPosition(clamped.x, clamped.y, false);
+    const final = state.skipClamp ? { x: nextX, y: nextY } : clampPosition(petHandleId, { x: nextX, y: nextY });
+    if (!Number.isFinite(final.x) || !Number.isFinite(final.y)) return;
+    window.setPosition(final.x, final.y, false);
   }
 }
 

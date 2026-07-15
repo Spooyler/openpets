@@ -138,7 +138,7 @@ export function scurryAllPetsToEdge(): void {
     const bounds = window.getBounds();
     const workArea = screen.getDisplayMatching(bounds).workArea;
     const target = computeScurryTarget(bounds, workArea, spriteWidth);
-    void motionMoveTo(petId, accessor, target, { durationMs: 900, easing: "easeOut" });
+    void motionMoveTo(petId, accessor, target, { durationMs: 900, easing: "easeOut", skipClamp: true });
   }
 }
 
