@@ -21,7 +21,6 @@ const permissions = [
   "commands",
   "status",
   "auth",
-  "secrets",
   "ui:toast",
 ];
 
@@ -46,6 +45,17 @@ const commandIds = [...h.calls.commands.keys()];
 assert.ok(commandIds.includes("spotify-login"), "registers Spotify login command");
 assert.ok(commandIds.includes("spotify-show-lyrics"), "registers lyrics command");
 assert.ok(h.calls.schedules.has("spotify-poll"), "schedules the polling loop");
+
+const login = h.calls.commands.get("spotify-login");
+assert.ok(login, "exposes OAuth login through a command");
+
+h.auth.mock({ accessToken: "access-token", expiresAt: Date.now() + 60_000 });
+await login.handler();
+assert.ok(h.calls.speak.includes("Successfully connected to Spotify!"), "executes Spotify login successfully");
+
+h.auth.mock(null);
+await login.handler();
+assert.ok(h.calls.speak.some((message) => message.startsWith("Spotify login failed:")), "executes Spotify login failure handling");
 
 h.expectNoErrors();
 await h.stop();

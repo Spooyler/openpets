@@ -18,6 +18,15 @@ try {
   ));
 }
 
+const realDateNow = Date.now;
+let activeClock;
+function createHarness(...args) {
+  const harness = createTestHarness(...args);
+  activeClock = harness.clock;
+  return harness;
+}
+Date.now = () => activeClock?.now() ?? realDateNow();
+
 assert.equal(paceDelayMs("gentle"), 60 * 60_000);
 assert.equal(paceDelayMs("normal"), 45 * 60_000);
 assert.equal(paceDelayMs("often"), 30 * 60_000);
@@ -47,7 +56,7 @@ const LOCALES = {
 
 // 1) start schedules the next reminder.
 {
-  const h = createTestHarness(register, {
+  const h = createHarness(register, {
     permissions: PERMISSIONS,
     config: { pace: "often" },
     locales: LOCALES,
@@ -61,7 +70,7 @@ const LOCALES = {
 
 // 2) reminder alert uses Done/Later and no sound without customSound.
 {
-  const h = createTestHarness(register, {
+  const h = createHarness(register, {
     permissions: PERMISSIONS,
     config: { pace: "often" },
     locales: LOCALES,
@@ -92,7 +101,7 @@ const LOCALES = {
 // 2b) stale due times reset on launch instead of firing immediately.
 {
   const nowMs = 2_500_000;
-  const h = createTestHarness(register, {
+  const h = createHarness(register, {
     permissions: PERMISSIONS,
     config: { pace: "often" },
     locales: LOCALES,
@@ -106,9 +115,32 @@ const LOCALES = {
   h.expectNoErrors();
 }
 
+// 2c) A callback queued before startup reconciliation cannot deliver early.
+{
+  const h = createHarness(register, {
+    permissions: PERMISSIONS,
+    config: { pace: "often" },
+    locales: LOCALES,
+    nowMs: 2_750_000,
+  });
+  const handlers = [];
+  const once = h.ctx.schedule.once;
+  h.ctx.schedule.once = async (id, delayMs, handler) => {
+    handlers.push(handler);
+    return once(id, delayMs, handler);
+  };
+  await h.start();
+  const staleHandler = handlers[0];
+  await h.clock.advance("1s");
+  await h.start();
+  await staleHandler();
+  assert.equal(h.calls.alerts.length, 0, "stale scheduled callback must not show an alert");
+  h.expectNoErrors();
+}
+
 // 3) Done records a drink and does not create duplicate success reactions.
 {
-  const h = createTestHarness(register, {
+  const h = createHarness(register, {
     permissions: PERMISSIONS,
     config: { pace: "normal" },
     locales: LOCALES,
@@ -126,7 +158,7 @@ const LOCALES = {
 
 // 4) Later snoozes for 15 minutes.
 {
-  const h = createTestHarness(register, {
+  const h = createHarness(register, {
     permissions: PERMISSIONS,
     config: { pace: "often" },
     locales: LOCALES,
@@ -143,7 +175,7 @@ const LOCALES = {
 
 // 5) pause-today stores pausedUntil and speaks.
 {
-  const h = createTestHarness(register, {
+  const h = createHarness(register, {
     permissions: PERMISSIONS,
     locales: LOCALES,
   });
@@ -156,7 +188,7 @@ const LOCALES = {
 
 // 6) drink-now command speaks localized done and schedules from now.
 {
-  const h = createTestHarness(register, {
+  const h = createHarness(register, {
     permissions: PERMISSIONS,
     config: { pace: "gentle" },
     locales: LOCALES,
@@ -171,7 +203,7 @@ const LOCALES = {
 
 // 7) custom sound only plays when configured.
 {
-  const h = createTestHarness(register, {
+  const h = createHarness(register, {
     permissions: PERMISSIONS,
     config: { pace: "often", customSound: "chime" },
     locales: LOCALES,
@@ -185,7 +217,7 @@ const LOCALES = {
 
 // 8) test-reminder command previews the water alert with the droplet icon.
 {
-  const h = createTestHarness(register, {
+  const h = createHarness(register, {
     permissions: PERMISSIONS,
     config: { pace: "normal" },
     locales: LOCALES,
@@ -210,4 +242,5 @@ const LOCALES = {
   h.expectNoErrors();
 }
 
+Date.now = realDateNow;
 console.log("openpets.water-reminder: all checks passed.");

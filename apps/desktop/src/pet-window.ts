@@ -271,6 +271,9 @@ async function buildPetContextMenuTemplate(action: PetContextMenuAction): Promis
     plugins.set(item.pluginId, group);
   }
   const template: Electron.MenuItemConstructorOptions[] = [];
+  const openControlCenter = (route: "dashboard" | "plugins"): void => {
+    import("./windows.js").then(({ openControlCenterWindow }) => openControlCenterWindow(route)).catch((error) => logError("pet.window", "open control center failed", error));
+  };
   // Session focus first: only offered while a session terminal is resolvable.
   if (action.focusSessionWindow && action.hasFocusableSessionTerminal?.() !== false) {
     const a11yReady = isFocusActionAvailable();
@@ -281,7 +284,10 @@ async function buildPetContextMenuTemplate(action: PetContextMenuAction): Promis
   }
   if (topLevel.length > 0) template.push(...topLevel.slice(0, 8), { type: "separator" });
   if (plugins.size > 0) template.push(...[...plugins.values()].map((plugin) => ({ label: plugin.name, submenu: plugin.commands })), { type: "separator" });
-  template.push({ label: t("pet.menu.openControlCenter"), click: () => { import("./windows.js").then(({ openControlCenterWindow }) => openControlCenterWindow()).catch((error) => logError("pet.window", "open control center failed", error)); } });
+  template.push(
+    { label: t("tray.plugins"), click: () => openControlCenter("plugins") },
+    { label: t("pet.menu.openControlCenter"), click: () => openControlCenter("dashboard") },
+  );
   if (action.onToggleNotifications) template.push({ label: t("pet.menu.notifications"), click: action.onToggleNotifications });
   template.push({ label: t("pet.menu.scurry"), click: () => scurryAllPetsToEdge() }, { label: action.label, click: action.click });
   return template;

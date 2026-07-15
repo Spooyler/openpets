@@ -18,7 +18,7 @@ const v2Permissions = ["pet:speak", "pet:reaction", "pet:move", "schedule", "sto
 const v3Permissions = [
   ...v2Permissions,
   "pet:interact", "pet:pin", "pet:animate", "pet:speak:dynamic", "pet:drop", "pets:read", "pets:manage",
-  "audio", "events", "ui:toast", "ui:panel", "notify", "bus", "ai", "secrets", "voice:speak", "voice:listen",
+  "audio", "events", "ui:toast", "ui:panel", "ui:delivery", "notify", "bus", "ai", "secrets", "voice:speak", "voice:listen",
   "auth", "files", "system:openExternal", "system:metrics", "clipboard", "network:write",
 ];
 const configFieldTypesV2 = ["text", "textarea", "number", "boolean", "select", "time", "multiSelect", "list"];
@@ -28,7 +28,7 @@ const assetExtensions: Record<string, readonly string[]> = {
   icons: [".png", ".webp", ".svg"],
   images: [".png", ".webp", ".jpg", ".jpeg", ".gif"],
   svgs: [".svg"],
-  sprites: [".png", ".webp"],
+  sprites: [".webp"],
   sounds: [".ogg", ".mp3", ".wav"],
 };
 const assetMaxBytes: Record<string, number> = { icons: 256 * 1024, images: 1024 * 1024, svgs: 256 * 1024, sprites: 5 * 1024 * 1024, sounds: 1024 * 1024 };
@@ -126,9 +126,18 @@ export function validatePluginFolder(sourceDir: string): PluginValidationResult 
       for (const [kind, group] of Object.entries(assets)) {
         if (!assetKinds.includes(kind as (typeof assetKinds)[number])) { fail(`$.assets.${kind}`, `Unknown asset kind ${kind}.`); continue; }
         if (typeof group !== "object" || group === null) { fail(`$.assets.${kind}`, `assets.${kind} must be an object.`); continue; }
-        for (const [name, relPath] of Object.entries(group as Record<string, unknown>)) {
+        for (const [name, declaration] of Object.entries(group as Record<string, unknown>)) {
           const where = `$.assets.${kind}.${name}`;
           if (!assetNamePattern.test(name)) fail(where, "Asset names must be simple lowercase identifiers.");
+          if (kind === "sprites") {
+            if (!isSpriteDeclaration(declaration)) { fail(where, "Sprite assets require path, frameWidth, frameHeight, frames, and durationMs metadata."); continue; }
+            if (!declaration.path.toLowerCase().endsWith(".webp") || declaration.path.startsWith("/") || declaration.path.includes("\\") || declaration.path.split("/").includes("..")) { fail(`${where}.path`, "Sprite path must be a safe relative WebP path."); continue; }
+            checkFile(dir, declaration.path, assetMaxBytes.sprites, where, fail);
+            const dimensions = readWebpDimensions(join(dir, declaration.path));
+            if (!dimensions || dimensions.width !== declaration.frameWidth * declaration.frames || dimensions.height !== declaration.frameHeight) fail(where, "Sprite decoded dimensions must equal frameWidth * frames by frameHeight.");
+            continue;
+          }
+          const relPath = declaration;
           if (typeof relPath !== "string" || relPath.startsWith("/") || relPath.includes("\\") || relPath.split("/").includes("..")) { fail(where, "Asset path must be a safe relative path."); continue; }
           if (!(assetExtensions[kind] ?? []).some((extension) => relPath.toLowerCase().endsWith(extension))) fail(where, `Asset must end with one of ${(assetExtensions[kind] ?? []).join(", ")}.`);
           else checkFile(dir, relPath, assetMaxBytes[kind] ?? 1024 * 1024, where, fail);
@@ -150,6 +159,29 @@ export function validatePluginFolder(sourceDir: string): PluginValidationResult 
   }
 
   return { ok: issues.length === 0, issues };
+}
+
+function isSpriteDeclaration(value: unknown): value is { path: string; frameWidth: number; frameHeight: number; frames: number; durationMs: number } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  const frameWidth = item.frameWidth;
+  const frameHeight = item.frameHeight;
+  const frames = item.frames;
+  const durationMs = item.durationMs;
+  if (Object.keys(item).some((key) => !["path", "frameWidth", "frameHeight", "frames", "durationMs"].includes(key))) return false;
+  return typeof item.path === "string" && typeof frameWidth === "number" && Number.isInteger(frameWidth) && frameWidth >= 32 && frameWidth <= 512 && typeof frameHeight === "number" && Number.isInteger(frameHeight) && frameHeight >= 32 && frameHeight <= 512 && typeof frames === "number" && Number.isInteger(frames) && frames >= 1 && frames <= 16 && typeof durationMs === "number" && Number.isInteger(durationMs) && durationMs >= 100 && durationMs <= 4000;
+}
+
+function readWebpDimensions(path: string): { width: number; height: number } | undefined {
+  try {
+    const bytes = readFileSync(path);
+    if (bytes.length < 30 || bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WEBP") return undefined;
+    const chunk = bytes.toString("ascii", 12, 16);
+    if (chunk === "VP8X") return { width: 1 + bytes.readUIntLE(24, 3), height: 1 + bytes.readUIntLE(27, 3) };
+    if (chunk === "VP8L" && bytes[20] === 0x2f) { const bits = bytes.readUInt32LE(21); return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 }; }
+    if (chunk === "VP8 " && bytes.length >= 30 && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a) return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+  } catch {}
+  return undefined;
 }
 
 function checkFile(dir: string, relPath: string, maxBytes: number, where: string, fail: (path: string, message: string) => void): void {

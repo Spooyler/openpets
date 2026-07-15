@@ -132,6 +132,7 @@ export async function updatePinned(ctx, state, now = Date.now()) {
     tone: "info",
     sticky: true,
     pin: true,
+    dismissOn: [],
     priority: "normal",
     hud: {
       items: [

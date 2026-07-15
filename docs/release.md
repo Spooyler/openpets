@@ -193,7 +193,6 @@ artifact set:
 - macOS DMG: x64 + arm64
 - macOS ZIP: x64 + arm64
 - Windows NSIS installer: x64
-- Windows portable: x64
 - Linux AppImage: x64
 - Linux DEB: x64
 - Linux RPM: x64
@@ -207,7 +206,6 @@ OpenPets-<version>-mac-arm64.dmg
 OpenPets-<version>-mac-x64.zip
 OpenPets-<version>-mac-arm64.zip
 OpenPets-<version>-win-x64-setup.exe
-OpenPets-<version>-win-x64-portable.exe
 OpenPets-<version>-linux-x86_64.AppImage
 OpenPets-<version>-linux-amd64.deb
 OpenPets-<version>-linux-x86_64.rpm
@@ -232,22 +230,40 @@ release. See [Linux DEB/RPM fallback via VMware](#linux-debrpm-fallback-via-vmwa
 
 ## Windows code signing with SignPath
 
-OpenPets is eligible for the SignPath Foundation program. Use SignPath for Windows Authenticode signing before publishing Windows release artifacts. SignPath's GitHub trusted-build integration requires signing inputs to be uploaded from a GitHub Actions workflow artifact, so do not expect the local macOS release script to produce trusted SignPath-signed Windows files by itself.
+OpenPets has a production certificate through the SignPath Foundation program. Use SignPath for Windows Authenticode signing before publishing Windows release artifacts. SignPath's GitHub trusted-build integration requires signing inputs to be uploaded from a GitHub Actions workflow artifact, so do not expect the local macOS release script to produce trusted SignPath-signed Windows files by itself.
+
+### Public code-signing policy
+
+The canonical public policy is https://openpets.dev/code-signing-policy. SignPath signing is limited to official OpenPets open-source release artifacts. The homepage, download page, and release pages must link to that policy. Update the policy whenever signing approvers, maintainer/committer/reviewer roles, or signing-related network handling changes.
 
 Current repository support:
 
 - Workflow: `.github/workflows/signpath-windows.yml`
 - Output workflow artifact: `signed-openpets-windows-x64`
+- Production signing policy: `release-signing`
+- App executable artifact configuration: `openpets-windows-app-exe-zip`
+- NSIS installer artifact configuration: `openpets-windows-installer-zip`
 - Signed files produced by the workflow:
   - Nested app executable: `openpets.exe`
   - `OpenPets-<version>-win-x64-setup.exe`
   - `SHA256SUMS.windows.txt`
 
-The workflow builds the Windows x64 unpacked app on `windows-latest`, uploads `openpets.exe` for SignPath signing, replaces the unpacked app executable with the signed file, builds the NSIS installer from that signed app, uploads the installer for SignPath signing, then publishes the signed installer as a GitHub Actions artifact.
+Note: Windows SmartScreen can still show a "not commonly downloaded" prompt for a newly signed OpenPets installer. That does **not** mean the signature is invalid; it usually means the file hash has little distribution history.
+
+The workflow builds the Windows x64 unpacked app on `windows-latest`, uploads `openpets.exe` for SignPath signing, replaces the unpacked app executable with the signed file, builds the NSIS installer from that signed app, uploads the installer for SignPath signing, then publishes the signed installer as a GitHub Actions artifact. The project is linked to the GitHub.com trusted-build system; its repository variables `SIGNPATH_ORGANIZATION_ID` and `SIGNPATH_PROJECT_SLUG`, plus the `SIGNPATH_API_TOKEN` secret, must remain configured.
+
+Verification steps after download (before first run):
+
+```powershell
+Get-FileHash .\OpenPets-<version>-win-x64-setup.exe -Algorithm SHA256
+Get-AuthenticodeSignature .\OpenPets-<version>-win-x64-setup.exe | Format-List *
+```
+
+Only run the installer when the SHA-256 matches the release `SHA256SUMS` and the authenticode signature is valid.
 
 ### SignPath setup checklist
 
-These steps require SignPath/GitHub organization access and cannot be completed from the local checkout alone:
+These setup values are already configured. If the SignPath project or GitHub repository configuration is recreated, restore them before signing:
 
 1. Accept the SignPath OSS organization invitation.
 2. In SignPath, add the predefined trusted build system **GitHub.com** to the organization.
@@ -265,7 +281,7 @@ These steps require SignPath/GitHub organization access and cannot be completed 
 
 GitHub `actions/upload-artifact` stores each upload as a ZIP archive for SignPath, so each SignPath artifact configuration must use `<zip-file>` as the root element.
 
-Create one artifact configuration for the unpacked app executable, for example slug `openpets-windows-app-exe-zip`:
+The unpacked app executable configuration is `openpets-windows-app-exe-zip`:
 
 ```xml
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
@@ -277,7 +293,7 @@ Create one artifact configuration for the unpacked app executable, for example s
 </artifact-configuration>
 ```
 
-Create a second artifact configuration for the NSIS installer, for example slug `openpets-windows-installer-zip`:
+The NSIS installer configuration is `openpets-windows-installer-zip`:
 
 ```xml
 <artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
@@ -289,13 +305,19 @@ Create a second artifact configuration for the NSIS installer, for example slug 
 </artifact-configuration>
 ```
 
-For the first SignPath review, use the self-signed test certificate policy and run the workflow manually from GitHub Actions with:
+Use `test-signing` only to validate SignPath setup. For a production release, run the workflow against the newly created release tag with the production policy and configured artifact slugs:
 
-- `signing_policy_slug`: the test signing policy slug.
-- `artifact_configuration_app_exe_slug`: the app executable artifact configuration slug.
-- `artifact_configuration_installer_slug`: the installer artifact configuration slug.
+```bash
+gh workflow run signpath-windows.yml --repo alvinunreal/openpets --ref v<version> \
+  -f signing_policy_slug=release-signing \
+  -f artifact_configuration_app_exe_slug=openpets-windows-app-exe-zip \
+  -f artifact_configuration_installer_slug=openpets-windows-installer-zip
+```
 
-After the workflow succeeds, send SignPath the signing request links from the workflow log / SignPath dashboard so they can review the setup and provision the production certificate.
+Watch the run in GitHub Actions, then download its `signed-openpets-windows-x64` artifact. The workflow signs both the unpacked app executable and the final NSIS installer.
+If the run pauses during a SignPath approval step, a signer/approver must approve the request in the SignPath dashboard before the workflow can continue.
+
+After the workflow succeeds, retain the signing request links from the workflow log / SignPath dashboard with the release records for auditability.
 
 ### Publishing a signed Windows release artifact
 
@@ -308,6 +330,7 @@ Until the local release script is replaced by a fully GitHub-hosted release flow
    gh release upload v<version> --repo alvinunreal/openpets OpenPets-<version>-win-x64-setup.exe SHA256SUMS.windows.txt
    ```
 4. Do not publish both signed and unsigned Windows setup artifacts with the same filename. The GitHub Release should expose the signed installer.
+5. Regenerate and replace the release-wide `SHA256SUMS` after replacing the installer; `SHA256SUMS.windows.txt` from the workflow is only a handoff checksum for the signed Windows artifact.
 
 ## Full release procedure
 
@@ -457,10 +480,10 @@ After publishing the release, manually test at least:
 - Windows installer on a Windows machine or VM.
 - Linux AppImage on a Linux machine or VM.
 
-Unsigned release warnings are expected until code signing/notarization is configured:
+Warnings behavior to expect:
 
 - macOS may show Gatekeeper warnings.
-- Windows may show SmartScreen warnings.
+- Windows may show SmartScreen reputation warnings on first launch, even for signed installers. This is usually reduced after repeated trustworthy downloads.
 
 ### Linux release-smoke VM
 
@@ -619,7 +642,6 @@ names = [
     f'OpenPets-{version}-mac-arm64.zip',
     f'OpenPets-{version}-mac-x64.dmg',
     f'OpenPets-{version}-mac-x64.zip',
-    f'OpenPets-{version}-win-x64-portable.exe',
     f'OpenPets-{version}-win-x64-setup.exe',
 ]
 lines = []
@@ -810,7 +832,7 @@ Dry-run npm publishing first:
 pnpm release:npm
 ```
 
-Publish all missing packages to npm. Package versions that already exist on npm are skipped automatically:
+Publish all missing packages to npm. Package versions that already exist on npm are skipped automatically. The helper pins its npm authentication check, registry probes, and `pnpm publish` commands to `https://registry.npmjs.org`. Before the publish plan, it logs each registry probe. Its 30-second watchdog stops the release and terminates the probe process tree; only npm's structured `E404` missing-version response for that exact package version is treated as unpublished. Registry, process, network, and authentication failures stop the release:
 
 ```bash
 pnpm release:npm -- --yes
@@ -822,7 +844,7 @@ If npm requires two-factor auth:
 pnpm release:npm -- --yes --otp <code>
 ```
 
-Publishing with the npm helper requires `npm whoami` to succeed, a clean working tree, and local `HEAD` to match the upstream branch.
+Publishing with the npm helper requires `npm whoami --registry https://registry.npmjs.org` to succeed, a clean working tree, and local `HEAD` to match the upstream branch.
 
 After publishing, verify the npm dependency set resolves:
 
@@ -849,4 +871,5 @@ npx -y @open-pets/cli@<version> --help
 - Keep `publish: null` in `electron-builder.yml`; GitHub release upload is handled by the local script.
 - Windows icon is `apps/desktop/assets/app-icon.ico`.
 - macOS icon is `apps/desktop/assets/app-icon.icns`.
-- The Windows/macOS artifacts are currently unsigned unless signing config is added later.
+- Windows artifacts are signed in the release handoff, but Windows SmartScreen reputation warnings may still appear on first run.
+- macOS artifacts may still show Gatekeeper warnings until notarization is configured.

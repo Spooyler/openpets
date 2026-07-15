@@ -49,6 +49,7 @@ export type OpenPetsPermission =
   | "events"
   | "ui:toast"
   | "ui:panel"
+  | "ui:delivery"
   | "notify"
   | "bus"
   | "ai"
@@ -277,6 +278,28 @@ export interface OpenPetsPanelHandle {
   close(): Promise<void>;
 }
 
+/** Descriptor for a host-owned, display-level delivery surface. Requires `ui:delivery`. */
+export interface OpenPetsDelivery {
+  /** Stable, plugin-scoped id (`[A-Za-z0-9._:-]`, 1–96 chars). */
+  key: string;
+  /** A manifest-declared courier spritesheet (`ctx.assets.sprite(name)`). */
+  courier: OpenPetsAssetRef;
+  /** Plain-text title (1–160 characters). */
+  title: string;
+  /** Optional plain-text detail (0–200 characters). */
+  detail: string;
+  /** Finite epoch milliseconds, in the next seven days. */
+  expiresAt: number;
+}
+
+export type OpenPetsDeliveryDismissReason = "click" | "manual" | "expired" | "plugin-stopped";
+
+/** Opaque handle for a host-owned delivery surface. */
+export interface OpenPetsDeliveryHandle {
+  dismiss(): Promise<void>;
+  onDismiss(handler: (reason: OpenPetsDeliveryDismissReason) => void): void;
+}
+
 /** Alert header indicator rendered above alert text. Custom art must be a manifest-declared asset. */
 export interface OpenPetsAlertIndicator {
   /** Visible/accessibility label shown next to the icon. */
@@ -325,6 +348,8 @@ export interface OpenPetsUiApi {
   alert(spec: OpenPetsAlert): Promise<OpenPetsAlertHandle>;
   /** Open a sandboxed plugin webview panel. Requires `ui:panel`. */
   panel(spec: OpenPetsPanelOptions): Promise<OpenPetsPanelHandle>;
+  /** Show a host-owned delivery surface on the cursor display. Requires `ui:delivery`. */
+  delivery(spec: OpenPetsDelivery): Promise<OpenPetsDeliveryHandle>;
   /** Fully dynamic context-menu section. Requires `commands`. */
   menu: OpenPetsMenuApi;
 }
@@ -581,6 +606,8 @@ export interface OpenPetsCommand {
   /** Ordering within its group (higher first). */
   priority?: number;
   featured?: boolean;
+  /** Maximum time the host waits for this command (1 second to 5 minutes). Defaults to 5 seconds. */
+  timeoutMs?: number;
 }
 
 /** A dynamic context-menu item set via {@link OpenPetsMenuApi.setItems}. */
@@ -790,16 +817,13 @@ export interface OpenPetsVoiceApi {
 // Auth (§14.1)
 // ---------------------------------------------------------------------------
 
-/** Host-mediated OAuth configuration (PKCE by default; no client secret). */
+/** Host-mediated OAuth configuration for the host-approved provider registry. */
 export interface OpenPetsOauthConfig {
-  provider?: "google" | "microsoft" | "github" | "generic";
-  authorizationUrl: string;
-  tokenUrl: string;
+  provider: "google" | "spotify";
   clientId: string;
+  /** Optional installed-app credential secret required by the provider token endpoint. */
+  clientSecret?: string;
   scopes: string[];
-  /** Default true. */
-  pkce?: boolean;
-  redirect?: "loopback" | "appProtocol";
 }
 
 /** Tokens returned by the host after running the OAuth dance. */
@@ -807,6 +831,14 @@ export interface OpenPetsOauthTokens {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: number;
+}
+
+/** Stable OAuth error codes returned by host-managed providers. */
+export type OpenPetsOauthErrorCode = "invalid_grant";
+
+/** OAuth errors may expose this code for reconnect-required handling. */
+export interface OpenPetsOauthError extends Error {
+  readonly code: OpenPetsOauthErrorCode;
 }
 
 /** Host-mediated OAuth: the host opens the system browser and runs PKCE. Requires `auth`. */

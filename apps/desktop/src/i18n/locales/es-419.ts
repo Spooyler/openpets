@@ -455,6 +455,7 @@ export const es419: Partial<Messages> = {
   "plugins.permission.events": "Eventos",
   "plugins.permission.ui:toast": "Notificaciones emergentes",
   "plugins.permission.ui:panel": "Paneles",
+  "plugins.permission.ui:delivery": "Entregas",
   "plugins.permission.notify": "Notificaciones",
   "plugins.permission.bus": "Bus de complementos",
   "plugins.permission.ai": "Puerta de enlace de IA",

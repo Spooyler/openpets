@@ -64,6 +64,36 @@ contract, so program against it rather than any list copied into a doc.
 `OpenPetsPermission` in the SDK mirrors manifest validation so authors get
 autocomplete for exactly the capabilities they can request.
 
+Commands time out after five seconds by default. A command that deliberately
+waits for user interaction, such as host-mediated OAuth, may declare a bounded
+`timeoutMs` between one second and five minutes.
+
+### OAuth installed-app credentials
+
+`ctx.auth.oauth` accepts an optional `clientSecret` alongside the provider,
+client ID, and approved scopes. An installed-app credential may require that
+secret at its token endpoint even when the host uses PKCE and a loopback
+redirect. The host keeps OAuth session data, including a supplied client secret,
+in encrypted plugin-scoped secret storage; plugins should not log it.
+
+### `ctx.ui.delivery`
+
+`ctx.ui.delivery` requests a generic, host-owned, display-level delivery and
+requires the dedicated `ui:delivery` permission. Authors provide a stable
+plugin-scoped key, a courier returned by `ctx.assets.sprite()` for a
+manifest-declared sprite, plain-text title/detail, and a near-term expiry. The
+host—not plugin code—selects the cursor display, renders the delivery, queues it
+with other work, and controls its visual behavior. Coordinates, HTML, URLs,
+arbitrary asset paths, and animation controls are intentionally outside this
+contract.
+
+The call returns an opaque handle. A plugin may dismiss its delivery or register
+one dismissal handler; the reason is `click`, `manual`, `expired`, or
+`plugin-stopped`. Re-registering the same key supersedes the prior handle.
+Handlers are not invoked after the plugin host has stopped. Use the stable key
+to make repeated sync or reminder work idempotent, and treat dismissal as a
+host lifecycle signal rather than a durable acknowledgement.
+
 ## Design principles authors should know
 
 - **Describe, don't render.** You hand the host descriptors (a bubble, an alert,
@@ -77,6 +107,10 @@ autocomplete for exactly the capabilities they can request.
   restart/sleep. Stateful companions (reminders, virtual pet) rely on this.
 - **Localize by reference.** Use `$t:` in the manifest and `ctx.t(key, vars)` in
   code; ship `locales/en.json`. See [i18n.md](i18n.md).
+- **Declare visual assets explicitly.** A delivery courier must be a declared
+  sprite asset, never an installed-pet ID or filesystem path. Sprite-grid config
+  is a host-rendered select presentation whose previews must refer to declared
+  sprites; the host honors reduced-motion preferences in that picker.
 
 ## The test harness — `@open-pets/plugin-sdk/testing`
 
@@ -88,7 +122,7 @@ without Electron, then exposes controls and assertions:
   `fireBubbleAction(...)`.
 - **Assert on recorded effects** (descriptors, not pixels): helpers like
   `expectSpoke`, `expectBubble`, `expectScheduled`, plus recorded
-  storage/config/network/AI/sound/panel/pet actions.
+  storage/config/network/AI/sound/panel/pet actions and recorded deliveries.
 
 This is why official plugins can have fast, deterministic `test.js` suites:
 they assert that a scheduled job *would* fire and the pet *would* speak, by

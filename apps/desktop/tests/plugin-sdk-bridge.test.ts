@@ -58,6 +58,28 @@ await scenario("diagnostics sanitizer redacts paths tokens and URL queries", () 
   assert.equal(reason.includes("sk-1234567890123456"), false);
 });
 
+await scenario("OAuth only accepts provider-approved scopes and host-owned parameters", async ({ api }) => {
+  await assert.rejects(
+    () => api.auth.oauth({ provider: "google", clientId: "client", scopes: ["https://www.googleapis.com/auth/calendar.readonly"] }),
+    /OAuth scopes are not allowed/,
+  );
+  await assert.rejects(
+    () => api.auth.oauth({ provider: "spotify", clientId: "client", scopes: ["user-read-playback-state"], redirectUri: "http://127.0.0.1" }),
+    /host-controlled/,
+  );
+  await api.auth.oauth({ provider: "google", clientId: "client", scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"] });
+});
+
+await scenario("OAuth accepts a valid client secret and rejects invalid values", async ({ api, capabilities }) => {
+  let received: unknown;
+  capabilities.auth.oauth = async (_pluginId, config) => { received = config; return { accessToken: "" }; };
+  await api.auth.oauth({ provider: "google", clientId: "client", clientSecret: "secret-value", scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"] });
+  assert.deepEqual(received, { provider: "google", clientId: "client", clientSecret: "secret-value", scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"] });
+  await assert.rejects(() => api.auth.oauth({ provider: "google", clientId: "client", clientSecret: "", scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"] }), /Invalid OAuth clientSecret\./);
+  await assert.rejects(() => api.auth.oauth({ provider: "google", clientId: "client", clientSecret: 1, scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"] }), /Invalid OAuth clientSecret\./);
+  await assert.rejects(() => api.auth.oauth({ provider: "google", clientId: "client", clientSecret: "line\nbreak", scopes: ["https://www.googleapis.com/auth/calendar.events.readonly"] }), /Invalid OAuth clientSecret\./);
+});
+
 await scenario("events.on config:changed uses config listener path", async ({ api, bridge, store, capabilities }) => {
   const seen: unknown[] = [];
   const sub = api.events.on("config:changed", (config: Record<string, unknown>) => seen.push(config.value));
@@ -84,6 +106,16 @@ await scenario("commands accept declared icon asset refs and reject raw svg stri
   );
 });
 
+await scenario("commands retain validated timeout overrides and honor them", async ({ api, bridge }) => {
+  api.commands.register({ id: "oauth-connect", title: "Connect", timeoutMs: 1_000 }, () => new Promise<void>(() => undefined));
+  assert.equal(bridge.getPublicState("plug").commands[0]?.timeoutMs, 1_000);
+  const started = Date.now();
+  await assert.rejects(() => bridge.executeCommand("plug", "oauth-connect"), /Plugin command timed out\./);
+  assert.ok(Date.now() - started < 3_000, "command-specific timeout wins over the five-second default");
+  assert.throws(() => api.commands.register({ id: "fraction", title: "Fraction", timeoutMs: 1_000.5 }, () => undefined), /Invalid plugin command timeoutMs\./);
+  assert.throws(() => api.commands.register({ id: "too-long", title: "Too long", timeoutMs: 300_001 }, () => undefined), /Invalid plugin command timeoutMs\./);
+});
+
 await scenario("pet.react validates silent reaction options", async ({ api }) => {
   await api.pet.react("waving", { showMessage: false });
   await assert.rejects(() => api.pet.react("waving", { showMessage: "no" }), /Invalid pet reaction showMessage option\./);
@@ -94,7 +126,7 @@ await scenario("hud bubble spec validation is enforced", async ({ store, bridge 
   const record = store.getRecord("plug")!;
   const updatedRecord = {
     ...record,
-    approvedPermissions: [...record.approvedPermissions, "pet:pin" as const],
+    approvedPermissions: [...record.approvedPermissions, "pet:pin" as const, "pet:speak" as const],
   };
   store.upsertRecord(updatedRecord);
   
@@ -133,7 +165,7 @@ await scenario("hud bubble spec validation is enforced", async ({ store, bridge 
         ],
       },
     }),
-    /Plugin bubble HUD cannot be combined with text, markdown, body media, or indicator\./,
+    /Plugin bubble HUD cannot be combined with text or markdown\./,
   );
 
   // Should reject if items contains more than 4 items
@@ -180,6 +212,40 @@ await scenario("hud bubble spec validation is enforced", async ({ store, bridge 
   );
 });
 
+await scenario("delivery requires permission and tears down without callbacks", async ({ api, bridge, store, capabilities }) => {
+  await assert.rejects(() => api.ui.delivery({ key: "calendar.1", courier: { kind: "sprite", name: "courier" }, title: "Event", detail: "Soon", expiresAt: Date.now() + 60_000 }), /ui:delivery/);
+  const record = { ...store.getRecord("plug")!, approvedPermissions: [...store.getRecord("plug")!.approvedPermissions, "ui:delivery" as const] };
+  store.upsertRecord(record);
+  const approved = bridge.createApi(record, manifest());
+  await assert.rejects(() => approved.ui.delivery({ key: "calendar.1", courier: { kind: "sprite", name: "courier" }, title: "Event", detail: "Soon", expiresAt: Date.now() + 60_000, x: 1 }), /Invalid delivery descriptor field/);
+  const handle = await approved.ui.delivery({ key: "calendar.1", courier: { kind: "sprite", name: "courier" }, title: "Event", detail: "Soon", expiresAt: Date.now() + 60_000 });
+  let dismissed = false;
+  approved.ui.deliverySubscribe(handle.deliveryId, () => { dismissed = true; });
+  bridge.clearPlugin("plug");
+  assert.equal(capabilities.delivery.teardowns, 1);
+  capabilities.delivery.dismiss?.("plugin-stopped");
+  assert.equal(dismissed, false);
+});
+
+await scenario("delivery re-registration retires obsolete handles and callbacks", async ({ bridge, store, capabilities }) => {
+  const record = { ...store.getRecord("plug")!, approvedPermissions: [...store.getRecord("plug")!.approvedPermissions, "ui:delivery" as const] };
+  store.upsertRecord(record);
+  const api = bridge.createApi(record, manifest());
+  const first = await api.ui.delivery({ key: "calendar.1", courier: { kind: "sprite", name: "courier" }, title: "First", detail: "Soon", expiresAt: Date.now() + 60_000 });
+  let firstDismissals = 0;
+  assert.deepEqual(api.ui.deliverySubscribe(first.deliveryId, () => { firstDismissals += 1; }), { ok: true });
+  const second = await api.ui.delivery({ key: "calendar.1", courier: { kind: "sprite", name: "courier" }, title: "Updated", detail: "Later", expiresAt: Date.now() + 60_000 });
+  assert.deepEqual(api.ui.deliverySubscribe(first.deliveryId, () => { firstDismissals += 1; }), { ok: false });
+  await api.ui.deliveryDismiss(first.deliveryId);
+  assert.equal(firstDismissals, 0);
+  let secondReason: string | undefined;
+  assert.deepEqual(api.ui.deliverySubscribe(second.deliveryId, (reason) => { secondReason = reason; }), { ok: true });
+  capabilities.delivery.dismiss?.("click");
+  assert.equal(firstDismissals, 0);
+  assert.equal(secondReason, "click");
+  assert.deepEqual(api.ui.deliverySubscribe(second.deliveryId, () => undefined), { ok: false });
+});
+
 type ScenarioContext = {
   api: ReturnType<PluginSdkBridge["createApi"]>;
   bridge: PluginSdkBridge;
@@ -202,7 +268,7 @@ async function scenario(name: string, run: (context: ScenarioContext) => Promise
       runtime: "javascript",
       sdkVersion: "3.0.0",
       enabled: true,
-      approvedPermissions: ["commands", "events", "storage", "pet:reaction"],
+      approvedPermissions: ["commands", "events", "storage", "pet:reaction", "auth"],
       config: {},
     };
     store.upsertRecord(record);
@@ -220,7 +286,7 @@ async function scenario(name: string, run: (context: ScenarioContext) => Promise
   }
 }
 
-type TestCapabilities = PluginHostCapabilities & { events: PluginHostCapabilities["events"] & { subscribed: string[] } };
+type TestCapabilities = PluginHostCapabilities & { events: PluginHostCapabilities["events"] & { subscribed: string[] }; delivery: PluginHostCapabilities["delivery"] & { teardowns: number; dismiss?: (reason: "click" | "manual" | "expired" | "plugin-stopped") => void } };
 
 function createTestCapabilities(): TestCapabilities {
   return {
@@ -250,6 +316,7 @@ function createTestCapabilities(): TestCapabilities {
     toast: async () => undefined,
     notify: async () => undefined,
     panels: { open: async () => ({ id: "panel", show: async () => undefined, hide: async () => undefined, postMessage: async () => undefined, close: async () => undefined }) },
+    delivery: { teardowns: 0, async register(_pluginId, _descriptor) { let handler: ((reason: "click" | "manual" | "expired" | "plugin-stopped") => void) | undefined; this.dismiss = (reason) => handler?.(reason); return { dismiss: () => this.dismiss?.("manual"), onDismiss: (next) => { handler = next; } }; }, teardown() { this.teardowns += 1; } },
     secrets: { get: async () => undefined, set: async () => undefined, delete: async () => undefined, has: async () => false },
     ai: { available: async () => false, complete: async () => ({ text: "" }), stream: async () => ({ text: "" }) },
     voice: { speak: async () => undefined, listen: async () => ({ text: "" }) },
@@ -269,7 +336,7 @@ function manifest(): OpenPetsJavascriptPluginManifest {
     runtime: "javascript",
     sdkVersion: "3.0.0",
     entry: "index.js",
-    permissions: ["commands", "events", "storage"],
+    permissions: ["commands", "events", "storage", "auth"],
     assets: { icons: { focus: "assets/focus.svg" } },
   };
 }

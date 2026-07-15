@@ -48,7 +48,6 @@ win:
   icon: assets/app-icon.ico
   target:
     - nsis
-    - portable
   verifyUpdateCodeSignature: false
 
 nsis:
@@ -56,10 +55,6 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-
-portable:
-  artifactName: OpenPets-${version}-win-${arch}-portable.${ext}
-
 linux:
   icon: assets/app-icon.png
   target:

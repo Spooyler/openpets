@@ -38,7 +38,7 @@ type PluginFilter = "all" | "installed" | "catalog" | "local" | "broken";
 type PluginPermission =
   | "pet:speak" | "pet:reaction" | "pet:move" | "timer" | "schedule" | "storage" | "status" | "commands" | "network"
   | "pet:interact" | "pet:pin" | "pet:animate" | "pet:speak:dynamic" | "pet:drop" | "pets:read" | "pets:manage"
-  | "audio" | "events" | "ui:toast" | "ui:panel" | "notify" | "bus" | "ai" | "secrets" | "voice:speak" | "voice:listen"
+  | "audio" | "events" | "ui:toast" | "ui:panel" | "ui:delivery" | "notify" | "bus" | "ai" | "secrets" | "voice:speak" | "voice:listen"
   | "auth" | "files" | "system:openExternal" | "system:metrics" | "clipboard" | "network:write";
 type PluginPlatformSettings = {
   allowPluginAudio: boolean;
@@ -50,7 +50,7 @@ type PluginPlatformSettings = {
 };
 type PluginInspectorState = { schedules: Array<{ id: string; type: string; nextRunMs: number }>; commands: PluginCommand[]; menuItems: Array<{ id: string; title: string }>; status?: PluginStatus; activeBubbles: number; activePanels: number; eventSubscriptions: number; lastError?: string; quotaCounters: Record<string, number> };
 type PluginIconName = "plugin" | "bell" | "timer" | "github" | "heart" | "sparkles" | "coffee" | "focus" | "droplet";
-type PluginConfigField = { type: "text" | "textarea" | "number" | "boolean" | "select" | "time" | "date" | "multiSelect" | "list" | "secret" | "sound"; label?: string; description?: string; default?: string | number | boolean | string[] | Array<Record<string, unknown>>; options?: Array<{ label: string; value: string }>; min?: number; max?: number; step?: number; maxLength?: number; maxItems?: number; itemSchema?: Record<string, PluginConfigField> };
+type PluginConfigField = { type: "text" | "textarea" | "number" | "boolean" | "select" | "time" | "date" | "multiSelect" | "list" | "secret" | "sound"; label?: string; description?: string; default?: string | number | boolean | string[] | Array<Record<string, unknown>>; options?: Array<{ label: string; value: string; previewSprite?: string }>; presentation?: "sprite-grid" | string; min?: number; max?: number; step?: number; maxLength?: number; maxItems?: number; itemSchema?: Record<string, PluginConfigField> };
 type PluginConfigSchema = Record<string, PluginConfigField>;
 type PluginConfig = Record<string, unknown>;
 type PluginCommandFormField = { id: string; type: "text" | "textarea" | "number" | "boolean" | "select" | "multiSelect" | "time" | "date" | "list"; label: string; default?: string | number | boolean | string[]; options?: Array<{ label: string; value: string }>; min?: number; max?: number; maxLength?: number; required?: boolean };
@@ -59,7 +59,7 @@ type PluginCommand = { id: string; title: string; description?: string; form?: P
 type PluginStatus = { text: string; tone?: "info" | "success" | "warning" | "error" };
 type PluginConfigError = { path?: string; code?: string; message?: string };
 type PluginCategory = "Companion" | "Wellness" | "Focus" | "Developer" | "Advanced";
-type SafePluginRecord = { id: string; name?: string; description?: string; version: string; icon?: PluginIconName; iconDataUrl?: string; source: "catalog" | "local"; sourcePath?: string; bundled?: boolean; category?: PluginCategory; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; commands?: PluginCommand[]; status?: PluginStatus };
+type SafePluginRecord = { id: string; name?: string; description?: string; version: string; icon?: PluginIconName; iconDataUrl?: string; source: "catalog" | "local"; sourcePath?: string; bundled?: boolean; category?: PluginCategory; enabled: boolean; brokenReason?: string; approvedPermissions: PluginPermission[]; runtime?: "declarative" | "javascript"; sdkVersion?: string; catalogDisabled?: boolean; catalogDeprecated?: boolean; catalogStatusReason?: string; configSchema?: PluginConfigSchema; effectiveConfig?: PluginConfig; configErrors?: PluginConfigError[]; spritePreviews?: Record<string, { url: string; frameWidth: number; frameHeight: number; frames: number; durationMs: number }>; commands?: PluginCommand[]; status?: PluginStatus };
 type SafeCatalogPluginRecord = { id: string; name: string; version: string; description: string; runtime: "declarative" | "javascript"; icon?: PluginIconName; iconDataUrl?: string; sdkVersion?: string; permissions: PluginPermission[]; installed: boolean; bundled?: boolean; category?: PluginCategory; deprecated?: boolean; statusReason?: string; publisherType?: "official" | "community" };
 type PluginServiceSnapshot = { plugins: SafePluginRecord[] };
 type PluginCatalogSnapshot = { plugins: SafeCatalogPluginRecord[] };
@@ -808,12 +808,12 @@ function isAllowedCatalogPreview(value: string | undefined): value is string {
   if (!value) return false;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && 
-      url.hostname === "openpets.dev" && 
-      url.port === "" && 
-      url.username === "" && 
-      url.password === "" && 
-      url.pathname.startsWith("/pets/") && 
+    return url.protocol === "https:" &&
+      url.hostname === "openpets.dev" &&
+      url.port === "" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.pathname.startsWith("/pets/") &&
       url.pathname.endsWith(".webp");
   } catch {
     return false;
@@ -1609,6 +1609,7 @@ const pluginPermissionLabelKeys: Record<PluginPermission, string> = {
   events: "plugins.permission.events",
   "ui:toast": "plugins.permission.ui:toast",
   "ui:panel": "plugins.permission.ui:panel",
+  "ui:delivery": "plugins.permission.ui:delivery",
   notify: "plugins.permission.notify",
   bus: "plugins.permission.bus",
   ai: "plugins.permission.ai",
@@ -1757,7 +1758,27 @@ function materializeConfigDraft(schema: PluginConfigSchema | undefined, config: 
   return next;
 }
 
-function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange, onPickSound }: { pluginId?: string; fieldKey: string; field: PluginConfigField; value: unknown; onChange: (value: unknown) => void; onPickSound?: (pluginId: string) => Promise<void> }) {
+export function computeNextRovingIndex(
+  key: string,
+  currentIndex: number,
+  totalCount: number
+): { nextIndex: number } {
+  if (key === "ArrowRight" || key === "ArrowDown") {
+    return { nextIndex: (currentIndex + 1) % totalCount };
+  }
+  if (key === "ArrowLeft" || key === "ArrowUp") {
+    return { nextIndex: (currentIndex - 1 + totalCount) % totalCount };
+  }
+  if (key === "Home") {
+    return { nextIndex: 0 };
+  }
+  if (key === "End") {
+    return { nextIndex: totalCount - 1 };
+  }
+  return { nextIndex: currentIndex };
+}
+
+function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange, onPickSound, spritePreviews }: { pluginId?: string; fieldKey: string; field: PluginConfigField; value: unknown; onChange: (value: unknown) => void; onPickSound?: (pluginId: string) => Promise<void>; spritePreviews?: SafePluginRecord["spritePreviews"] }) {
   const { t } = useI18n();
   const label = field.label || fieldKey;
   const description = field.description;
@@ -1811,7 +1832,7 @@ function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange, onPickS
               if (scheduleType === "daily" && childKey === "intervalMinutes") return null;
               if (scheduleType === "interval" && (childKey === "time" || childKey === "days")) return null;
             }
-            return <ConfigFieldEditor key={childKey} pluginId={pluginId} fieldKey={childKey} field={childField} value={item[childKey] ?? initialConfigValue(childField)} onChange={(nextValue) => onChange(items.map((existing, itemIndex) => itemIndex === index ? { ...existing, [childKey]: nextValue } : existing))} />;
+            return <ConfigFieldEditor key={childKey} pluginId={pluginId} fieldKey={childKey} field={childField} value={item[childKey] ?? initialConfigValue(childField)} onChange={(nextValue) => onChange(items.map((existing, itemIndex) => itemIndex === index ? { ...existing, [childKey]: nextValue } : existing))} spritePreviews={spritePreviews} />;
           };
 
           return (
@@ -1866,6 +1887,106 @@ function ConfigFieldEditor({ pluginId, fieldKey, field, value, onChange, onPickS
         <Button variant="secondary" size="compact" onClick={() => onChange("")}>{t("plugins.config.clearSound")}</Button>
       </span>
     </label>;
+  }
+
+  if (field.type === "select" && field.presentation === "sprite-grid") {
+    const options = field.options ?? [];
+    const [focusedValue, setFocusedValue] = React.useState<string>(textValue || (options[0]?.value ?? ""));
+    const cardRefs = React.useRef<Map<string, HTMLDivElement | null>>(new Map());
+
+    React.useEffect(() => {
+      if (textValue) setFocusedValue(textValue);
+    }, [textValue]);
+
+    return <div className="plugin-config-row">
+      <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
+      <div className="courier-sprite-grid" role="radiogroup" aria-label={label}>
+        {options.map((option, index) => {
+          const isSelected = textValue === option.value;
+          const isFocused = focusedValue === option.value || (!focusedValue && index === 0);
+
+          const spriteInfo = spritePreviews?.[option.previewSprite || ""];
+          const spriteUrl = spriteInfo?.url || "";
+          const frames = spriteInfo?.frames ?? 1;
+          const duration = spriteInfo?.durationMs ?? 0;
+          const frameWidth = spriteInfo?.frameWidth || 256;
+          const frameHeight = spriteInfo?.frameHeight || 256;
+          const scaleVal = 80 / frameWidth;
+
+          const previewStyle: React.CSSProperties = {
+            backgroundImage: `url("${spriteUrl}")`,
+            width: `${frameWidth}px`,
+            height: `${frameHeight}px`,
+            backgroundSize: `${frameWidth * frames}px ${frameHeight}px`,
+            transform: `scale(${scaleVal})`,
+            transformOrigin: "top left",
+            position: "absolute",
+            top: 0,
+            left: 0,
+            backgroundRepeat: "repeat-x",
+            backgroundPosition: "0 0",
+            pointerEvents: "none",
+            animationDuration: `${duration}ms`,
+            animationTimingFunction: `steps(${frames})`,
+          };
+
+          const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+            const idx = options.findIndex((o) => o.value === option.value);
+            const { nextIndex } = computeNextRovingIndex(event.key, idx, options.length);
+
+            const isArrowKey = event.key === "ArrowRight" || event.key === "ArrowDown" || event.key === "ArrowLeft" || event.key === "ArrowUp";
+            const isHomeEnd = event.key === "Home" || event.key === "End";
+
+            if (isArrowKey || isHomeEnd) {
+              event.preventDefault();
+              const targetValue = options[nextIndex].value;
+              onChange(targetValue); // ARIA: arrow navigation both focus and select next option; Home/End also select
+              setFocusedValue(targetValue);
+              setTimeout(() => {
+                const targetEl = cardRefs.current.get(targetValue);
+                targetEl?.focus();
+              }, 0);
+            } else if (event.key === " " || event.key === "Enter") {
+              event.preventDefault();
+              onChange(option.value);
+            }
+          };
+
+          return (
+            <div
+              key={option.value}
+              ref={(el) => {
+                if (el) cardRefs.current.set(option.value, el);
+                else cardRefs.current.delete(option.value);
+              }}
+              role="radio"
+              aria-checked={isSelected}
+              tabIndex={isFocused ? 0 : -1}
+              data-courier-value={option.value}
+              onFocus={() => setFocusedValue(option.value)}
+              onKeyDown={handleKeyDown}
+              onClick={() => onChange(option.value)}
+              className={`courier-card ${isSelected ? "selected" : ""}`}
+              style={{
+                "--courier-total-width": `-${frameWidth * frames}px`
+              } as React.CSSProperties}
+            >
+              <div className="courier-sprite-frame">
+                {spriteUrl && (
+                  <div
+                    className="courier-sprite-preview"
+                    style={previewStyle}
+                  />
+                )}
+              </div>
+              <div className="courier-card-meta">
+                <span className="courier-card-title">{option.label || option.value}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>;
   }
 
   return <label className="plugin-config-row">
@@ -2600,7 +2721,7 @@ function PluginsView() {
             {!!installed.configErrors?.length && <section className="plugin-section plugin-section-danger"><div className="plugin-section-title"><small>{t("plugins.inspector.configuration")}</small><strong>{t("plugins.inspector.needsAttention")}</strong></div><ul>{installed.configErrors.map((configError, index) => <li key={index}>{configError.message || String(configError)}</li>)}</ul></section>}
             {hasConfigFields && <section className="plugin-section">
               <div className="plugin-section-title"><small>{t("plugins.inspector.settings")}</small><strong>{t("plugins.inspector.configuration")}</strong></div>
-              <div className="plugin-config-form">{Object.entries(installed.configSchema ?? {}).map(([key, field]) => <ConfigFieldEditor key={key} pluginId={installed.id} fieldKey={key} field={field} value={configDraft[key] ?? initialConfigValue(field)} onChange={(value) => updateDraft(key, value)} onPickSound={(pluginId) => pickConfigSound(pluginId, key)} />)}</div>
+              <div className="plugin-config-form">{Object.entries(installed.configSchema ?? {}).map(([key, field]) => <ConfigFieldEditor key={key} pluginId={installed.id} fieldKey={key} field={field} value={configDraft[key] ?? initialConfigValue(field)} onChange={(value) => updateDraft(key, value)} onPickSound={(pluginId) => pickConfigSound(pluginId, key)} spritePreviews={installed.spritePreviews} />)}</div>
               <Button variant="primary" fullWidth icon={<SaveIcon />} disabled={!!busy} onClick={() => void run(t("plugins.busy.saving"), async () => { applyResult(await api.savePluginConfig(installed.id, configDraft), t("plugins.toast.configSaved")); })}>{t("plugins.inspector.saveConfiguration")}</Button>
             </section>}
             {!!installed.commands?.length && <section className="plugin-section">
@@ -2879,9 +3000,9 @@ function ControlCenter() {
     if (!catalogSearch) return;
     const q = query.trim().toLowerCase();
     const needsRemotePages = !!q || filter === "featured" || filter === "originals";
-    
+
     const pages = new Set<number>();
-    
+
     if (state?.pets.installed) {
       for (const p of state.pets.installed) {
         const searchPet = catalogSearch.find(sp => sp.id === p.id);
@@ -2900,7 +3021,7 @@ function ControlCenter() {
         if (typeof pet.catalogPage === "number" && !catalogPages[pet.catalogPage]) pages.add(pet.catalogPage);
       }
     }
-    
+
     if (!pages.size) return;
     let cancelled = false;
     void Promise.all([...pages].map((page) => api.getCatalogPage(page).catch((err) => ({ source: "error", pets: [], error: String((err as Error)?.message ?? err), page } as CatalogState)))).then((results) => {

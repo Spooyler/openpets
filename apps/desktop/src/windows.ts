@@ -1,5 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { join, resolve, relative } from "node:path";
+import sharp from "sharp";
 
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell, type IpcMainInvokeEvent, type OpenDialogOptions } from "electron";
 
@@ -24,6 +25,8 @@ import { assertSafePetId, getInstalledPetDir } from "./pet-paths.js";
 import { debug, error as logError, warn } from "./logger.js";
 import { getPluginService, type PluginConfigSoundPickResult, type PluginServiceResult } from "./plugin-service.js";
 import { defaultPetSprite, reactionAnimationMetadata, selectableAnimationMetadata } from "./reaction-animation-mapping.js";
+import { readSafePluginManifest } from "./plugin-manifest-reader.js";
+import { registerPluginAssetProtocol } from "./plugin-asset-protocol.js";
 import { checkForGitHubReleaseUpdate, getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 
 type InternalUiWindowKind = "control-center";
@@ -678,6 +681,7 @@ function petTelemetryForId(petId: string): Record<string, string | boolean | und
 }
 
 export function installInternalUiProtocol(): void {
+  registerPluginAssetProtocol(protocol, getPluginService);
   protocol.handle("openpets-codex", async (request) => {
     try {
       if (request.method !== "GET" && request.method !== "HEAD") return new Response(null, { status: 405 });

@@ -53,10 +53,12 @@ Default targets:
 - macOS DMG (x64+arm64 universal)
 - Windows NSIS installer (x64)
 - Linux AppImage (x64)
+- Linux DEB (x64)
+- Linux RPM (x64)
+- Linux tar.gz (x64)
 
 Optional flags:
 - `--include-mac-zip`: macOS ZIP archive
-- `--include-win-portable`: Windows portable executable
 - `--include-linux-deb`: Debian package
 - `--include-linux-targz`: Linux tar.gz archive
 - `--include-experimental-arm`: Windows/Linux ARM64 builds

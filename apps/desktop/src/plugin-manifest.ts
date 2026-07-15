@@ -27,6 +27,7 @@ export type PluginPermission =
   | "events"
   | "ui:toast"
   | "ui:panel"
+  | "ui:delivery"
   | "notify"
   | "bus"
   | "ai"
@@ -48,14 +49,16 @@ export type PluginConfigFieldType = "text" | "textarea" | "number" | "boolean" |
 /** Asset kinds a v3 plugin can declare and bundle. */
 export type PluginAssetKind = "icons" | "images" | "svgs" | "sprites" | "sounds";
 /** Manifest `assets` block: per-kind maps of asset name -> relative file path. */
-export type PluginAssetsDeclaration = Partial<Record<PluginAssetKind, Record<string, string>>>;
+export type PluginSpriteAsset = { path: string; frameWidth: number; frameHeight: number; frames: number; durationMs: number };
+export type PluginAssetsDeclaration = Partial<Omit<Record<PluginAssetKind, Record<string, string>>, "sprites">> & { sprites?: Record<string, PluginSpriteAsset> };
 
 export type PluginConfigField = {
   type: PluginConfigFieldType;
   label?: string;
   description?: string;
   default?: string | number | boolean | string[] | Array<Record<string, unknown>>;
-  options?: Array<{ label: string; value: string }>;
+  options?: Array<{ label: string; value: string; previewSprite?: string }>;
+  presentation?: "sprite-grid";
   min?: number;
   max?: number;
   step?: number;
@@ -117,8 +120,8 @@ export type PluginManifestValidationResult =
 const topLevelFields = new Set(["$schema", "manifestVersion", "id", "name", "description", "version", "runtime", "icon", "permissions", "configSchema", "triggers"]);
 const jsTopLevelFields = new Set(["$schema", "manifestVersion", "id", "name", "description", "version", "runtime", "sdkVersion", "entry", "icon", "permissions", "network", "configSchema"]);
 const jsV3TopLevelFields = new Set([...jsTopLevelFields, "assets", "panels"]);
-const configFieldFields = new Set(["type", "label", "description", "default", "options", "min", "max", "step", "maxLength", "maxItems", "itemSchema"]);
-const configOptionFields = new Set(["label", "value"]);
+const configFieldFields = new Set(["type", "label", "description", "default", "options", "presentation", "min", "max", "step", "maxLength", "maxItems", "itemSchema"]);
+const configOptionFields = new Set(["label", "value", "previewSprite"]);
 const triggerFields = new Set(["on", "everyMinutes", "actions"]);
 const speakActionFields = new Set(["type", "message"]);
 const reactActionFields = new Set(["type", "reaction"]);
@@ -138,6 +141,7 @@ export const pluginV3Permissions = [
   "events",
   "ui:toast",
   "ui:panel",
+  "ui:delivery",
   "notify",
   "bus",
   "ai",
@@ -161,7 +165,7 @@ const pluginAssetExtensions: Record<PluginAssetKind, readonly string[]> = {
   icons: [".png", ".webp", ".svg"],
   images: [".png", ".webp", ".jpg", ".jpeg", ".gif"],
   svgs: [".svg"],
-  sprites: [".png", ".webp"],
+  sprites: [".webp"],
   sounds: [".ogg", ".mp3", ".wav"],
 };
 /** Per-file size caps enforced when asset files are published/installed. */
@@ -235,10 +239,21 @@ function validateJavascriptPluginManifest(input: Record<string, unknown>, manife
   validateNetwork(input.network, errors);
   if (manifestVersion === 3) {
     validateAssets(input.assets, errors);
+    validateSpriteGridPreviews(input.configSchema, input.assets, errors);
     validatePanels(input.panels, errors);
   }
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, manifest: input as OpenPetsPluginManifest, errors: [] };
+}
+
+function validateSpriteGridPreviews(schema: unknown, assets: unknown, errors: PluginManifestValidationError[]): void {
+  if (!isRecord(schema) || !isRecord(assets) || !isRecord(assets.sprites)) return;
+  for (const [fieldName, field] of Object.entries(schema)) {
+    if (!isRecord(field) || field.presentation !== "sprite-grid" || !Array.isArray(field.options)) continue;
+    for (const [index, option] of field.options.entries()) {
+      if (!isRecord(option) || typeof option.previewSprite !== "string" || !Object.prototype.hasOwnProperty.call(assets.sprites, option.previewSprite)) addError(errors, `$.configSchema.${fieldName}.options[${index}].previewSprite`, "invalid_preview_sprite", "sprite-grid options must reference a declared sprite.");
+    }
+  }
 }
 
 function validateJavascriptPermissions(value: unknown, manifestVersion: 2 | 3, errors: PluginManifestValidationError[]): Set<string> {
@@ -268,11 +283,21 @@ function validateAssets(value: unknown, errors: PluginManifestValidationError[])
     if (!isRecord(group)) { addError(errors, `$.assets.${kind}`, "invalid_assets", `assets.${kind} must be an object.`); continue; }
     const entries = Object.entries(group);
     if (entries.length > 32) addError(errors, `$.assets.${kind}`, "too_many_assets", `assets.${kind} may declare at most 32 entries.`);
-    for (const [name, assetPath] of entries) {
+    for (const [name, assetValue] of entries) {
       const path = `$.assets.${kind}.${name}`;
       if (!assetNamePattern.test(name)) addError(errors, path, "invalid_asset_name", "Asset names must be simple lowercase identifiers.");
-      validateRelativeAssetPath(assetPath, pluginAssetExtensions[kind], path, errors);
+      if (kind !== "sprites") validateRelativeAssetPath(assetValue, pluginAssetExtensions[kind], path, errors);
+      else validateSpriteAsset(assetValue, path, errors);
     }
+  }
+}
+
+function validateSpriteAsset(value: unknown, path: string, errors: PluginManifestValidationError[]): void {
+  if (!isRecord(value)) { addError(errors, path, "invalid_sprite", "Sprite assets must declare path and frame metadata."); return; }
+  rejectUnknownFields(value, new Set(["path", "frameWidth", "frameHeight", "frames", "durationMs"]), path, errors);
+  validateRelativeAssetPath(value.path, pluginAssetExtensions.sprites, `${path}.path`, errors);
+  for (const [key, min, max] of [["frameWidth", 32, 512], ["frameHeight", 32, 512], ["frames", 1, 16], ["durationMs", 100, 4000]] as const) {
+    if (typeof value[key] !== "number" || !Number.isInteger(value[key]) || value[key] < min || value[key] > max) addError(errors, `${path}.${key}`, "invalid_sprite_metadata", `${key} must be an integer between ${min} and ${max}.`);
   }
 }
 
@@ -376,6 +401,7 @@ function validateConfigFieldSemantics(field: Record<string, unknown>, path: stri
   if (field.type === "time" && field.default !== undefined && (typeof field.default !== "string" || !isValidTime(field.default))) addError(errors, `${path}.default`, "invalid_default", "Default must be HH:mm between 00:00 and 23:59.");
   if (field.type === "date" && field.default !== undefined && (typeof field.default !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(field.default))) addError(errors, `${path}.default`, "invalid_default", "Default must be YYYY-MM-DD.");
   if (field.type === "secret" && field.default !== undefined) addError(errors, `${path}.default`, "invalid_default", "Secret config fields must not declare defaults.");
+  if (field.presentation !== undefined && (field.type !== "select" || field.presentation !== "sprite-grid")) addError(errors, `${path}.presentation`, "invalid_presentation", "sprite-grid presentation is only valid for select fields.");
   if (field.type === "select" || field.type === "multiSelect") validateSelectField(field, path, errors);
   if (field.type === "list") {
     if (field.maxItems !== undefined && (typeof field.maxItems !== "number" || !Number.isInteger(field.maxItems) || field.maxItems < 0)) addError(errors, `${path}.maxItems`, "invalid_max_items", "maxItems must be a non-negative integer.");
@@ -411,6 +437,7 @@ function validateOptions(value: unknown, path: string, errors: PluginManifestVal
     rejectUnknownFields(option, configOptionFields, optionPath, errors);
     validateString(option.label, `${optionPath}.label`, "option label", errors);
     validateString(option.value, `${optionPath}.value`, "option value", errors);
+    if (option.previewSprite !== undefined && (typeof option.previewSprite !== "string" || !assetNamePattern.test(option.previewSprite))) addError(errors, `${optionPath}.previewSprite`, "invalid_preview_sprite", "previewSprite must be a declared sprite name.");
     if (typeof option.value === "string" && option.value.trim() !== "") {
       if (values.has(option.value)) addError(errors, `${optionPath}.value`, "duplicate_option_value", `Duplicate option value ${option.value}.`);
       values.add(option.value);

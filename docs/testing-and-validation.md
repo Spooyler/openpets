@@ -75,6 +75,20 @@ Each package runs its own `check`/`test`. Notable contract/boundary coverage:
   permissions, SDK compatibility, config field types, network hosts, asset
   formats/size caps, entry files, and panels — run it before packaging.
 
+- **Calendar Airmail**: its deterministic harness coverage should exercise the
+  primary-calendar reconciliation, state-appropriate connection commands,
+  ten-minute and start deliveries, duplicate suppression, selected/default
+  couriers, and reconnect-required cleanup. Run its plugin test alongside
+  `pnpm plugins:locales`,
+  `pnpm plugins:test`, and `pnpm --filter @open-pets/plugin-sdk check` when
+  changing its SDK-facing behavior.
+- **Delivery/picker boundary**: desktop bridge tests cover `ui:delivery`
+  permission and lifecycle semantics; manifest validation covers declared
+  sprite-grid options and asset references. For an Electron end-to-end smoke run,
+  verify that the Airmail settings grid loads each bundled courier, keyboard and
+  pointer selection persist, reduced motion is static, and a test delivery uses
+  the selected courier without requiring any installed pet.
+
 ## Plugin release validation (production gate)
 
 `plugins:check` alone is **not** release-readiness. The dedicated validators are
@@ -83,7 +97,7 @@ the production gate (`scripts/validate-plugin-release.mjs`):
 | Command | When | Catches |
 |---------|------|---------|
 | `pnpm plugins:package` | build artifacts | (produces catalog + ZIP staging) |
-| `pnpm plugins:validate-release` | **before deploy** | unresolved `$t:` names/descriptions in catalog cards, missing plugin ZIPs, SHA mismatches, missing `locales/en.json`, missing declared assets/entry files, catalog/package drift, and **community plugin sidecar validation** (`provenance.json`, `submissions.json`) |
+| `pnpm plugins:validate-release` | **before deploy** | unresolved `$t:` names/descriptions in catalog cards, missing plugin ZIPs, SHA mismatches, missing `locales/en.json`, missing declared assets/entry files (including courier sprites), catalog/package drift, and **community plugin sidecar validation** (`provenance.json`, `submissions.json`) |
 | `pnpm plugins:validate-live` | **after deploy/R2 upload** | the same, against the live catalog + live ZIPs & live sidecars |
 
 ### Plugin sidecar validation
@@ -127,6 +141,8 @@ Before shipping, the relevant gate must be green:
   checks) pass.
 - **An app change** → desktop behavior + contract + runtime checks pass; if it
   touches packaging/CSP/bundled plugins, `check-packaging-contract.ts` passes.
+  A delivery, trusted-asset protocol, or sprite-picker change additionally needs
+  the desktop bridge/static checks and the targeted Electron smoke above.
 - **A plugin release** → `validate-release` before deploy, `validate-live` after.
 - **A pet catalog change** → `verify:catalog:remote` before, `verify:catalog:prod`
   after.

@@ -455,6 +455,7 @@ export const ja: Partial<Messages> = {
   "plugins.permission.events": "イベント",
   "plugins.permission.ui:toast": "トースト",
   "plugins.permission.ui:panel": "パネル",
+  "plugins.permission.ui:delivery": "配達",
   "plugins.permission.notify": "通知",
   "plugins.permission.bus": "プラグインバス",
   "plugins.permission.ai": "AI ゲートウェイ",

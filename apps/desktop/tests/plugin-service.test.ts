@@ -103,6 +103,7 @@ await scenario("config save replaces and reloads", async ({ service, store, runt
   assert.deepEqual(runtime.reloads, ["plug"]);
 });
 
+
 await scenario("config save reload preserves plugin user sounds", async ({ root, userData, store, runtime }) => {
   const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, allowedPluginRoots: [root] });
   addPlugin(store, { manifestVersion: 3, runtime: "javascript", sdkVersion: "3.0.0", config: { customSound: { kind: "user-sound", id: "a".repeat(32), name: "Bell" } } }, { manifestVersion: 3, id: "plug", name: "Plug", version: "1.0.0", runtime: "javascript", sdkVersion: "3.0.0", entry: "index.js", permissions: [], configSchema: { customSound: { type: "sound" } } });
@@ -397,6 +398,26 @@ await localScenario("bundled seeding copies manifest and preserves user choices"
   assert.equal(record?.enabled, false);
   assert.deepEqual(record?.config, { minutes: 45 });
   assert.deepEqual(record?.approvedPermissions, ["pet:speak", "pet:reaction"]);
+});
+
+await localScenario("bundled defaults enable Focus Buddy and Launch Buddy but not Virtual Pet on a fresh install", async ({ userData, root, store }) => {
+  const official = join(root, "official");
+  const focusSource = join(official, "openpets.focus-buddy");
+  const launchSource = join(official, "openpets.launch-buddy");
+  const virtualPetSource = join(official, "openpets.virtual-pet");
+  writeManifest(focusSource, { manifestVersion: 2, id: "openpets.focus-buddy", name: "Focus Buddy", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
+  writeManifest(launchSource, { manifestVersion: 2, id: "openpets.launch-buddy", name: "Launch Buddy", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
+  writeManifest(virtualPetSource, { manifestVersion: 2, id: "openpets.virtual-pet", name: "Virtual Pet", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
+  writeFileSync(join(focusSource, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
+  writeFileSync(join(launchSource, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
+  writeFileSync(join(virtualPetSource, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
+  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official] });
+
+  await service.start();
+
+  assert.equal(store.getRecord("openpets.focus-buddy")?.enabled, true);
+  assert.equal(store.getRecord("openpets.launch-buddy")?.enabled, true);
+  assert.equal(store.getRecord("openpets.virtual-pet")?.enabled, false);
 });
 
 await localScenario("bundled seeding prunes stale ids and blocks uninstall update", async ({ userData, root, store }) => {

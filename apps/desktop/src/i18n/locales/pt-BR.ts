@@ -455,6 +455,7 @@ export const ptBR: Partial<Messages> = {
   "plugins.permission.events": "Eventos",
   "plugins.permission.ui:toast": "Avisos",
   "plugins.permission.ui:panel": "Painéis",
+  "plugins.permission.ui:delivery": "Entregas",
   "plugins.permission.notify": "Notificações",
   "plugins.permission.bus": "Barramento de plugins",
   "plugins.permission.ai": "Gateway de IA",

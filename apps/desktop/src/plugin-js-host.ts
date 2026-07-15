@@ -24,6 +24,26 @@ export interface PluginJsHost { startPlugin(options: PluginJsHostStartOptions): 
 const configDisposers = new WeakMap<WebContents, Map<string, () => void>>();
 type SdkWithLogger = PluginSdkApi & { __logger?: PluginRuntimeLogger };
 
+export type PluginSdkErrorEnvelope = {
+  readonly __openPetsError: {
+    readonly message: string;
+    readonly code?: string;
+  };
+};
+
+const pluginSdkErrorCode = /^[a-z][a-z0-9_-]{0,63}$/;
+
+export function serializePluginSdkError(error: unknown): PluginSdkErrorEnvelope {
+  const message = error instanceof Error && error.message.trim()
+    ? error.message
+    : "Plugin SDK call failed.";
+  const code = error instanceof Error && typeof (error as Error & { code?: unknown }).code === "string"
+    && pluginSdkErrorCode.test((error as Error & { code: string }).code)
+    ? (error as Error & { code: string }).code
+    : undefined;
+  return { __openPetsError: { message, ...(code ? { code } : {}) } };
+}
+
 export class ElectronPluginJsHost implements PluginJsHost {
   readonly #startupTimeoutMs: number;
 
@@ -107,7 +127,7 @@ function installSdkHandler(channel: string, contents: WebContents, sdk: PluginSd
       event.returnValue = dispatchSyncSdkCall(sdk, path, args);
     } catch (error) {
       logPluginDiagnostic(logger, "warn", "plugin sdk dispatch failed", { pluginId, route: typeof path === "string" ? path : "invalid", ok: false, reason: error instanceof Error ? error.message : String(error), errorCode: classifyPluginError(error), durationMs: Date.now() - started });
-      event.returnValue = { __openPetsError: error instanceof Error ? error.message : String(error) };
+      event.returnValue = serializePluginSdkError(error);
     }
   };
   ipcMain.handle(channel, async (event: IpcMainInvokeEvent, path: unknown, args: unknown[]) => {
@@ -118,7 +138,7 @@ function installSdkHandler(channel: string, contents: WebContents, sdk: PluginSd
       return await dispatchSdkCall(contents, sdk, path, args);
     } catch (error) {
       logPluginDiagnostic(logger, "warn", "plugin sdk dispatch failed", { pluginId, route: typeof path === "string" ? path : "invalid", ok: false, reason: error instanceof Error ? error.message : String(error), errorCode: classifyPluginError(error), durationMs: Date.now() - started });
-      throw error;
+      return serializePluginSdkError(error);
     }
   });
   ipcMain.on(channel, syncListener);
@@ -169,6 +189,9 @@ export const sdkCallHandlers: Record<PluginSdkRoute, SdkCallHandler> = {
   "ui.panelPost": (sdk, args) => sdk.ui.panelPost(args[0], args[1]),
   "ui.panelClose": (sdk, args) => sdk.ui.panelClose(args[0]),
   "ui.panelOnMessage": (sdk, args, runCallback) => sdk.ui.panelOnMessage(args[0], callbackOf(runCallback, args[1])),
+  "ui.delivery": (sdk, args) => sdk.ui.delivery(args[0]),
+  "ui.deliveryDismiss": (sdk, args) => sdk.ui.deliveryDismiss(args[0]),
+  "ui.deliverySubscribe": (sdk, args, runCallback) => sdk.ui.deliverySubscribe(args[0], callbackOf(runCallback, args[1]) as never),
   "ui.menuSetItems": (sdk, args) => sdk.ui.menuSetItems(args[0]),
   "ui.menuOnSelect": (sdk, args, runCallback) => sdk.ui.menuOnSelect(callbackOf(runCallback, args[0])),
   "ui.menuOffSelect": (sdk, args) => sdk.ui.menuOffSelect(args[0]),

@@ -455,6 +455,7 @@ export const zhHans: Partial<Messages> = {
   "plugins.permission.events": "事件",
   "plugins.permission.ui:toast": "提示消息",
   "plugins.permission.ui:panel": "面板",
+  "plugins.permission.ui:delivery": "投递",
   "plugins.permission.notify": "通知",
   "plugins.permission.bus": "插件总线",
   "plugins.permission.ai": "AI 网关",

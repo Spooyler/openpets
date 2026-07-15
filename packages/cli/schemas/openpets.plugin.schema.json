@@ -23,7 +23,7 @@
         "enum": [
           "pet:speak", "pet:reaction", "pet:move", "timer", "schedule", "storage", "status", "commands", "network",
           "pet:interact", "pet:pin", "pet:animate", "pet:speak:dynamic", "pet:drop", "pets:read", "pets:manage",
-          "audio", "events", "ui:toast", "ui:panel", "notify", "bus", "ai", "secrets", "voice:speak", "voice:listen",
+          "audio", "events", "ui:toast", "ui:panel", "ui:delivery", "notify", "bus", "ai", "secrets", "voice:speak", "voice:listen",
           "auth", "files", "system:openExternal", "system:metrics", "clipboard", "network:write"
         ]
       }
@@ -47,7 +47,7 @@
         "icons": { "$ref": "#/definitions/assetGroup" },
         "images": { "$ref": "#/definitions/assetGroup" },
         "svgs": { "$ref": "#/definitions/assetGroup" },
-        "sprites": { "$ref": "#/definitions/assetGroup" },
+        "sprites": { "$ref": "#/definitions/spriteAssetGroup" },
         "sounds": { "$ref": "#/definitions/assetGroup" }
       }
     },
@@ -114,6 +114,23 @@
       "propertyNames": { "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
       "additionalProperties": { "type": "string" }
     },
+    "spriteAssetGroup": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "frameWidth", "frameHeight", "frames", "durationMs"],
+        "properties": {
+          "path": { "type": "string", "pattern": "\\.webp$" },
+          "frameWidth": { "type": "integer", "minimum": 32, "maximum": 512 },
+          "frameHeight": { "type": "integer", "minimum": 32, "maximum": 512 },
+          "frames": { "type": "integer", "minimum": 1, "maximum": 16 },
+          "durationMs": { "type": "integer", "minimum": 100, "maximum": 4000 }
+        }
+      }
+    },
     "configRef": {
       "type": "object",
       "additionalProperties": false,
@@ -125,9 +142,10 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "enum": ["text", "textarea", "number", "boolean", "select", "time", "date", "multiSelect", "list", "secret"] },
+        "type": { "enum": ["text", "textarea", "number", "boolean", "select", "time", "date", "multiSelect", "list", "secret", "sound"] },
         "label": { "type": "string" },
         "description": { "type": "string" },
+        "presentation": { "enum": ["sprite-grid"] },
         "default": {},
         "options": {
           "type": "array",
@@ -135,7 +153,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["label", "value"],
-            "properties": { "label": { "type": "string" }, "value": { "type": "string" } }
+            "properties": { "label": { "type": "string" }, "value": { "type": "string" }, "previewSprite": { "type": "string" } }
           }
         },
         "min": { "type": "number" },

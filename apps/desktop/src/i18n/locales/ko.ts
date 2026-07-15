@@ -455,6 +455,7 @@ export const ko: Partial<Messages> = {
   "plugins.permission.events": "이벤트",
   "plugins.permission.ui:toast": "토스트",
   "plugins.permission.ui:panel": "패널",
+  "plugins.permission.ui:delivery": "배달",
   "plugins.permission.notify": "알림",
   "plugins.permission.bus": "플러그인 버스",
   "plugins.permission.ai": "AI 게이트웨이",

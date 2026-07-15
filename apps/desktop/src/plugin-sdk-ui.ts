@@ -1,7 +1,7 @@
 import type { OpenPetsJavascriptPluginManifest, PluginPermission } from "./plugin-manifest.js";
 import type { PluginAudioApi } from "./plugin-sdk-audio.js";
-import type { BubbleSlot, PluginRuntimeState } from "./plugin-sdk-state.js";
-import type { PluginBubbleDescriptor, PluginBubbleDismissReason, PluginBubbleHostHandle, PluginHostCapabilities, PluginLogLevel, PluginMenuItem, PluginStatus } from "./plugin-sdk-bridge.js";
+import type { BubbleSlot, DeliverySlot, PluginRuntimeState } from "./plugin-sdk-state.js";
+import type { PluginBubbleDescriptor, PluginBubbleDismissReason, PluginBubbleHostHandle, PluginDeliveryDescriptor, PluginDeliveryDismissReason, PluginHostCapabilities, PluginLogLevel, PluginMenuItem, PluginStatus } from "./plugin-sdk-bridge.js";
 
 export function createPluginUiApi(options: {
   readonly pluginId: string;
@@ -21,7 +21,7 @@ export function createPluginUiApi(options: {
   readonly safeError: (error: unknown) => string;
   readonly logger: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void;
   readonly onError: (reason: string) => void;
-  readonly quotas: { petActionsPerMinute: number; activeBubbles: number; notifyPerMinute: number; toastPerMinute: number; activePanels: number; busPayloadBytes: number };
+  readonly quotas: { petActionsPerMinute: number; activeBubbles: number; notifyPerMinute: number; toastPerMinute: number; activePanels: number; deliveriesPerMinute: number; busPayloadBytes: number };
 }) {
   const { pluginId, manifest, state, capabilities, audio, requirePermission, guardCallback, validateBubbleSpec, validatePetHandleId, resolvePanelPath, normalizeJson, validateMenuItems, validateSayMessage, safeError, logger, onError, quotas } = options;
 
@@ -55,6 +55,56 @@ export function createPluginUiApi(options: {
     const title = validateSayMessage(String(spec.title ?? ""));
     const body = spec.body === undefined ? undefined : validateSayMessage(String(spec.body));
     await capabilities.notify({ title, body, sound: spec.sound === true && capabilities.settings.audioAllowed() && !capabilities.settings.inQuietHours() });
+  };
+
+  const delivery = async (spec: unknown): Promise<{ deliveryId: string }> => {
+    requirePermission("ui:delivery");
+    state.deliveryWindow.tick(quotas.deliveriesPerMinute, "delivery");
+    const descriptor = validateDelivery(spec);
+    const deliveryId = opaqueId("delivery");
+    const previousId = [...state.deliveries.entries()].find(([, current]) => current.key === descriptor.key)?.[0];
+    if (previousId) {
+      const previous = state.deliveries.get(previousId);
+      if (previous) previous.dismissed = true;
+      state.deliveries.delete(previousId);
+    }
+    const slot: DeliverySlot = { key: descriptor.key, dismissed: false };
+    state.deliveries.set(deliveryId, slot);
+    try {
+      slot.host = await capabilities.delivery.register(pluginId, descriptor);
+    } catch (error) {
+      if (state.deliveries.get(deliveryId) === slot) {
+        state.deliveries.delete(deliveryId);
+      }
+      throw error;
+    }
+    // A newer registration for this key won while the host call was pending.
+    // Its handle exclusively owns dismissal callbacks and host interactions.
+    if (slot.dismissed || state.deliveries.get(deliveryId) !== slot) return { deliveryId };
+    slot.host.onDismiss((reason) => {
+      if (slot.dismissed || !state.deliveries.has(deliveryId)) return;
+      slot.dismissed = true;
+      state.deliveries.delete(deliveryId);
+      try { slot.onDismiss?.(reason); } catch (error) { onError(safeError(error)); }
+    });
+    return { deliveryId };
+  };
+
+  const validateDelivery = (value: unknown): PluginDeliveryDescriptor => {
+    if (!isRecord(value)) throw new Error("Invalid delivery descriptor.");
+    check(Object.keys(value).every((key) => ["key", "courier", "title", "detail", "expiresAt"].includes(key)), "Invalid delivery descriptor field.");
+    const key = typeof value.key === "string" ? value.key : "";
+    const courier = value.courier;
+    const title = typeof value.title === "string" ? value.title : "";
+    const detail = typeof value.detail === "string" ? value.detail : "";
+    const expiresAt = Number(value.expiresAt);
+    const now = Date.now();
+    check(/^[A-Za-z0-9._:-]{1,96}$/.test(key), "Invalid delivery key.");
+    check(isRecord(courier) && courier.kind === "sprite" && typeof courier.name === "string" && /^[a-z0-9][a-z0-9._-]{0,63}$/.test(courier.name) && Object.keys(courier).every((key) => key === "kind" || key === "name"), "Invalid delivery courier.");
+    check(title.length >= 1 && title.length <= 160 && !/[\u0000-\u001f\u007f]/.test(title), "Invalid delivery title.");
+    check(detail.length <= 200 && !/[\u0000-\u001f\u007f]/.test(detail), "Invalid delivery detail.");
+    check(Number.isFinite(expiresAt) && expiresAt > now && expiresAt <= now + 7 * 24 * 60 * 60 * 1000, "Invalid delivery expiresAt.");
+    return { key, courier: { kind: "sprite", name: courier.name }, title, detail, expiresAt };
   };
 
   return {
@@ -118,6 +168,14 @@ export function createPluginUiApi(options: {
       panelPost: async (panelId: unknown, msg: unknown) => { await requirePanel(state, panelId).postMessage(normalizeJson(msg, quotas.busPayloadBytes, "panel message")); },
       panelClose: async (panelId: unknown) => { const panel = state.panels.get(String(panelId)); if (panel) { await panel.close(); state.panels.delete(String(panelId)); } },
       panelOnMessage: (panelId: unknown, handler: (msg: unknown) => void) => { requirePanel(state, panelId).onMessage = guardCallback(handler); },
+      delivery,
+      deliveryDismiss: async (deliveryId: unknown) => { await Promise.resolve(state.deliveries.get(String(deliveryId))?.host?.dismiss()); },
+      deliverySubscribe: (deliveryId: unknown, handler: (reason: PluginDeliveryDismissReason) => void) => {
+        const slot = state.deliveries.get(String(deliveryId));
+        if (!slot) return { ok: false };
+        slot.onDismiss = handler;
+        return { ok: true };
+      },
       menuSetItems: async (items: unknown) => { requirePermission("commands"); state.menuItems = validateMenuItems(items); },
       menuOnSelect: (handler: (id: string) => void) => { requirePermission("commands"); const wrapped = guardCallback(handler); state.menuHandlers.add(wrapped); return { subscriptionId: registerDisposer(state, () => state.menuHandlers.delete(wrapped)) }; },
       menuOffSelect: (subscriptionId: unknown) => { state.eventSubscriptions.get(String(subscriptionId))?.(); state.eventSubscriptions.delete(String(subscriptionId)); },

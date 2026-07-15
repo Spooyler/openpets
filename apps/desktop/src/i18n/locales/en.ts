@@ -527,6 +527,7 @@ export const en = {
   "plugins.permission.events": "Events",
   "plugins.permission.ui:toast": "Toasts",
   "plugins.permission.ui:panel": "Panels",
+  "plugins.permission.ui:delivery": "Deliveries",
   "plugins.permission.notify": "Notifications",
   "plugins.permission.bus": "Plugin bus",
   "plugins.permission.ai": "AI gateway",

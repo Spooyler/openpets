@@ -119,7 +119,6 @@ function createBuildPlan() {
     { name: "mac dmg x64+arm64", args: ["--mac", "dmg", "--x64", "--arm64"] },
     { name: "mac zip x64+arm64", args: ["--mac", "zip", "--x64", "--arm64"] },
     { name: "windows nsis x64", args: ["--win", "nsis", "--x64"] },
-    { name: "windows portable x64", args: ["--win", "portable", "--x64"] },
     { name: "linux AppImage x64", args: ["--linux", "AppImage", "--x64"] },
     { name: "linux deb x64", args: ["--linux", "deb", "--x64"] },
     { name: "linux rpm x64", args: ["--linux", "rpm", "--x64"] },
@@ -210,7 +209,7 @@ function defaultReleaseNotes() {
     "",
     "## Artifacts",
     "",
-    "This release includes the full desktop artifact set: macOS DMG/ZIP, Windows installer/portable, Linux AppImage/DEB/RPM/tar.gz, and SHA256SUMS.",
+    "This release includes the full desktop artifact set: macOS DMG/ZIP, Windows installer, Linux AppImage/DEB/RPM/tar.gz, and SHA256SUMS.",
     "",
     "## Notes",
     "",
@@ -219,5 +218,5 @@ function defaultReleaseNotes() {
 }
 
 function printHelp() {
-  console.log(`Usage: pnpm release:desktop -- --yes\n\nBuilds local desktop release artifacts, creates a published GitHub release, and uploads artifacts.\n\nDefault targets:\n  - macOS dmg x64+arm64\n  - macOS zip x64+arm64\n  - Windows nsis x64\n  - Windows portable x64\n  - Linux AppImage x64\n  - Linux deb x64\n  - Linux rpm x64\n  - Linux tar.gz x64\n\nOptions:\n  --yes                       create the published GitHub release after building\n  --dry-run                   run checks/builds and print what would be released\n  --skip-checks               skip pnpm build and desktop check\n  --include-experimental-arm  also build Windows/Linux ARM64 artifacts\n`);
+  console.log(`Usage: pnpm release:desktop -- --yes\n\nBuilds local desktop release artifacts, creates a published GitHub release, and uploads artifacts.\n\nDefault targets:\n  - macOS dmg x64+arm64\n  - macOS zip x64+arm64\n  - Windows nsis x64\n  - Linux AppImage x64\n  - Linux deb x64\n  - Linux rpm x64\n  - Linux tar.gz x64\n\nOptions:\n  --yes                       create the published GitHub release after building\n  --dry-run                   run checks/builds and print what would be released\n  --skip-checks               skip pnpm build and desktop check\n  --include-experimental-arm  also build Windows/Linux ARM64 artifacts\n`);
 }

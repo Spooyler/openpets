@@ -318,4 +318,63 @@
     .dashboard-grid { @apply grid-cols-1; }
   }
 
+  /* Accessible presentation: sprite-grid animated radio-card courier picker */
+  .courier-sprite-grid {
+    @apply grid grid-cols-2 min-[640px]:grid-cols-3 gap-3 w-full mt-1.5;
+  }
+  .courier-card {
+    @apply flex flex-col items-center justify-between p-3.5 rounded-2xl border bg-white/60 cursor-pointer transition-all duration-200 outline-none select-none;
+    border-color: rgba(126, 161, 210, 0.25);
+  }
+  .courier-card:hover {
+    @apply border-brand/50 bg-white/95 scale-[1.02] shadow-sm;
+  }
+  .courier-card:focus-visible {
+    @apply ring-4 ring-brand/20 border-brand;
+  }
+  .courier-card.selected {
+    @apply border-brand bg-blue-50/90 ring-4 ring-blue-200/50 shadow-sm;
+  }
+  .courier-sprite-frame {
+    @apply w-20 h-20 overflow-hidden relative mb-2 flex items-center justify-center rounded-xl bg-blue-50/40 border border-blue-100/30;
+  }
+  .courier-sprite-preview {
+    width: var(--courier-width);
+    height: var(--courier-height);
+    background-size: calc(var(--courier-width) * var(--courier-frames)) var(--courier-height);
+    background-repeat: repeat-x;
+    background-position: 0 0;
+    @apply absolute origin-top-left pointer-events-none;
+    top: 0;
+    left: 0;
+  }
+  /* Animation loops on hover/focus OR when selected. First frame is static naturally. */
+  .courier-card.selected .courier-sprite-preview,
+  .courier-card:hover .courier-sprite-preview,
+  .courier-card:focus-visible .courier-sprite-preview {
+    animation-name: picker-fly;
+    animation-duration: var(--courier-duration);
+    animation-timing-function: steps(var(--courier-frames));
+    animation-iteration-count: infinite;
+  }
+  @keyframes picker-fly {
+    from { background-position: 0 0; }
+    to { background-position: var(--courier-total-width) 0; }
+  }
+  /* Reduced motion media query */
+  @media (prefers-reduced-motion: reduce) {
+    .courier-card.selected .courier-sprite-preview,
+    .courier-card:hover .courier-sprite-preview,
+    .courier-card:focus-visible .courier-sprite-preview {
+      animation: none !important;
+      background-position: 0 0 !important;
+    }
+  }
+  .courier-card-meta {
+    @apply flex flex-col items-center gap-0.5;
+  }
+  .courier-card-title {
+    @apply text-xs font-black text-navy;
+  }
+
 }

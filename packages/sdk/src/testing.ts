@@ -27,6 +27,9 @@ import type {
   OpenPetsCommand,
   OpenPetsCommandHandler,
   OpenPetsContext,
+  OpenPetsDelivery,
+  OpenPetsDeliveryDismissReason,
+  OpenPetsDeliveryHandle,
   OpenPetsEventName,
   OpenPetsMenuItem,
   OpenPetsPermission,
@@ -64,6 +67,14 @@ export interface RecordedAlert {
   acknowledged: boolean;
 }
 
+export interface RecordedDelivery {
+  /** Deterministic delivery id accepted by `harness.dismissDelivery`. */
+  id: string;
+  spec: OpenPetsDelivery;
+  handle: OpenPetsDeliveryHandle;
+  dismissed: boolean;
+}
+
 export interface RecordedSchedule {
   type: "once" | "every" | "daily" | "cron" | "at";
   handler: OpenPetsScheduleHandler;
@@ -93,6 +104,7 @@ export interface MockCalls {
   menuItems: OpenPetsMenuItem[];
   bubbles: RecordedBubble[];
   alerts: RecordedAlert[];
+  deliveries: RecordedDelivery[];
   dismissedBubbles: string[];
   toasts: Array<{ text: string; tone?: string }>;
   notifications: Array<{ title: string; body?: string }>;
@@ -275,6 +287,7 @@ export interface MockHarnessCore {
   fireBubbleAction(bubbleId: string, actionId: string): Promise<void>;
   fireBubbleSubmit(bubbleId: string, values: Record<string, string | number>): Promise<void>;
   dismissBubble(bubbleId: string, reason?: OpenPetsBubbleDismissReason): Promise<void>;
+  dismissDelivery(deliveryId: string, reason?: OpenPetsDeliveryDismissReason): Promise<void>;
   runCommand(commandId: string, values?: Record<string, unknown>): Promise<void>;
   setConfig(config: Record<string, unknown>): Promise<void>;
   net: { mock(urlPrefix: string, response: { status?: number; json?: unknown; text?: string; chunks?: string[] }): void };
@@ -296,7 +309,7 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
   let config = { ...(options.config ?? {}) };
   const calls: MockCalls = {
     speak: [], react: [], reactions: [], statusReactions: [], status: [], storage: new Map(), schedules: new Map(), commands: new Map(), menuItems: [],
-    bubbles: [], alerts: [], dismissedBubbles: [], toasts: [], notifications: [], sounds: [], importedUserSounds: [], forgottenUserSounds: [], busPublishes: [], netCalls: [],
+    bubbles: [], alerts: [], deliveries: [], dismissedBubbles: [], toasts: [], notifications: [], sounds: [], importedUserSounds: [], forgottenUserSounds: [], busPublishes: [], netCalls: [],
     aiCalls: [], voiceSpeaks: [], openedExternal: [], clipboardWrites: [], spawnedPets: [], panelMessages: [],
     savedFiles: [], secrets: new Map(), errors: [],
   };
@@ -370,6 +383,30 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
     return record.handle;
   };
   const bubbleCallbacks = new Map<string, { record: RecordedBubble; callbacks: { onAction?: (actionId: string) => void | Promise<void>; onSubmit?: (values: Record<string, string | number>) => void | Promise<void>; onDismiss?: (reason: OpenPetsBubbleDismissReason) => void } }>();
+
+  const deliveryCallbacks = new Map<string, { record: RecordedDelivery; onDismiss?: (reason: OpenPetsDeliveryDismissReason) => void }>();
+  const makeDelivery = (spec: OpenPetsDelivery): OpenPetsDeliveryHandle => {
+    requirePermission("ui:delivery");
+    const id = newId("delivery");
+    const record: RecordedDelivery = {
+      id,
+      spec: { ...spec },
+      dismissed: false,
+      handle: {
+        dismiss: async () => dismissDelivery(id, "manual"),
+        onDismiss: (handler) => { deliveryCallbacks.get(id)!.onDismiss = handler; },
+      },
+    };
+    deliveryCallbacks.set(id, { record });
+    calls.deliveries.push(record);
+    return record.handle;
+  };
+  const dismissDelivery = async (id: string, reason: OpenPetsDeliveryDismissReason): Promise<void> => {
+    const entry = deliveryCallbacks.get(id);
+    if (!entry || entry.record.dismissed) return;
+    entry.record.dismissed = true;
+    entry.onDismiss?.(reason);
+  };
 
   const makeAlert = (spec: OpenPetsAlert): OpenPetsAlertHandle => {
     if (spec.sound !== undefined) requirePermission("audio");
@@ -458,6 +495,7 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
           close: async () => undefined,
         };
       },
+      delivery: async (spec) => makeDelivery(spec),
       menu: {
         setItems: async (items) => { requirePermission("commands"); calls.menuItems = items.map((item) => ({ ...item })); },
         onSelect: () => () => undefined,
@@ -638,6 +676,7 @@ export function createMockContext(optionsOrConfig: MockContextOptions | Record<s
     fireBubbleAction: async (bubbleId, actionId) => { const entry = bubbleCallbacks.get(bubbleId); if (!entry) throw new Error(`Unknown bubble: ${bubbleId}`); await entry.callbacks.onAction?.(actionId); const action = entry.record.spec.actions?.find((candidate) => candidate.id === actionId); if (action?.dismissesBubble !== false) await entry.record.handle.dismiss(); },
     fireBubbleSubmit: async (bubbleId, values) => { const entry = bubbleCallbacks.get(bubbleId); if (!entry) throw new Error(`Unknown bubble: ${bubbleId}`); await entry.callbacks.onSubmit?.(values); },
     dismissBubble: async (bubbleId, reason = "click") => { const entry = bubbleCallbacks.get(bubbleId); if (!entry || entry.record.dismissed) return; entry.record.dismissed = true; calls.dismissedBubbles.push(bubbleId); entry.callbacks.onDismiss?.(reason); },
+    dismissDelivery,
     runCommand: async (commandId, values) => { const command = calls.commands.get(commandId); if (!command) throw new Error(`Unknown command: ${commandId}`); await command.handler(values); },
     setConfig: async (next) => { config = { ...next }; for (const listener of configListeners) await Promise.resolve(listener({ ...config })); },
     net: { mock: (urlPrefix, response) => { netMocks.unshift({ urlPrefix, response }); } },

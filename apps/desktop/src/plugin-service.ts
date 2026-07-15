@@ -16,6 +16,7 @@ import type { PluginPetApi } from "./plugin-pet-api.js";
 import { JsonPluginStorageStore, type PluginCommand, type PluginHostCapabilities, type PluginLogLevel, type PluginStatus } from "./plugin-sdk-bridge.js";
 import { PluginRuntime, type PluginRuntimeOptions, type PluginRuntimeScheduler } from "./plugin-runtime.js";
 import { PluginStateStore, type PluginSource, type PluginStateRecord } from "./plugin-state.js";
+import { getAppStateSnapshot } from "./app-state.js";
 
 export type SafePluginRecord = {
   readonly id: string;
@@ -38,6 +39,8 @@ export type SafePluginRecord = {
   readonly configSchema?: OpenPetsPluginManifest["configSchema"];
   readonly effectiveConfig?: PluginConfig;
   readonly configErrors?: readonly PluginConfigValidationError[];
+  /** Host-resolved plugin sprite URLs and animation metadata; never filesystem paths. */
+  readonly spritePreviews?: Readonly<Record<string, { readonly url: string; readonly frameWidth: number; readonly frameHeight: number; readonly frames: number; readonly durationMs: number }>>;
   readonly commands?: readonly PluginCommand[];
   readonly status?: PluginStatus;
 };
@@ -76,8 +79,8 @@ export type PluginServiceOptions = {
   readonly onLocalPluginSourceRemoved?: (sourcePath: string) => void;
 };
 
-export const bundledOfficialPluginIds = ["openpets.reminders", "openpets.virtual-pet"] as const;
-const bundledEnabledByDefault = new Set<string>(["openpets.reminders", "openpets.virtual-pet"]);
+export const bundledOfficialPluginIds = ["openpets.reminders", "openpets.focus-buddy", "openpets.launch-buddy", "openpets.virtual-pet"] as const;
+const bundledEnabledByDefault = new Set<string>(["openpets.reminders", "openpets.focus-buddy", "openpets.launch-buddy"]);
 const staleBundledPluginIds = ["openpets.daily-reminders", "openpets.pomodoro", "openpets.ambient-companion", "openpets.break-buddy", "openpets.focus-buddy", "openpets.github-notifications", "openpets.pet-pal", "openpets.quick-reminders", "openpets.wander-buddy"] as const;
 
 export class PluginService {
@@ -457,11 +460,13 @@ export class PluginService {
       const config = getEffectivePluginConfig(manifest, record.config);
       const runtimeState = typeof (this.runtime as unknown as { getPluginState?: unknown }).getPluginState === "function" ? this.runtime.getPluginState(record.id) : { commands: [] };
       await ensurePluginLocales(record.id, record.installPath).catch(() => undefined);
-      return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason), name: resolvePluginText(record.id, manifest.name) ?? manifest.name, description: resolvePluginText(record.id, manifest.description), icon: manifest.icon, iconDataUrl: await readPluginIconDataUrl(manifest, record.installPath), configSchema: resolveConfigSchemaText(record.id, manifest.configSchema), effectiveConfig: config.ok ? resolveConfigValueText(record.id, config.config) : undefined, configErrors: config.ok ? undefined : config.errors, commands: runtimeState.commands.map((command) => resolveCommandText(record.id, command)), status: runtimeState.status };
+      return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason), name: resolvePluginText(record.id, manifest.name) ?? manifest.name, description: resolvePluginText(record.id, manifest.description), icon: manifest.icon, iconDataUrl: await readPluginIconDataUrl(manifest, record.installPath), configSchema: resolveConfigSchemaText(record.id, manifest.configSchema), effectiveConfig: config.ok ? resolveConfigValueText(record.id, config.config) : undefined, configErrors: config.ok ? undefined : config.errors, spritePreviews: getSafeSpritePreviews(manifest), commands: runtimeState.commands.map((command) => resolveCommandText(record.id, command)), status: runtimeState.status };
     } catch (error) {
       return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason) ?? safeError(error) };
     }
   }
+
+  /** Sole authority for pet config options and validation. */
 
   async #updateCatalogMetadata(entry: PluginCatalogEntryV2 | { readonly id: string }): Promise<void> {
     const existing = this.stateStore.getRecord(entry.id);
@@ -751,6 +756,17 @@ function resolveConfigSchemaText(pluginId: string, schema: OpenPetsPluginManifes
   return Object.fromEntries(Object.entries(schema).map(([key, field]) => [key, resolveConfigFieldText(pluginId, field)]));
 }
 
+export function getSafeSpritePreviews(manifest: OpenPetsPluginManifest): SafePluginRecord["spritePreviews"] {
+  if (manifest.runtime !== "javascript" || manifest.manifestVersion !== 3) return undefined;
+  return Object.fromEntries(Object.entries(manifest.assets?.sprites ?? {}).map(([name, sprite]) => [name, {
+    url: `openpets-plugin-asset://${encodeURIComponent(manifest.id)}/sprites/${encodeURIComponent(name)}?v=${encodeURIComponent(manifest.version)}`,
+    frameWidth: sprite.frameWidth,
+    frameHeight: sprite.frameHeight,
+    frames: sprite.frames,
+    durationMs: sprite.durationMs,
+  }]));
+}
+
 function isPermissionSubset(next: readonly PluginPermission[], approved: readonly PluginPermission[]): boolean {
   const approvedSet = new Set(approved);
   return next.every((permission) => approvedSet.has(permission));
@@ -812,7 +828,6 @@ function isEntryDeprecated(entry: object): boolean { return "deprecated" in entr
 function getStatusReason(entry: object): string | undefined { return "statusReason" in entry && typeof entry.statusReason === "string" ? entry.statusReason : undefined; }
 function getSdkVersion(entry: object): string | undefined { return "sdkVersion" in entry && typeof entry.sdkVersion === "string" ? entry.sdkVersion : undefined; }
 function getMaxVersion(entry: object): string | undefined { return "maxOpenPetsVersion" in entry && typeof entry.maxOpenPetsVersion === "string" ? entry.maxOpenPetsVersion : undefined; }
-function getNetworkHosts(entry: object): readonly string[] | undefined { return "network" in entry && entry.network && typeof entry.network === "object" && "hosts" in entry.network && Array.isArray(entry.network.hosts) ? entry.network.hosts : undefined; }
 
 function compareSemver(a: string, b: string): number {
   const pa = parseCoreVersion(a); const pb = parseCoreVersion(b);

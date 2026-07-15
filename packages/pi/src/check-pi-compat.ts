@@ -28,6 +28,7 @@ const runtime = createOpenPetsPiExtension(api, {
     status: async () => ({ ok: true, appRunning: true }),
     listPets: async () => ({ ok: true, defaultPetId: "builtin", pets: [] }),
     installPet: async () => ({ ok: true, petId: "x", displayName: "X", installed: true }),
+    installLocalPet: async () => ({ ok: true, petId: "x", displayName: "X", installed: true }),
     acquireLease: async () => { throw new Error("leases disabled"); },
     heartbeatLease: async () => ({ leaseId: "x", expiresAt: 0 }),
     releaseLease: async () => ({ released: true }),

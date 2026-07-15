@@ -99,11 +99,12 @@ async function checkStdioServerContract(): Promise<void> {
     command: process.execPath,
     args: [join("dist", "index.js"), "--pet", "snoopy"],
     env: { ...process.env, OPENPETS_DISCOVERY_FILE: join(process.cwd(), ".missing-openpets-discovery.json") },
-    stderr: "pipe",
+    stderr: "ignore",
   });
   const client = new Client({ name: "openpets-stdio-contract", version: "0.0.0" });
-  await client.connect(transport);
+  let primaryFailure = false;
   try {
+    await client.connect(transport);
     const tools = await client.listTools();
     const names = tools.tools.map((tool) => tool.name).sort();
     if (names.join(",") !== "openpets_adopt,openpets_react,openpets_say,openpets_status") {
@@ -121,8 +122,26 @@ async function checkStdioServerContract(): Promise<void> {
     if (structured.appRunning !== false || structured.configuredPetId !== "snoopy" || structured.routingImplemented !== true) {
       throw new Error("Unavailable stdio status returned unexpected structured content.");
     }
+  } catch (error) {
+    primaryFailure = true;
+    throw error;
   } finally {
-    await client.close();
+    const cleanupErrors: unknown[] = [];
+    try {
+      await client.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      await transport.close();
+    } catch (error) {
+      cleanupErrors.push(error);
+    } finally {
+      process.stdin.pause();
+    }
+    if (!primaryFailure && cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, "Failed to clean up the stdio MCP contract transport.");
+    }
   }
 }
 
@@ -213,8 +232,6 @@ async function checkT7EnsureLeaseHeartbeatFirst(): Promise<void> {
   // --- T7a: heartbeat succeeds → restore lease, no acquireLease ---
   {
     const calls: string[] = [];
-    const [, serverTransport] = InMemoryTransport.createLinkedPair();
-
     const fakeClient = {
       status: async () => ({ ok: true, appRunning: true }),
       listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
@@ -229,12 +246,6 @@ async function checkT7EnsureLeaseHeartbeatFirst(): Promise<void> {
     };
 
     const lease: LeaseContext = { lease: undefined, staleLeaseId, staleLease };
-    const server = createOpenPetsMcpServer({ configuredPetId: "snoopy", client: fakeClient, lease, leaseReady: Promise.resolve() });
-    const mcpClient = new Client({ name: "t7a", version: "0.0.0" });
-    const [clientTransport] = InMemoryTransport.createLinkedPair();
-    // We need the leaseReady-resolved server; connect it just to allow tool calls
-    // Instead call handleReact directly via the server tool interface by invoking
-    // the MCP tool through a fresh in-memory pair.
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const server2 = createOpenPetsMcpServer({ configuredPetId: "snoopy", client: fakeClient, lease, leaseReady: Promise.resolve() });
     const mc = new Client({ name: "t7a-client", version: "0.0.0" });
@@ -260,7 +271,6 @@ async function checkT7EnsureLeaseHeartbeatFirst(): Promise<void> {
       await mc.close();
       await server2.close();
     }
-    void clientTransport; void serverTransport; void server; void mcpClient; // unused stubs
   }
 
   // --- T7b: heartbeat fails → acquireLease IS called ---

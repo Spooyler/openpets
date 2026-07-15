@@ -1,4 +1,5 @@
-import { app, shell } from "electron";
+import electron from "electron";
+const { app, shell } = electron || {};
 import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
 import { dirname, join } from "node:path";

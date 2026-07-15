@@ -6,6 +6,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { unzipSync } from "node:zlib";
+import { validateSpriteAssetBytes } from "./plugin-sprite-validation.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const catalogPath = join(repoRoot, "web", "public", "plugins", "catalog.v2.json");
@@ -53,12 +54,15 @@ async function loadCatalog() {
   return readJson(catalogPath);
 }
 
-async function pluginIdsForDir(sourceDir, publisherType) {
+async function pluginEntriesForDir(sourceDir, publisherType) {
   try {
-    return (await readdir(sourceDir, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-      .map((entry) => ({ id: entry.name, publisherType }))
-      .sort((a, b) => a.id.localeCompare(b.id));
+    const directories = (await readdir(sourceDir, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."));
+    const entries = await Promise.all(directories.map(async (directory) => {
+      const manifest = await readJson(join(sourceDir, directory.name, "openpets.plugin.json"));
+      return { id: manifest.id, publisherType };
+    }));
+    return entries.sort((a, b) => String(a.id).localeCompare(String(b.id)));
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -67,8 +71,8 @@ async function pluginIdsForDir(sourceDir, publisherType) {
 
 async function expectedPluginEntries() {
   const expected = [
-    ...(await pluginIdsForDir(officialDir, "official")),
-    ...(await pluginIdsForDir(communityDir, "community")),
+    ...(await pluginEntriesForDir(officialDir, "official")),
+    ...(await pluginEntriesForDir(communityDir, "community")),
   ].sort((a, b) => a.id.localeCompare(b.id));
   const seen = new Map();
   for (const entry of expected) {
@@ -182,7 +186,15 @@ function validateManifestAgainstCatalog(entry, manifest, localeCatalog, files) {
   for (const [kind, group] of Object.entries(manifest.assets ?? {})) {
     if (!isRecord(group)) continue;
     for (const [name, relPath] of Object.entries(group)) {
-      if (typeof relPath !== "string" || !files.has(relPath)) fail(`${entry.id}: missing declared ${kind} asset ${name} at ${relPath}.`);
+      const realRelPath = kind === "sprites" && relPath && typeof relPath === "object" ? relPath.path : relPath;
+      if (typeof realRelPath !== "string" || !files.has(realRelPath)) fail(`${entry.id}: missing declared ${kind} asset ${name} at ${realRelPath}.`);
+      else if (kind === "sprites") {
+        try {
+          validateSpriteAssetBytes(relPath, files.get(realRelPath), `${entry.id}: sprite ${name} (${realRelPath})`);
+        } catch (error) {
+          fail(error.message);
+        }
+      }
     }
   }
 }

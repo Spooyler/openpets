@@ -93,6 +93,7 @@ const LOCALES = { en: JSON.parse(await readFile(new URL("./locales/en.json", imp
   assert.ok(h.calls.schedules.has(SCHEDULE_ID));
   // Expect pinned status bubble to show HUD
   h.expectBubble({ sticky: true, pin: true });
+  assert.deepEqual(h.calls.bubbles[0].spec.dismissOn, [], "HUD must not dismiss when clicked or when the pet is clicked");
   
   // Verify that the bubble contains the correct HUD items/values rather than text
   const lastBubble = h.calls.bubbles[h.calls.bubbles.length - 1];

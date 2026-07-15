@@ -63,8 +63,9 @@ The manifest is the contract the host validates before *any* plugin code runs
 - `entry`: the JS entry file (e.g. `index.js`).
 - `permissions`: the capabilities the plugin requests (see below).
 - `configSchema`: typed config fields rendered as a no-JSON settings form.
-  Field types include `string`, `number`, `boolean`, `time`, plus v3 types
-  `date`, `secret`, `sound`.
+  Fields include text, number, boolean, select, time, date, secret, and sound;
+  a select can opt into the host's `sprite-grid` presentation when every option
+  references a declared sprite preview.
 - `assets`: declared icon/image/svg/sprite/sound refs (validated, see below).
 - `commands`, `status`, `panels`, `network` hosts, and timer triggers as
   applicable.
@@ -88,6 +89,18 @@ The manifest is never trusted blindly.
 
 ## Permission model
 
+### Sprite-grid configuration
+
+`sprite-grid` is a presentation for a `select` field, not a general renderer
+surface. Each option names a manifest-declared sprite as its preview; manifest
+validation rejects undeclared previews. The Control Center renders those choices
+as accessible radio cards, with animation only for the selected, hovered, or
+keyboard-focused card. `prefers-reduced-motion` keeps the first frame static.
+
+Calendar Airmail uses this for its courier choice. The couriers are bundled
+plugin assets, not installed pets: changing the selection never reads the pet
+catalog, changes the default pet, or depends on a user-installed companion.
+
 Permissions are declared in the manifest, **approved** by the user at install,
 persisted in plugin state, and **re-checked on every SDK call** by the bridge.
 The permission surface (from `plugin-manifest.ts`):
@@ -100,6 +113,22 @@ A plugin that calls a namespace it didn't declare (or wasn't approved for) is
 denied and the block is recorded in diagnostics. `network:*` is further
 constrained to declared hosts. This is defense in depth: manifest validation,
 user approval, runtime permission check, and quotas all apply.
+
+### Display deliveries
+
+`ui:delivery` is a dedicated permission for the generic, host-owned delivery
+surface. It lets a plugin request a short, plain-text delivery with one of its
+own declared courier sprites; it is not permission to position windows, inject
+markup, select arbitrary files, or control animation. The host chooses the cursor
+display, renders the courier and banner together, queues competing deliveries,
+enforces expiry and quotas, and owns the window lifecycle. The returned handle
+can be dismissed and can observe `click`, `manual`, `expired`, or
+`plugin-stopped` dismissal. Plugin teardown
+removes that plugin's pending and active deliveries without calling handlers in
+the stopped host. See [sdk.md](sdk.md) for the author contract.
+
+This surface is intended for time-sensitive companion messages such as Calendar
+Airmail, not as a general custom-overlay API.
 
 ## Runtime & sandbox
 
@@ -135,7 +164,8 @@ mirror of all this is the SDK in [sdk.md](sdk.md).
 - `plugin-config.ts` — default/effective config validation and reference
   resolution.
 - `plugin-assets.ts` — validates/resolves declared assets (formats + size caps)
-  for SDK refs and catalog cards.
+  for SDK refs and catalog cards. Courier sprites are WebP strips with bounded,
+  declared frame metadata; their dimensions are checked at package/install time.
 - `plugin-bubble-arbiter.ts` — priority/coalescing of transient vs pinned bubble
   slots.
 - `plugin-diagnostics.ts` — per-plugin error/quota/settings-block collector for
@@ -181,6 +211,49 @@ repo dev build still supports maintainer-only env paths with
    SDK compatibility, config field types, network hosts, asset formats/size
    caps, entry files, and HTML panels. (`packages/cli/src/plugin-validate.ts`.)
 5. **Package & publish**: see below.
+
+### Calendar Airmail
+
+`openpets.calendar-airmail` is the official Google Calendar companion. Its
+configuration selects one of its bundled courier sprites in an animated,
+reduced-motion-aware sprite grid; the default is AirDog. This replaces the
+previous installed-pet selection: legacy `pet` configuration is ignored, and a
+missing or invalid courier resolves to the declared default rather than a pet
+fallback. It reads the user's **primary calendar** only, expands recurring
+instances, and deliberately omits all-day events in this first release. It
+delivers an airmail reminder ten minutes before an event and again at its start.
+
+Connection begins only from the plugin's explicit sign-in command. The official
+Google Cloud **Desktop app** OAuth credential used for the release includes its
+client ID and the client secret required by Google's token endpoint; the user
+then selects the plugin's Connect command and completes the host-managed
+browser/loopback PKCE flow. The plugin requests only Google Calendar's event
+read-only scope and may contact only `www.googleapis.com`. The host persists
+the OAuth session, including this credential when supplied, in encrypted
+plugin-scoped secret storage. While Google's
+consent screen is in Testing, add intended users as test users. Broad external
+distribution requires Google consent-screen verification.
+
+Calendar Airmail reconciles a bounded rolling view of the primary calendar and
+keeps durable occurrence and delivery state so reminders recover across app
+restart, sleep, configuration changes, and reconnection. Temporary network
+failures retain the last known schedule. If authorization is revoked or expires
+and cannot be refreshed, the plugin clears its Google session and outstanding
+delivery schedule, reports that reconnection is required, and the user should
+run its sign-in command again.
+If Google Calendar API access is denied, it keeps the connection and existing
+deliveries, shows an API/account-access warning, and records only the bounded,
+sanitized HTTP status and Google error classification in plugin diagnostics.
+Its status shows the synced upcoming-event count and the next event's local
+start and Airmail reminder times (or that no timed events were found), so users
+can confirm the calendar data it sees. When future timed events remain today,
+the pet menu also shows disabled summary rows for the remaining-today count and
+the next event's local time and relative countdown; it hides those rows when
+there are none. The pet menu exposes **Connect Google Calendar** only while
+disconnected; once connected, it instead exposes **Sync now**, **Test
+delivery**, and **Disconnect Google Calendar**.
+Its manifest requests only `ui:delivery`, `auth`, `network`, `schedule`,
+`storage`, `commands`, and `status`.
 
 ## Packaging, catalog & release validation
 

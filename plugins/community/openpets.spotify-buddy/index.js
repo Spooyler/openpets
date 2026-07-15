@@ -17,6 +17,8 @@ let activeLyrics = [];
 let currentLyricIndex = -1;
 let scheduleWallBase = null;
 let scheduleProgressBase = null;
+let spotifyAccessToken = null;
+let spotifyExpiresAt = 0;
 
 // ─── Text helpers ─────────────────────────────────────────────────────────────
 
@@ -173,17 +175,10 @@ async function loginSpotify(ctx) {
     const tokens = await ctx.auth.oauth({
       provider: "spotify",
       clientId,
-      authUrl: "https://accounts.spotify.com/authorize",
-      authorizationUrl: "https://accounts.spotify.com/authorize",
-      tokenUrl: "https://accounts.spotify.com/api/token",
-      redirectUri: "http://127.0.0.1:48373/callback",
       scopes: ["user-read-playback-state", "user-modify-playback-state", "user-read-currently-playing"],
-      usePkce: true
     });
-    
-    await ctx.secrets.set("spotify-access-token", tokens.accessToken);
-    await ctx.secrets.set("spotify-refresh-token", tokens.refreshToken);
-    await ctx.secrets.set("spotify-expires-at", String(Date.now() + (tokens.expiresIn || 3600) * 1000));
+    spotifyAccessToken = tokens.accessToken;
+    spotifyExpiresAt = tokens.expiresAt || 0;
     
     await ctx.pet.speak("Successfully connected to Spotify!");
     await ctx.pet.react("celebrating");
@@ -199,44 +194,27 @@ async function loginSpotify(ctx) {
 }
 
 async function refreshAccessToken(ctx) {
-  const refreshToken = await ctx.secrets.get("spotify-refresh-token");
-  const clientId = await getSpotifyClientId(ctx);
-  
-  if (!refreshToken) return null;
-  
   try {
-    const res = await ctx.net.fetch("https://accounts.spotify.com/api/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: refreshToken,
-        client_id: clientId
-      }).toString()
-    });
-    
-    if (res.ok && res.json) {
-      await ctx.secrets.set("spotify-access-token", res.json.access_token);
-      if (res.json.refresh_token) {
-        await ctx.secrets.set("spotify-refresh-token", res.json.refresh_token);
-      }
-      await ctx.secrets.set("spotify-expires-at", String(Date.now() + res.json.expires_in * 1000));
-      return res.json.access_token;
-    }
+    const tokens = await ctx.auth.refresh("spotify");
+    spotifyAccessToken = tokens.accessToken;
+    spotifyExpiresAt = tokens.expiresAt || 0;
+    return spotifyAccessToken;
   } catch (e) {
+    if (e?.code === "invalid_grant") {
+      await ctx.auth.signOut("spotify");
+      spotifyAccessToken = null;
+      spotifyExpiresAt = 0;
+    }
     ctx.log?.warn?.("Token refresh failed", e?.message);
   }
   return null;
 }
 
 async function getValidToken(ctx) {
-  let token = await ctx.secrets.get("spotify-access-token");
-  let expiresAt = Number(await ctx.secrets.get("spotify-expires-at") || 0);
-  
-  if (!token || Date.now() > expiresAt - 60000) {
-    token = await refreshAccessToken(ctx);
+  if (!spotifyAccessToken || Date.now() > spotifyExpiresAt - 60000) {
+    spotifyAccessToken = await refreshAccessToken(ctx);
   }
-  return token;
+  return spotifyAccessToken;
 }
 
 async function spotifyFetch(ctx, path, method = "GET", body = null) {

@@ -41,7 +41,7 @@ in-the-moment interactions (snooze, done, feed).
 ## Official plugin lineup
 
 Official plugins live in `plugins/official/` and are the reviewed catalog set.
-Current lineup (verified 2026-06-13 against the folder + manifests):
+Current lineup (verified 2026-07-10 against the folder + manifests):
 
 | Plugin id | What it is |
 |-----------|------------|
@@ -54,6 +54,7 @@ Current lineup (verified 2026-06-13 against the folder + manifests):
 | `openpets.launch-buddy` | Launch/checklist companion for shipping moments |
 | `openpets.magic-8-ball` | Command-driven decision/fortune responses |
 | `openpets.fortune-cookie` | Periodic or command-triggered fortunes |
+| `openpets.calendar-airmail` | Google primary-calendar reminders delivered by a selected bundled courier sprite ten minutes before and at event start |
 
 `plugins/official/codemap.md` carries the per-plugin SDK-surface breakdown.
 
@@ -81,9 +82,12 @@ Defaults are defined in `apps/desktop/src/plugin-service.ts` and the bundled
 plugins are shipped as packaging extra-resources (`plugins/official` → packaged
 `plugins/official`, enforced by `check-packaging-contract.ts`):
 
-- **Bundled with the app**: `openpets.reminders`, `openpets.virtual-pet`
-  (`bundledOfficialPluginIds`).
-- **Enabled by default**: the same two (`bundledEnabledByDefault`).
+- **Bundled with the app**: `openpets.reminders`, `openpets.focus-buddy`,
+  `openpets.launch-buddy`, `openpets.virtual-pet` (`bundledOfficialPluginIds`).
+- **Enabled by default**: `openpets.reminders`, `openpets.focus-buddy`,
+  `openpets.launch-buddy` (`bundledEnabledByDefault`).
+- **Bundled but disabled by default**: `openpets.virtual-pet`; users can enable it
+  from the Plugins page.
 - **`staleBundledPluginIds`**: an explicit cleanup list of plugin ids that were
   bundled in past builds and must be removed on upgrade (e.g. `ambient-companion`,
   `break-buddy`, `focus-buddy`-as-bundled, `github-notifications`, `pomodoro`,

@@ -62,6 +62,8 @@ const plugin: OpenPetsPluginDefinition = {
         ],
       },
     } satisfies OpenPetsBubble);
+    const delivery = await ctx.ui.delivery({ key: "sample.delivery", courier: ctx.assets.sprite("courier"), title: "Delivery", detail: "Sample", expiresAt: Date.now() + 60_000 });
+    delivery.onDismiss(() => undefined);
     await ctx.schedule.every("tick", 60_000, async () => {
       await ctx.storage.set("lastTick", "now");
     });
@@ -104,11 +106,16 @@ assert.equal(calls.bubbles[3]!.spec.hud?.items[0]?.value, 80);
 assert.equal(calls.bubbles[3]!.spec.hud?.items[0]?.tone, "amber");
 assert.equal(calls.bubbles[3]!.spec.hud?.items[0]?.label, "Food");
 assert.equal(calls.alerts.length, 1);
+assert.equal(calls.deliveries.length, 1);
+assert.ok(calls.deliveries[0]?.id.startsWith("delivery-"), "recorded deliveries expose deterministic ids");
 assert.equal(calls.alerts[0]!.acknowledged, true);
 assert.equal(calls.sounds[0]!.sound, "alert");
 assert.equal(calls.busPublishes.length, 1);
 assert.equal(calls.importedUserSounds.length, 1);
 assert.equal(calls.forgottenUserSounds.length, 1);
+
+await harness.dismissDelivery(calls.deliveries[0]!.id, "manual");
+assert.equal(calls.deliveries[0]!.dismissed, true, "recorded delivery ids address deterministic dismissal");
 
 // Bubble interactions round-trip.
 const live = calls.bubbles[2]!;

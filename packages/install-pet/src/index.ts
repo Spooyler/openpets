@@ -12,6 +12,8 @@ import yauzl from "yauzl";
 import type { Entry, ZipFile } from "yauzl";
 
 const catalogUrl = "https://openpets.dev/pets/catalog.v2.json";
+const catalogV3IndexUrl = "https://openpets.dev/pets/catalog.v3.json";
+const catalogHost = "openpets.dev";
 const zipHost = "zip.openpets.dev";
 const maxCatalogBytes = 1_000_000;
 const maxZipDownloadBytes = 50 * 1024 * 1024;
@@ -87,7 +89,9 @@ interface OpenPetsState {
 
 interface SafeZipPath {
   readonly isDirectory: boolean;
-  readonly relativeOutputPath?: string;
+  readonly normalizedName: string;
+  readonly topLevelDirectory: string;
+  readonly relativeOutputPath?: "pet.json" | "spritesheet.webp";
 }
 
 export async function installPet(options: InstallPetOptions): Promise<InstallPetResult> {
@@ -229,21 +233,61 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+class CatalogPetNotFoundError extends Error {}
+
 async function getCatalogPet(petId: string): Promise<CatalogPet> {
+  let v3Failure: string;
+  try {
+    return await getCatalogV3Pet(petId);
+  } catch (error) {
+    if (error instanceof CatalogPetNotFoundError) throw error;
+    v3Failure = error instanceof Error ? error.message : String(error);
+  }
+
+  // Catalog v3 is the full catalog. v2 is a frozen legacy snapshot of the
+  // oldest pets, kept only so long-standing pets stay installable while v3
+  // is unavailable.
   const catalog = await fetchCatalog();
   const pet = catalog.find((candidate) => candidate.id === petId);
-  if (!pet) throw new Error(`Pet is not available in the OpenPets catalog: ${petId}`);
+  if (!pet) {
+    throw new Error(`Pet lookup failed: catalog v3 is unavailable (${v3Failure}) and the pet is not in the legacy v2 catalog: ${petId}`);
+  }
   return pet;
 }
 
+async function getCatalogV3Pet(petId: string): Promise<CatalogPet> {
+  const index = validateCatalogV3Index(await fetchCatalogJson(catalogV3IndexUrl));
+  if (!index.search) throw new Error("OpenPets catalog v3 index is missing its search index.");
+  const searchIndex = validateCatalogV3Index(await fetchCatalogJson(index.search));
+
+  for (const searchPageUrl of searchIndex.pages) {
+    const entries = validateCatalogV3SearchPage(await fetchCatalogJson(searchPageUrl), index.pages.length);
+    const match = entries.find((entry) => entry.id === petId);
+    if (!match) continue;
+
+    const pageUrl = index.pages[match.catalogPage];
+    if (!pageUrl) throw new Error("Catalog v3 search points to a missing catalog page.");
+    const pagePets = validateCatalogV3Page(await fetchCatalogJson(pageUrl));
+    const pet = pagePets.find((candidate) => candidate.id === petId);
+    if (!pet) throw new Error(`Pet is listed in the catalog search index but missing from its catalog page: ${petId}`);
+    return pet;
+  }
+
+  throw new CatalogPetNotFoundError(`Pet is not available in the OpenPets catalog: ${petId}`);
+}
+
 async function fetchCatalog(): Promise<readonly CatalogPet[]> {
+  return validateCatalog(await fetchCatalogJson(catalogUrl));
+}
+
+async function fetchCatalogJson(url: string): Promise<unknown> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), fetchTimeoutMs);
   try {
-    const response = await fetch(catalogUrl, { signal: controller.signal, redirect: "error", credentials: "omit" });
-    if (response.url !== catalogUrl) throw new Error("Catalog final URL is not allowed.");
+    const response = await fetch(url, { signal: controller.signal, redirect: "error", credentials: "omit" });
+    if (response.url !== url) throw new Error("Catalog final URL is not allowed.");
     if (!response.ok) throw new Error(`Catalog download failed with HTTP ${response.status}.`);
-    return validateCatalog(JSON.parse(await readLimitedTextResponse(response, maxCatalogBytes)) as unknown);
+    return JSON.parse(await readLimitedTextResponse(response, maxCatalogBytes)) as unknown;
   } finally {
     clearTimeout(timeout);
   }
@@ -253,6 +297,46 @@ export function validateCatalog(value: unknown): readonly CatalogPet[] {
   if (!isRecord(value) || value.version !== 2 || !Array.isArray(value.pets)) throw new Error("OpenPets catalog is invalid.");
   const ids = new Set<string>();
   return value.pets.map((pet) => validateCatalogPet(pet, ids));
+}
+
+// Validates both the catalog v3 root index and its search index, which share
+// the { version: 3, pages: [...] } shape; only the root index carries `search`.
+export function validateCatalogV3Index(value: unknown): { readonly pages: readonly string[]; readonly search?: string } {
+  if (!isRecord(value) || value.version !== 3 || !Array.isArray(value.pages) || value.pages.length === 0) throw new Error("OpenPets catalog v3 index is invalid.");
+  return {
+    pages: value.pages.map((page) => validateCatalogJsonUrl(page)),
+    search: value.search === undefined ? undefined : validateCatalogJsonUrl(value.search),
+  };
+}
+
+export function validateCatalogV3SearchPage(value: unknown, pageCount: number): readonly { readonly id: string; readonly catalogPage: number }[] {
+  if (!isRecord(value) || value.version !== 3 || !Array.isArray(value.pets)) throw new Error("OpenPets catalog v3 search page is invalid.");
+  return value.pets.map((pet) => {
+    if (!isRecord(pet)) throw new Error("Catalog v3 search entry is invalid.");
+    const id = validatePetId(readString(pet.id, "id", 64));
+    const catalogPage = pet.catalogPage;
+    if (typeof catalogPage !== "number" || !Number.isInteger(catalogPage) || catalogPage < 0 || catalogPage >= pageCount) {
+      throw new Error(`Catalog v3 search entry has an invalid page for pet: ${id}`);
+    }
+    return { id, catalogPage };
+  });
+}
+
+export function validateCatalogV3Page(value: unknown): readonly CatalogPet[] {
+  if (!isRecord(value) || value.version !== 3 || !Array.isArray(value.pets)) throw new Error("OpenPets catalog v3 page is invalid.");
+  const ids = new Set<string>();
+  return value.pets.map((pet) => {
+    if (!isRecord(pet)) throw new Error("Catalog v3 pet is invalid.");
+    return validateCatalogPet({ ...pet, preview: pet.thumbnail }, ids);
+  });
+}
+
+function validateCatalogJsonUrl(value: unknown): string {
+  const raw = readString(value, "catalog page URL", 2048);
+  const url = new URL(raw);
+  if (url.protocol !== "https:" || url.hostname !== catalogHost || url.username || url.password || url.port || url.search || url.hash) throw new Error("Catalog v3 page URL is not allowed.");
+  if (!url.pathname.startsWith("/pets/") || !url.pathname.endsWith(".json") || url.pathname.includes("..")) throw new Error("Catalog v3 page URL path is not allowed.");
+  return url.toString();
 }
 
 function validateCatalogPet(value: unknown, ids: Set<string>): CatalogPet {
@@ -504,20 +588,65 @@ function normalizeInstalledPet(value: unknown, userData: string): InstalledPetSt
   };
 }
 
+// Ported from the desktop app's zip-safety module so direct installs accept
+// the same zip layouts the app does: pet files at the root, or under exactly
+// one top-level directory (the common layout for published pet zips).
 class ZipEntryPathTracker {
-  private readonly seen = new Set<string>();
+  private readonly normalizedPaths = new Set<string>();
+  private readonly caseFoldedPaths = new Set<string>();
+  private topLevelDirectory: string | null = null;
 
-  accept(rawPath: string): SafeZipPath {
-    const normalized = rawPath.replaceAll("\\", "/").replace(/^\/+/, "");
-    if (!normalized || normalized.includes("../") || normalized === ".." || /^[a-zA-Z]:/.test(normalized)) throw new Error(`Unsafe zip path: ${rawPath}`);
-    const isDirectory = normalized.endsWith("/");
-    const outputPath = isDirectory ? normalized.slice(0, -1) : normalized;
-    if (!outputPath || outputPath.split("/").some((part) => !part || part === "." || part === "..")) throw new Error(`Unsafe zip path: ${rawPath}`);
-    const key = outputPath.toLowerCase();
-    if (this.seen.has(key)) throw new Error(`Duplicate zip entry path: ${outputPath}`);
-    this.seen.add(key);
-    return isDirectory ? { isDirectory } : { isDirectory, relativeOutputPath: outputPath };
+  accept(fileName: string): SafeZipPath {
+    const entry = validateZipEntryName(fileName);
+
+    if (this.topLevelDirectory !== null && entry.topLevelDirectory !== this.topLevelDirectory) {
+      throw new Error("Zip contains mixed or multiple top-level layouts.");
+    }
+    this.topLevelDirectory = entry.topLevelDirectory;
+
+    if (this.normalizedPaths.has(entry.normalizedName)) {
+      throw new Error(`Duplicate zip entry path: ${entry.normalizedName}`);
+    }
+    const caseFolded = entry.normalizedName.toLocaleLowerCase("en-US");
+    if (this.caseFoldedPaths.has(caseFolded)) {
+      throw new Error(`Case-insensitive zip entry collision: ${entry.normalizedName}`);
+    }
+    this.normalizedPaths.add(entry.normalizedName);
+    this.caseFoldedPaths.add(caseFolded);
+    return entry;
   }
+}
+
+export function validateZipEntryName(fileName: string): SafeZipPath {
+  if (fileName.includes("\0")) throw new Error("Zip entry contains NUL byte.");
+  if (fileName.includes("\\")) throw new Error("Zip entry contains backslash separator.");
+  if (fileName.startsWith("/")) throw new Error("Zip entry is absolute.");
+  if (/^[a-zA-Z]:\//.test(fileName)) throw new Error("Zip entry contains Windows drive path.");
+  if (fileName.includes("//")) throw new Error("Zip entry contains empty path segment.");
+
+  const parts = fileName.split("/").filter(Boolean);
+  if (parts.some((part) => part === "..")) throw new Error("Zip entry contains parent traversal.");
+  if (parts.some((part) => part === ".")) throw new Error("Zip entry contains current-directory segment.");
+
+  const isDirectory = fileName.endsWith("/");
+  if (isDirectory) {
+    if (parts.length !== 1) throw new Error("Zip directory layout is unsupported.");
+    return { isDirectory: true, normalizedName: parts.join("/"), topLevelDirectory: parts[0] ?? "" };
+  }
+
+  if (parts.length !== 1 && parts.length !== 2) throw new Error("Zip must contain pet files at the root or under exactly one top-level directory.");
+
+  const leaf = parts.at(-1);
+  if (leaf !== "pet.json" && leaf !== "spritesheet.webp") {
+    throw new Error(`Unexpected zip file: ${leaf}`);
+  }
+
+  return {
+    isDirectory: false,
+    normalizedName: parts.join("/"),
+    topLevelDirectory: parts.length === 1 ? "" : parts[0] ?? "",
+    relativeOutputPath: leaf,
+  };
 }
 
 function getInstalledPetDir(petsRoot: string, petId: string): string {

@@ -11,14 +11,22 @@ const callbacks = new Map();
 
 async function call(path, args) {
   if (!channel) throw new Error("OpenPets plugin SDK is unavailable.");
-  return ipcRenderer.invoke(channel, path, normalizeForIpc(args));
+  return unwrapSdkResult(await ipcRenderer.invoke(channel, path, normalizeForIpc(args)));
 }
 
 function callSync(path, args) {
   if (!channel) throw new Error("OpenPets plugin SDK is unavailable.");
   const result = ipcRenderer.sendSync(channel, path, normalizeForIpc(args));
-  if (result && typeof result === "object" && typeof result.__openPetsError === "string") throw new Error(result.__openPetsError);
-  return result;
+  return unwrapSdkResult(result);
+}
+
+function unwrapSdkResult(result) {
+  if (!result || typeof result !== "object" || !result.__openPetsError || typeof result.__openPetsError !== "object") return result;
+  const { message, code } = result.__openPetsError;
+  if (typeof message !== "string") return result;
+  const error = new Error(message);
+  if (typeof code === "string") error.code = code;
+  throw error;
 }
 
 function normalizeForIpc(value, depth = 0) {
@@ -87,6 +95,14 @@ function makePanelHandle(result) {
   };
 }
 
+function makeDeliveryHandle(result) {
+  const deliveryId = result && result.deliveryId;
+  return {
+    dismiss: () => call("ui.deliveryDismiss", [deliveryId]),
+    onDismiss: (fn) => { void call("ui.deliverySubscribe", [deliveryId, registerCallback(fn)]).catch(() => undefined); },
+  };
+}
+
 function wrapPickedFile(file) {
   return {
     name: String(file.name),
@@ -150,6 +166,7 @@ const sdk = {
     }),
     toast: (spec) => call("ui.toast", [spec]),
     panel: (spec) => call("ui.panel", [spec]).then(makePanelHandle),
+    delivery: (spec) => call("ui.delivery", [spec]).then(makeDeliveryHandle),
     menu: {
       setItems: (items) => call("ui.menuSetItems", [items]),
       onSelect: (fn) => subscription("ui.menuOnSelect", "ui.menuOffSelect", [], fn),

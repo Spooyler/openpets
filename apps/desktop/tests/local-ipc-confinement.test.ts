@@ -1,19 +1,5 @@
-/**
- * Unit tests for the self-heal confinement poller logic in local-ipc.ts.
- *
- * Verifies:
- *   (1) Poller is subscribed even when the first findTerminal resolve returns null.
- *   (2) No double-subscribe for the same leaseId.
- *   (3) Poller is unsubscribed (and onDead called) when isAlive returns false.
- *   (4) Initial resolve success seeds identity + update before subscribing.
- *   (5) Poller callback calls setIdentity (self-heal path after null first resolve).
- *   (6) Production subscribe dep forwards onNull (4th arg) to subscribeWindowTracking.
- *   (7) Source-level guard: getDefaultPetPaused must NOT gate explicit-lease branch.
- */
+/** Executable confinement subscription and lease-authorization regression tests. */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { resolveAndSubscribe, type ConfinementPollerDeps } from "../src/confinement-poller.js";
 import type { TerminalWindowInfo } from "../src/window-tracker.js";
@@ -41,9 +27,8 @@ function makeDeps(overrides: Partial<ConfinementPollerDeps> = {}): ConfinementPo
   };
 }
 
-// ---------------------------------------------------------------------------
-// Test 1: Poller is subscribed even when first resolve returns null
-// ---------------------------------------------------------------------------
+// A newly authorized lease must remain subscribed when its terminal is not
+// discoverable yet; otherwise confinement never starts when it appears later.
 {
   const subscribeCallIds: string[] = [];
   const subscribed = new Map<string, () => void>();
@@ -64,9 +49,7 @@ function makeDeps(overrides: Partial<ConfinementPollerDeps> = {}): ConfinementPo
   assert.ok(subscribed.has("lease-1"), "subscribed map should contain the leaseId");
 }
 
-// ---------------------------------------------------------------------------
-// Test 2: No double-subscribe for the same leaseId
-// ---------------------------------------------------------------------------
+// A lease owns one confinement subscription, preventing duplicate updates.
 {
   const subscribeCallCount = { n: 0 };
   const subscribed = new Map<string, () => void>();
@@ -87,9 +70,8 @@ function makeDeps(overrides: Partial<ConfinementPollerDeps> = {}): ConfinementPo
   assert.equal(subscribeCallCount.n, 1, "subscribe should be called only once for same leaseId");
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: Poller is unsubscribed (onDead triggered) when isAlive returns false
-// ---------------------------------------------------------------------------
+// A callback from a no-longer-authorized lease must tear down its subscription
+// rather than continuing to confine a pet after the lease expires.
 {
   const deadCalled = { n: 0 };
   const unsubCalled = { n: 0 };

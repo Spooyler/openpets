@@ -162,6 +162,20 @@ runtime, the sandboxed JS host, the permission-checked SDK bridge, catalog/local
 install, assets, panels, diagnostics, and platform settings. Fully documented in
 [plugins.md](plugins.md) and [sdk.md](sdk.md).
 
+The plugin subsystem also owns **display deliveries**: a lazy, transparent,
+host-owned surface used by `ctx.ui.delivery`. A delivery is rendered as a single
+courier-and-banner surface on the cursor display, rather than as a spawned pet
+or a plugin-controlled overlay. Each display advances a bounded FIFO queue;
+expiry, dismissal, display removal, plugin reload/disable/uninstall, and app
+shutdown are host lifecycle events. The host animates the declared courier strip
+and owns its layout; plugins only supply a trusted sprite reference and text.
+
+Calendar Airmail's configuration is a plugin-exclusive courier picker. It is an
+accessible animated sprite grid whose selected/hovered/focused cards animate,
+while reduced-motion users see a static first frame. It does not select, preview,
+or validate installed pets; its bundled courier sprites remain available wherever
+the plugin is installed.
+
 ### Agent setup
 
 `agent-setup.ts` detects installed agents and runs configuration actions (MCP
@@ -225,9 +239,10 @@ ZIPs) and runs third-party plugin code, so it is defensive by construction:
   renderer-visible URL scheme, image source, dev endpoint, or internal protocol
   **must** be added to the CSP in *both* `apps/desktop/vite.config.ts` and
   `apps/desktop/src/renderer/index.html`. Common pet image protocols:
-  `openpets-codex:`, `openpets-installed:`, `openpets-pet-preview:`. Forgetting
-  the CSP makes images fall back to the default pet even when install/render
-  logic is correct. (This is a documented, easy-to-hit footgun in `AGENTS.md`.)
+  `openpets-codex:`, `openpets-installed:`, `openpets-pet-preview:`, and
+  `openpets-plugin-asset:`. Forgetting the CSP makes images fall back to the
+  default pet even when install/render logic is correct. (This is a documented,
+  easy-to-hit footgun in `AGENTS.md`.)
 - **Mock keychain** to avoid OS credential prompts.
 - **IPC network security**: TCP mode is restricted to loopback/private
   addresses; public IPs and hostnames are rejected. See [ipc.md](ipc.md).
@@ -236,6 +251,13 @@ ZIPs) and runs third-party plugin code, so it is defensive by construction:
 - **Plugin sandbox**: plugins run in hidden, session-partitioned BrowserWindows
   with navigation/window-open hardening and permission-gated SDK calls. See
   [plugins.md](plugins.md).
+
+- **Trusted plugin assets**: `openpets-plugin-asset:` serves only an enabled,
+  exact-version JavaScript plugin's declared sprite. The protocol accepts only a
+  narrow sprite route, resolves it beneath the real install root, rechecks WebP
+  dimensions against manifest frame metadata, and returns no filesystem paths to
+  a renderer. Delivery documents have their own restrictive CSP and can load
+  only this protocol (or data URLs).
 
 ## Packaging
 

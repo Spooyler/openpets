@@ -63,7 +63,7 @@ Download the package for your operating system from [OpenPets Releases](https://
 - **Windows**: `OpenPets-*-win-x64-setup.exe`
 - **Linux**: `OpenPets-*-linux-x86_64.AppImage`
 
-> Note: Current builds may be unsigned. If macOS blocks execution with a security warning, remove the quarantine flag via terminal:
+> Note: Windows release installers are signed. macOS builds may still be unsigned and can trigger a security warning; if macOS blocks execution, remove the quarantine flag via terminal:
 > ```bash
 > xattr -dr com.apple.quarantine /Applications/OpenPets.app
 > ```
@@ -280,3 +280,17 @@ Explore detailed architectural and platform documentation inside the `docs/` fol
 - **SSRF Safety**: Plugin network connections are restricted to approved domains and blocked from local network/private IP access.
 - **Dynamic Content Sanitization**: Any dynamic AI-speech text runs through strict local filters to redact paths, URLs, secrets, or multiline code snippets.
 - **Sensitive Permission Consent**: Features accessing clipboard, microphone, or dynamic AI responses are off by default and require explicit user opt-in.
+
+---
+
+## Code signing policy
+
+OpenPets Windows release artifacts are built only by the project's GitHub Actions trusted-build workflow and signed through the configured SignPath release policy. The canonical public policy is [openpets.dev/code-signing-policy](https://openpets.dev/code-signing-policy).
+
+- **Maintainer, committer, reviewer, and signing approver:** [Alvin Unreal](https://github.com/alvinunreal).
+- **Review:** Changes to release workflows, signing configuration, or Windows packaging require maintainer review before release approval.
+- **Scope:** SignPath signing is limited to official OpenPets open-source release artifacts.
+- **Signing ops:** The SignPath GitHub workflow may pause on release-signing requests that need approver review; approvals must be completed in the SignPath dashboard before publishing proceeds.
+- **Privacy:** See the [Privacy & network behaviour policy](https://openpets.dev/privacy).
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).

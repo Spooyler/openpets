@@ -78,12 +78,30 @@ async function config(ctx) {
 }
 
 async function scheduleNext(ctx, delayMs) {
-  await ctx.schedule.cancel(SCHEDULE_ID);
   const state = await getState(ctx);
   const now = Date.now();
   const target = Math.max(now + Math.max(1, delayMs), state.pausedUntil || 0);
+  await scheduleAt(ctx, target, state);
+}
+
+async function scheduleAt(ctx, target, state) {
+  state ??= await getState(ctx);
+  const now = Date.now();
+  await ctx.schedule.cancel(SCHEDULE_ID);
   await saveState(ctx, { ...state, nextDueAt: target });
-  await ctx.schedule.once(SCHEDULE_ID, Math.max(1, target - now), () => fireReminder(ctx));
+  await ctx.schedule.once(SCHEDULE_ID, Math.max(1, target - now), () => fireScheduledReminder(ctx, target));
+}
+
+async function fireScheduledReminder(ctx, dueAt) {
+  const state = await getState(ctx);
+  if (state.nextDueAt !== dueAt) return false;
+
+  const now = Date.now();
+  if (now < dueAt) {
+    await scheduleAt(ctx, dueAt, state);
+    return false;
+  }
+  return fireReminder(ctx);
 }
 
 async function scheduleFromState(ctx) {
@@ -98,19 +116,16 @@ async function recordDrink(ctx, speechKey = null) {
   const now = Date.now();
   const state = recordDrinkState(await getState(ctx), now);
   const cfg = await config(ctx);
-  await saveState(ctx, { ...state, nextDueAt: now + paceDelayMs(cfg.pace) });
-  await ctx.schedule.cancel(SCHEDULE_ID);
-  await ctx.schedule.once(SCHEDULE_ID, paceDelayMs(cfg.pace), () => fireReminder(ctx));
+  await scheduleAt(ctx, now + paceDelayMs(cfg.pace), state);
   if (speechKey) await ctx.pet.speak(ctx.t(speechKey, { streakDays: state.streakDays }));
   return state;
 }
 
 export async function pauseToday(ctx) {
   const pausedUntil = nextLocalDayMs();
-  const state = await saveState(ctx, { ...(await getState(ctx)), pausedUntil, nextDueAt: pausedUntil });
-  await ctx.schedule.cancel(SCHEDULE_ID);
-  await ctx.schedule.once(SCHEDULE_ID, Math.max(1, pausedUntil - Date.now()), () => fireReminder(ctx));
-  return state;
+  const state = { ...(await getState(ctx)), pausedUntil, nextDueAt: pausedUntil };
+  await scheduleAt(ctx, pausedUntil, state);
+  return cleanState(state);
 }
 
 let activeAlert = null;

@@ -22,9 +22,14 @@ import { motionStop } from "./pet-motion-engine.js";
 import { PluginSecretsStore } from "./plugin-secrets.js";
 import { showPluginToast } from "./plugin-toast.js";
 import { pluginVoiceListen, pluginVoiceSpeak } from "./plugin-voice.js";
+import { registerDelivery, stopDeliverySystem, teardownPluginDeliveries } from "./plugin-delivery.js";
 import type { PluginHostCapabilities, PluginPickedFileHost } from "./plugin-sdk-bridge.js";
 import { maxUserSoundBytes, UserSoundStore, userSoundMimeByExtension } from "./plugin-user-sound-store.js";
 import { classifyPluginError } from "./plugin-diagnostics.js";
+import { getAppStateSnapshot } from "./app-state.js";
+import { readSafePluginManifest } from "./plugin-manifest-reader.js";
+import { resolveTrustedPluginSprite } from "./plugin-assets.js";
+import { getPluginService } from "./plugin-service.js";
 
 /**
  * The Electron implementation of every SDK v3 host capability. Built once at
@@ -81,6 +86,15 @@ export function createElectronPluginHostCapabilities(userDataPath: string): Elec
   const pickedFiles = new Map<string, PickedFileEntry>();
   const userSounds = new UserSoundStore(join(userDataPath, "plugin-user-sounds"));
   let nextPickedFileId = 0;
+  let didShutdown = false;
+  const shutdown = () => {
+    if (didShutdown) return;
+    didShutdown = true;
+    app.off("before-quit", shutdown);
+    stopDeliverySystem();
+    closeAllPluginPets();
+    if (activeCapabilities === capabilities) activeCapabilities = null;
+  };
 
   const capabilities: ElectronPluginHostCapabilities = {
     secretsStore,
@@ -170,6 +184,16 @@ export function createElectronPluginHostCapabilities(userDataPath: string): Elec
     },
     panels: {
       open: (opts) => openPluginPanel(opts),
+    },
+    delivery: {
+      async register(pluginId, descriptor) {
+        const record = getPluginService().stateStore.getRecord(pluginId);
+        if (!record || !record.enabled) throw new Error("Plugin is unavailable for delivery.");
+        const manifest = await readSafePluginManifest({ installPath: record.installPath, manifestPath: record.manifestPath, allowedPluginRoots: getPluginService().allowedPluginRoots, expectedId: pluginId, expectedVersion: record.version });
+        if (manifest.runtime !== "javascript") throw new Error("Plugin is unavailable for delivery.");
+        return registerDelivery(resolveTrustedPluginSprite(manifest, pluginId, descriptor.courier.name), descriptor);
+      },
+      teardown: (pluginId) => teardownPluginDeliveries(pluginId),
     },
     secrets: {
       get: (pluginId, key) => secretsStore.get(pluginId, key),
@@ -268,6 +292,7 @@ export function createElectronPluginHostCapabilities(userDataPath: string): Elec
     },
     clearPlugin(pluginId: string) {
       try {
+        teardownPluginDeliveries(pluginId);
         clearPluginPetsForPlugin(pluginId);
       } catch (error) {
         warn("plugin", "plugin pet teardown failed", { pluginId, error: error instanceof Error ? error.message : String(error) });
@@ -277,11 +302,12 @@ export function createElectronPluginHostCapabilities(userDataPath: string): Elec
       motionStop("default");
     },
     shutdown() {
-      closeAllPluginPets();
+      shutdown();
     },
   };
   // Prime the CPU sampler so the first metrics() call has a delta to use.
   cpuSample = sampleCpus();
   activeCapabilities = capabilities;
+  app.once("before-quit", shutdown);
   return capabilities;
 }

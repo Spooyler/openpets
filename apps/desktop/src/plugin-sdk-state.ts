@@ -1,5 +1,5 @@
 import type { PluginConfig } from "./plugin-config.js";
-import type { PluginCommand, PluginBubbleDismissReason, PluginBubbleHostHandle, PluginMenuItem, PluginPanelHostHandle, PluginStatus } from "./plugin-sdk-bridge.js";
+import type { PluginCommand, PluginBubbleDismissReason, PluginBubbleHostHandle, PluginDeliveryDismissReason, PluginDeliveryHostHandle, PluginMenuItem, PluginPanelHostHandle, PluginStatus } from "./plugin-sdk-bridge.js";
 import type { PluginTimerHandle } from "./plugin-runtime.js";
 
 export type ScheduleSpec =
@@ -11,6 +11,7 @@ export type ScheduleSpec =
 
 export type ScheduleSlot = { spec: ScheduleSpec; callback: () => unknown; handle: PluginTimerHandle; nextRunMs: number };
 export type BubbleSlot = { host: PluginBubbleHostHandle; onAction?: (actionId: string) => void; onSubmit?: (values: Record<string, string | number>) => void; onDismiss?: (reason: PluginBubbleDismissReason) => void; dismissed: boolean };
+export type DeliverySlot = { key: string; host?: PluginDeliveryHostHandle; onDismiss?: (reason: PluginDeliveryDismissReason) => void; dismissed: boolean };
 
 export class WindowCounter {
   count = 0;
@@ -31,6 +32,7 @@ export type PluginRuntimeState = {
   eventSubscriptions: Map<string, () => void>;
   tickSubscriptions: Map<string, () => void>;
   bubbles: Map<string, BubbleSlot>;
+  deliveries: Map<string, DeliverySlot>;
   panels: Map<string, PluginPanelHostHandle & { onMessage?: (msg: unknown) => void }>;
   spawnedPets: Set<string>;
   pickedFiles: Set<string>;
@@ -43,6 +45,7 @@ export type PluginRuntimeState = {
   audioWindow: WindowCounter;
   notifyWindow: WindowCounter;
   toastWindow: WindowCounter;
+  deliveryWindow: WindowCounter;
   aiWindow: WindowCounter;
   voiceWindow: WindowCounter;
 };
