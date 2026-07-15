@@ -17,8 +17,13 @@ assert.equal(typeof packagePlugin.default.server, "function");
 assert.equal(classifyOpenCodeToolReaction("edit", {}), "editing");
 assert.equal(classifyOpenCodeToolReaction("apply_patch", {}), "editing");
 assert.equal(classifyOpenCodeToolReaction("bash", { command: "pnpm test" }), "testing");
-assert.equal(classifyOpenCodeToolReaction("shell", { command: "ls" }), undefined);
-assert.equal(classifyOpenCodeToolReaction("read", {}), undefined);
+assert.equal(classifyOpenCodeToolReaction("shell", { command: "ls" }), "running");
+assert.equal(classifyOpenCodeToolReaction("read", {}), "thinking");
+assert.equal(classifyOpenCodeToolReaction("grep", {}), "thinking");
+assert.equal(classifyOpenCodeToolReaction("glob", {}), "thinking");
+assert.equal(classifyOpenCodeToolReaction("list", {}), "thinking");
+assert.equal(classifyOpenCodeToolReaction("todowrite", {}), "editing");
+assert.equal(classifyOpenCodeToolReaction("webfetch", {}), undefined);
 assert.equal(shouldIgnoreOpenPetsTool("openpets_openpets_status"), true);
 assert.equal(shouldIgnoreOpenPetsTool("openpets_openpets_say"), true);
 assert.equal(shouldIgnoreOpenPetsTool("openpets_openpets_react"), true);
@@ -42,6 +47,7 @@ try {
     status: async () => ({ ok: true, appRunning: true }),
     listPets: async () => ({ ok: true, pets: [], defaultPetId: "builtin" }),
     installPet: async () => { throw new Error("unused"); },
+    installLocalPet: async () => { throw new Error("unused"); },
     acquireLease: async (options?: { readonly requestedPetId?: string }) => {
       calls.push({ kind: "lease", value: "acquire", requestedPetId: options?.requestedPetId });
       return { leaseId: "lease-fixer", requestedPetId: options?.requestedPetId, targetKind: "explicit", actualTargetPetId: options?.requestedPetId ?? "builtin", actualTargetPetName: "Fixer", usingDefaultPet: false, expiresAt: Date.now() + 15_000, leaseActive: true };
@@ -81,7 +87,9 @@ try {
   await promise;
 
   hooks["tool.execute.before"]({ tool: "shell" }, { args: { command: "ls" } });
-  assert.equal(scheduled.length, 0);
+  assert.equal(scheduled.length, 1);
+  await scheduled.shift()?.();
+  assert.deepEqual(calls.at(-1), { kind: "react", value: "running", leaseId: "lease-fixer" });
   hooks["tool.execute.before"]({ tool: "bash" }, { args: { command: "pnpm test" } });
   assert.equal(scheduled.length, 1);
   const beforeDuplicateTesting = calls.length;
