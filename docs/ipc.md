@@ -70,6 +70,7 @@ shapes before returning.
 | `pets.install-local` | Install a local pet from an absolute zip-file or folder path |
 | `pet.react` | Set a pet reaction (animation state) |
 | `pet.say` | Show a speech bubble on a pet |
+| `agent.activity` | Re-arm an active busy status badge (statusline heartbeat); never creates one |
 | `lease.acquire` / `lease.heartbeat` / `lease.release` | Manage a pet lease |
 
 Client method names (`hello()`, `status()`, `listPets()`, `installPet()`,

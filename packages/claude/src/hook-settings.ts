@@ -29,21 +29,21 @@ export function getClaudeUserSettingsPath(): string {
   return join(homedir(), ".claude", "settings.json");
 }
 
-export function createOpenPetsHookCommand(commandMode: OpenPetsCommandMode = "published", selectedPetId?: string, nodeCommand = "node", explicitCliPath?: string): string {
+export function createOpenPetsHookCommand(commandMode: OpenPetsCommandMode = "published", selectedPetId?: string, nodeCommand = "node", explicitCliPath?: string, subcommand: "hook" | "statusline" = "hook"): string {
   const petArgs = selectedPetId === undefined ? "" : ` --pet ${shellQuote(validateOpenPetsPetArg(selectedPetId))}`;
   // An explicitly resolved CLI path (e.g. the bundled CLI inside an installed
   // OpenPets app, discovered by the external install-hooks command) always wins
   // over the package-relative bundled/local paths and the npx fallback.
   if (explicitCliPath !== undefined) {
     assertInstalledClaudeCliPath(explicitCliPath);
-    return `${shellQuote(nodeCommand)} ${shellQuote(explicitCliPath)} hook ${openPetsHookMarker}${petArgs}`;
+    return `${shellQuote(nodeCommand)} ${shellQuote(explicitCliPath)} ${subcommand} ${openPetsHookMarker}${petArgs}`;
   }
   if (commandMode === "local" || commandMode === "bundled") {
     const cliPath = commandMode === "bundled" ? getBundledClaudeCliPath() : getLocalClaudeCliPath();
     commandMode === "bundled" ? assertBundledClaudeCliPath() : assertLocalClaudeCliPath();
-    return `${shellQuote(nodeCommand)} ${shellQuote(cliPath)} hook ${openPetsHookMarker}${petArgs}`;
+    return `${shellQuote(nodeCommand)} ${shellQuote(cliPath)} ${subcommand} ${openPetsHookMarker}${petArgs}`;
   }
-  return `npx -y @open-pets/claude hook ${openPetsHookMarker}${petArgs}`;
+  return `npx -y @open-pets/claude ${subcommand} ${openPetsHookMarker}${petArgs}`;
 }
 
 // Candidate locations of an installed OpenPets desktop app's bundled
@@ -260,7 +260,7 @@ function removeOpenPetsHooksFromMatcher(value: unknown): unknown | null {
   return { ...value, hooks };
 }
 
-function readClaudeSettings(path: string): Record<string, unknown> {
+export function readClaudeSettings(path: string): Record<string, unknown> {
   assertSafeSettingsPath(path);
   if (!existsSync(path)) return {};
   const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
@@ -289,7 +289,7 @@ function shellQuote(value: string): string {
   return `"${value.replaceAll("\\", "\\\\").replaceAll("$", "\\$").replaceAll("`", "\\`")}"`;
 }
 
-function writeClaudeSettings(path: string, settings: Record<string, unknown>): void {
+export function writeClaudeSettings(path: string, settings: Record<string, unknown>): void {
   assertSafeSettingsPath(path);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const tempPath = `${path}.${process.pid}.tmp`;
@@ -297,7 +297,7 @@ function writeClaudeSettings(path: string, settings: Record<string, unknown>): v
   renameSync(tempPath, path);
 }
 
-function backupSettings(path: string): string | undefined {
+export function backupSettings(path: string): string | undefined {
   if (!existsSync(path)) return undefined;
   assertSafeSettingsPath(path);
   const backupPath = `${path}.openpets-backup-${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z")}.json`;

@@ -22,6 +22,16 @@ Provides Claude Code editor integration via MCP configuration and lifecycle hook
 - Lease acquisition for targeted pets
 - Error handling: Debug logging, graceful degradation
 
+**Statusline** (`statusline.ts`):
+- `runClaudeStatuslineFromStdin()` - Entry for the Claude Code statusLine command
+- Prints `🐾 <model> · <dir> · ctx <n>%` (never empty), then fire-and-forget `agent.activity` ping (5s throttle)
+- Re-arm-only: the desktop only extends an existing busy badge, never creates one
+
+**Statusline Settings** (`statusline-settings.ts`):
+- `doctorClaudeStatusline()` / `installClaudeStatusline()` / `uninstallClaudeStatusline()`
+- Install only when statusLine is absent or openpets-managed; foreign entry → "conflict", never replaced/removed
+- Event-driven only (no refreshInterval) so idle sessions never ping
+
 **Hook Settings Management** (`hook-settings.ts`):
 - Settings path: `~/.claude/settings.json`
 - Hook events: `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `Notification`, `Stop`, `StopFailure`

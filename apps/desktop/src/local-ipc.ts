@@ -3,11 +3,11 @@ import net from "node:net";
 
 import { Notification, shell, systemPreferences } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetLeaseState, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetLeaseState, refreshAgentPetBusyBadge, repositionConfinedPet, showAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
-import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
@@ -416,6 +416,16 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       return releaseExplicitLease(leaseId);
     }
     return leaseManager.release(leaseId);
+  }
+
+  if (request.method === "agent.activity") {
+    const params = isRecord(request.params) ? request.params : {};
+    const lease = getLeaseTarget(params.leaseId);
+    debug("ipc", "agent activity ping", { requestId: request.id, leaseId: lease?.leaseId, targetKind: lease?.targetKind });
+    if (lease?.targetKind === "explicit") {
+      return { ok: true, refreshed: refreshAgentPetBusyBadge(lease.actualTargetPetId), leaseId: lease.leaseId };
+    }
+    return { ok: true, refreshed: refreshDefaultPetBusyBadge() };
   }
 
   if (request.method === "pet.react") {

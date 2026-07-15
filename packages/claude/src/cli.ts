@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { runClaudeHookFromStdin } from "./hooks.js";
 import { doctorClaudeHooks, findInstalledOpenPetsClaudeCli, installClaudeHooks, uninstallClaudeHooks } from "./hook-settings.js";
+import { runClaudeStatuslineFromStdin } from "./statusline.js";
+import { doctorClaudeStatusline, installClaudeStatusline, uninstallClaudeStatusline } from "./statusline-settings.js";
 import { validateOpenPetsPetArg } from "./claude-code.js";
 
 async function main(): Promise<void> {
@@ -30,7 +32,26 @@ async function main(): Promise<void> {
     process.stderr.write(`${JSON.stringify(uninstallClaudeHooks(readPathArg(args)), null, 2)}\n`);
     return;
   }
-  process.stderr.write("Usage: open-pets-claude <hook|doctor-hooks|install-hooks|uninstall-hooks> [--settings <path>] [--pet <id>] [--prefer-npx]\n");
+  if (command === "statusline") {
+    const code = await runClaudeStatuslineFromStdin(process.stdin, { configuredPetId: readPetArg(args), debug: process.env.OPENPETS_DEBUG === "1" });
+    process.exitCode = code;
+    return;
+  }
+  if (command === "doctor-statusline") {
+    const installedCliPath = resolveInstalledClaudeCliPath(args);
+    process.stderr.write(`${JSON.stringify(doctorClaudeStatusline(readPathArg(args), undefined, readPetArg(args), "node", installedCliPath ?? undefined), null, 2)}\n`);
+    return;
+  }
+  if (command === "install-statusline") {
+    const installedCliPath = resolveInstalledClaudeCliPath(args);
+    process.stderr.write(`${JSON.stringify(installClaudeStatusline(readPathArg(args), undefined, readPetArg(args), "node", installedCliPath ?? undefined), null, 2)}\n`);
+    return;
+  }
+  if (command === "uninstall-statusline") {
+    process.stderr.write(`${JSON.stringify(uninstallClaudeStatusline(readPathArg(args)), null, 2)}\n`);
+    return;
+  }
+  process.stderr.write("Usage: open-pets-claude <hook|statusline|doctor-hooks|install-hooks|uninstall-hooks|doctor-statusline|install-statusline|uninstall-statusline> [--settings <path>] [--pet <id>] [--prefer-npx]\n");
   process.exitCode = 1;
 }
 
