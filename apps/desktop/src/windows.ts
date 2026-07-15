@@ -11,6 +11,8 @@ import { classifyAnalyticsError, trackDesktopAnalyticsConsentChanged, trackDeskt
 import { createAppIcon } from "./assets.js";
 import { getCatalogPageUiState, getCatalogSearchUiState, getCatalogUiState } from "./catalog.js";
 import { getCodexPetsUiState, importCodexPet, readCodexPetSpritesheet } from "./codex-pets.js";
+import { getPetdexPreviews, getPetdexUiState, installPetdexPet } from "./petdex-catalog.js";
+import { isSafePetdexSlug, petdexPetPageUrl } from "./petdex-catalog-core.js";
 import { setConfinementEnabled } from "./confinement-manager.js";
 import { setCrossDisplayRoamingEnabled } from "./display.js";
 import { getActiveLocale, getActiveMessages, LOCALE_LABELS, SUPPORTED_LOCALES, setLocaleFromPreference, t, type Locale, type LocalePreference } from "./i18n/index.js";
@@ -389,6 +391,24 @@ export function installInternalUiHandlers(): void {
     return getCodexPetsUiState();
   });
 
+  ipcMain.handle("openpets:get-petdex-pets", async (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    const state = await getPetdexUiState();
+    if (state.error) trackDesktopEvent("desktop_catalog_fetch_failed", { catalog_kind: "pet", source: "petdex", error_code: classifyAnalyticsError(state.error, "petdex_manifest_fetch_failed") });
+    return state;
+  });
+
+  ipcMain.handle("openpets:get-petdex-previews", async (event, slugs: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    return getPetdexPreviews(slugs);
+  });
+
+  ipcMain.handle("openpets:open-petdex-page", async (event, slug: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (!isSafePetdexSlug(slug)) throw new Error("Invalid petdex pet slug.");
+    await shell.openExternal(`${petdexPetPageUrl}${encodeURIComponent(slug)}`);
+  });
+
   ipcMain.handle("openpets:update-preferences", (event, patch: unknown) => {
     assertAllowedSender(event, ["control-center"]);
     const previousScale = getAppStateSnapshot().preferences.petScale;
@@ -548,6 +568,24 @@ export function installInternalUiHandlers(): void {
       throw error;
     }
     return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getPetsStateSnapshot() : state;
+  });
+
+  ipcMain.handle("openpets:install-petdex-pet", async (event, slug: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (!isSafePetdexSlug(slug)) {
+      throw new Error("Invalid petdex pet slug.");
+    }
+
+    trackDesktopEvent("desktop_pet_install_started", { source: "petdex", entrypoint: "control-center" });
+    let result;
+    try {
+      result = await installPetdexPet(slug);
+      trackDesktopEvent("desktop_pet_install_completed", { source: "petdex" });
+    } catch (error) {
+      trackDesktopEvent("desktop_pet_install_failed", { source: "petdex", error_code: classifyAnalyticsError(error, "petdex_pet_install_failed") });
+      throw error;
+    }
+    return getInternalUiWindowKindForWebContents(event.sender.id) === "control-center" ? getPetsStateSnapshot() : result.state;
   });
 
   ipcMain.handle("openpets:remove-pet", async (event, petId: unknown) => {
