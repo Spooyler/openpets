@@ -99,27 +99,45 @@ export function stopRoamingForPet(petId: string): void {
  * window's horizontal center against the work area's horizontal midpoint:
  * left of midpoint walks to the left edge, right of (or exactly at) midpoint
  * walks to the right edge. The y coordinate is left unchanged.
+ *
+ * The sprite is centered horizontally inside the transparent pet window, so
+ * the target offsets by the transparent margin so the *sprite* — not the
+ * window — touches the screen edge. `spriteWidth` defaults to 0, which
+ * falls back to window-edge alignment.
  */
 export function computeScurryTarget(
   bounds: { x: number; y: number; width: number; height: number },
   workArea: { x: number; y: number; width: number; height: number },
+  spriteWidth = 0,
 ): { x: number; y: number } {
+  const margin = spriteWidth > 0 ? Math.max(0, (bounds.width - spriteWidth) / 2) : 0;
   const centerX = bounds.x + bounds.width / 2;
   const midpoint = workArea.x + workArea.width / 2;
-  const x = centerX < midpoint ? workArea.x : workArea.x + workArea.width - bounds.width;
+  const x = centerX < midpoint
+    ? workArea.x - margin
+    : workArea.x + workArea.width - bounds.width + margin;
   return { x, y: bounds.y };
 }
+
+const defaultSpriteBaseWidth = 192;
 
 /** Send every visible pet walking to the nearest side edge of its display. */
 export function scurryAllPetsToEdge(): void {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { screen } = require("electron") as typeof import("electron");
+  let petScale = 1;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const appState = require("./app-state.js") as { getAppStateSnapshot: () => { preferences: { petScale: number } } };
+    petScale = appState.getAppStateSnapshot().preferences.petScale || 1;
+  } catch { /* fallback to scale 1 */ }
+  const spriteWidth = Math.ceil(defaultSpriteBaseWidth * petScale);
   for (const [petId, accessor] of livePets) {
     const window = accessor();
     if (!window || window.isDestroyed() || !window.isVisible()) continue;
     const bounds = window.getBounds();
     const workArea = screen.getDisplayMatching(bounds).workArea;
-    const target = computeScurryTarget(bounds, workArea);
+    const target = computeScurryTarget(bounds, workArea, spriteWidth);
     void motionMoveTo(petId, accessor, target, { durationMs: 900, easing: "easeOut" });
   }
 }

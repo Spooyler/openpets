@@ -58,4 +58,19 @@ const workArea = { x: 0, y: 0, width: 1920, height: 1080 };
   );
 }
 
+// With spriteWidth: the sprite (not the window) should touch the screen edge.
+// Window = 340px, sprite = 192px → margin = (340-192)/2 = 74px per side.
+{
+  const petBounds = { x: 100, y: 800, width: 340, height: 420 };
+  const target = computeScurryTarget(petBounds, workArea, 192);
+  assert.equal(target.x, 0 - 74, "left scurry with sprite offset: window extends 74px past screen edge");
+  assert.equal(target.y, 800, "y unchanged");
+}
+{
+  const petBounds = { x: 1500, y: 800, width: 340, height: 420 };
+  const target = computeScurryTarget(petBounds, workArea, 192);
+  assert.equal(target.x, 1920 - 340 + 74, "right scurry with sprite offset: window extends 74px past screen edge");
+  assert.equal(target.y, 800, "y unchanged");
+}
+
 console.log("scurry-target.test.ts passed");
