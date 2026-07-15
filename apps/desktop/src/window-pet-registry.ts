@@ -28,7 +28,7 @@ export interface RegistryCallbacks {
   spawnPet(windowKey: WindowKey, petId: string): void;
   closePet(windowKey: WindowKey, petId: string, reason: PetCloseReason): void;
   rebindPet(windowKey: WindowKey, fromPetId: string, toPetId: string): void;
-  sessionEndedNotice(label: string, petId: string): void; // default pet's "session ended in X"
+  sessionEndedNotice(label: string, petId: string, windowKey: WindowKey): void;
 }
 
 type TrackedSession = RegistrySessionInfo & { lastActivityAt: number };
@@ -131,7 +131,7 @@ export class WindowPetRegistry {
     if (binding.sessions.size > 0 || !info) return;
     this.#bindings.delete(windowKey);
     if (this.#isPidAlive(info.terminalOwnerPid)) {
-      this.#callbacks.sessionEndedNotice(info.label, binding.petId);
+      this.#callbacks.sessionEndedNotice(info.label, binding.petId, windowKey);
       this.#callbacks.closePet(windowKey, binding.petId, "session-ended");
     } else {
       this.#callbacks.closePet(windowKey, binding.petId, "window-dead");

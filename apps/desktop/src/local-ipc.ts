@@ -68,8 +68,8 @@ const windowPetRegistry = new WindowPetRegistry({
       clearAgentPetDismissal(toPetId);
       showAgentPet(toPetId);
     },
-    sessionEndedNotice: (label, petId) => {
-      windowPetRegistry.defaultStore.record({ sessionKey: `ended:${petId}:${Date.now()}`, kind: "message", message: t("pet.notify.sessionEnded", { label }), label });
+    sessionEndedNotice: (label, petId, windowKey) => {
+      windowPetRegistry.defaultStore.record({ sessionKey: `ended:${petId}:${Date.now()}`, windowKey, kind: "message", message: t("pet.notify.sessionEnded", { label }), label });
       refreshDefaultPetNotifications();
     },
   },
