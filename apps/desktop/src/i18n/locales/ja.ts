@@ -50,15 +50,19 @@ export const ja: Partial<Messages> = {
   // --- Navigation tabs (renderer) ---
   "nav.dashboard": "ダッシュボード",
   "nav.pets": "ペット",
+  "nav.sessions": "Sessions",
   "nav.settings": "設定",
   "nav.plugins": "プラグイン",
   "nav.integrations": "連携",
+  "nav.docs": "ドキュメント",
 
   // --- Route metadata (renderer hero header) ---
   "route.dashboard.title": "ダッシュボード",
   "route.dashboard.description": "アクティブな相棒、ステータス、システム指標の概要。",
   "route.pets.title": "ペット",
   "route.pets.description": "デスクトップの相棒をインストール、インポート、プレビューして選びましょう。",
+  "route.sessions.title": "Active Sessions",
+  "route.sessions.description": "Connected coding sessions and their pet assignments.",
   "route.settings.title": "設定",
   "route.settings.description": "起動時の動作、サイズ設定、アニメーション設定を構成します。",
   "route.plugins.title": "プラグイン",
@@ -68,19 +72,42 @@ export const ja: Partial<Messages> = {
 
   // --- App shell (renderer) ---
   "app.controlCenter": "コントロールセンター",
-  "app.logo.alt": "OpenPets",
+
+  // --- Sessions ledger (renderer) ---
+  "sessions.loading": "Loading sessions…",
+  "sessions.title": "Active Sessions",
+  "sessions.empty.title": "No Active Sessions",
+  "sessions.empty.description": "Sessions appear here when an MCP client (Claude Code, Cursor, etc.) connects to OpenPets.",
+  "sessions.col.pet": "Pet",
+  "sessions.col.terminal": "Terminal",
+  "sessions.col.project": "Project",
+  "sessions.col.uptime": "Uptime",
+  "sessions.col.notifications": "Notifs",
+  "sessions.col.actions": "Actions",
+  "sessions.badge.default": "default",
+  "sessions.badge.explicit": "explicit",
+  "sessions.badge.pool": "pool",
+  "sessions.pool.label": "Pool",
+  "sessions.pool.usage": "{used}/{total} slots in use",
+  "sessions.action.focus": "Focus terminal",
+  "sessions.action.show": "Show pet",
+  "sessions.action.hide": "Hide pet",
+  "sessions.action.disconnect": "Disconnect",
+  "sessions.action.confirm": "Confirm?",
+  "sessions.confinement.confined": "confined",
+  "sessions.confinement.minimized": "minimized",
+  "sessions.confinement.occluded": "occluded",
+  "sessions.confinement.freeRoam": "free-roam",
+  "sessions.disconnected.title": "Recently Disconnected",
+  "sessions.disconnected.reason.released": "released",
+  "sessions.disconnected.reason.expired": "expired",
+  "sessions.disconnected.reason.pid_dead": "pid dead",
 
   // --- Dashboard (renderer) ---
   "dashboard.loading": "相棒の指標を収集中...",
-  "dashboard.hero.eyebrow": "メインの相棒",
   "dashboard.hero.desc": "次のコーディングセッションの準備は万全です。",
   "dashboard.hero.changePet": "ペットを変更",
   "dashboard.lastActive.none": "まだ活動がありません",
-  "dashboard.update.available": "アップデートあり",
-  "dashboard.update.error": "確認に失敗",
-  "dashboard.update.checking": "確認中",
-  "dashboard.update.current": "最新",
-  "dashboard.update.notChecked": "未確認",
   "dashboard.stat.messages": "メッセージ",
   "dashboard.stat.messages.footer": "送信した吹き出しの合計",
   "dashboard.stat.reactions": "リアクション",
@@ -109,8 +136,6 @@ export const ja: Partial<Messages> = {
   "dashboard.system.catalog.offline": "オフライン",
   "dashboard.system.catalog.pets": "{count} 個のペット",
   "dashboard.system.catalog.ready": "準備完了",
-  "dashboard.system.updates": "アップデート",
-  "dashboard.system.version": "バージョン",
 
   // --- Placeholder view (renderer) ---
   "placeholder.comingSoon": "近日公開 • 次の移行対象",
@@ -209,12 +234,10 @@ export const ja: Partial<Messages> = {
   "settings.general.analytics.title": "プライバシーに配慮した使用状況分析を共有",
   "settings.general.analytics.description": "OpenPets の改善に役立てます。プロンプト、コード、ファイルパス、ターミナルコマンド、ペットの発話、プラグイン設定値は収集しません。",
   "settings.general.petScale.title": "ペットのサイズ",
-  "settings.general.petScale.description": "デフォルトのデスクトップペットの表示サイズを調整します。",
+  "settings.general.petScale.description": "プリセットを選択するか、カスタム値を入力してください。",
+  "settings.general.petScale.custom": "カスタム",
   "settings.general.resetPosition": "ペットの位置をリセット",
   "settings.general.systemStatus": "システムステータス",
-  "settings.general.updateAvailable": "アップデートあり",
-  "settings.general.checking": "確認中…",
-  "settings.general.checkForUpdates": "アップデートを確認",
   "settings.toast.startupSaved": "起動時の設定を保存しました。",
   "settings.toast.loginStartupSaved": "ログイン起動の設定を保存しました。",
   "settings.toast.analyticsSaved": "分析設定を保存しました。",
@@ -227,8 +250,6 @@ export const ja: Partial<Messages> = {
   "settings.petPool.description": "When on, each concurrent agent session gets its own pet from the pool.",
   "settings.busy.saving": "保存中",
   "settings.busy.resetting": "リセット中",
-  "settings.busy.opening": "開いています",
-  "settings.busy.checking": "確認中",
 
   // --- Settings: LAN mode (renderer) ---
   "settings.lan.eyebrow": "オフィスペット",
@@ -249,14 +270,6 @@ export const ja: Partial<Messages> = {
   "settings.lan.tokenHintValue": "末尾 {hint}",
   "settings.lan.currentOwner": "現在の所有者",
   "settings.lan.persistedOwner": "保存済み所有者",
-
-  // --- Settings: update status formatting (renderer) ---
-  "settings.update.notLoaded": "アップデート状況はまだ読み込まれていません。",
-  "settings.update.checking": "アップデートを確認中…",
-  "settings.update.available": "バージョン {version} が利用可能です。",
-  "settings.update.current": "最新です。",
-  "settings.update.failed": "アップデートの確認に失敗しました。",
-  "settings.update.version": "バージョン: {version}。",
 
   // --- Settings: reaction mapping (renderer) ---
   "settings.reactions.eyebrow": "動作",
@@ -557,4 +570,8 @@ export const ja: Partial<Messages> = {
   "settings.language.title": "言語",
   "settings.language.description": "OpenPets のメニューとウィンドウの表示言語。",
   "settings.language.system": "システムのデフォルト",
+
+  // --- Docs (renderer) ---
+  "docs.title": "ドキュメント",
+  "docs.placeholder": "近日公開 — ガイドやリファレンスをここに追加します。",
 };

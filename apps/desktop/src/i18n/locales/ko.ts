@@ -50,15 +50,19 @@ export const ko: Partial<Messages> = {
   // --- Navigation tabs (renderer) ---
   "nav.dashboard": "대시보드",
   "nav.pets": "펫",
+  "nav.sessions": "Sessions",
   "nav.settings": "설정",
   "nav.plugins": "플러그인",
   "nav.integrations": "연동",
+  "nav.docs": "문서",
 
   // --- Route metadata (renderer hero header) ---
   "route.dashboard.title": "대시보드",
   "route.dashboard.description": "활성 동반자, 상태, 시스템 지표를 한눈에 확인하세요.",
   "route.pets.title": "펫",
   "route.pets.description": "기본 데스크톱 동반자를 설치, 가져오기, 미리보기하고 선택하세요.",
+  "route.sessions.title": "Active Sessions",
+  "route.sessions.description": "Connected coding sessions and their pet assignments.",
   "route.settings.title": "설정",
   "route.settings.description": "시작 동작, 크기 설정, 애니메이션 설정을 구성하세요.",
   "route.plugins.title": "플러그인",
@@ -68,19 +72,42 @@ export const ko: Partial<Messages> = {
 
   // --- App shell (renderer) ---
   "app.controlCenter": "컨트롤 센터",
-  "app.logo.alt": "OpenPets",
+
+  // --- Sessions ledger (renderer) ---
+  "sessions.loading": "Loading sessions…",
+  "sessions.title": "Active Sessions",
+  "sessions.empty.title": "No Active Sessions",
+  "sessions.empty.description": "Sessions appear here when an MCP client (Claude Code, Cursor, etc.) connects to OpenPets.",
+  "sessions.col.pet": "Pet",
+  "sessions.col.terminal": "Terminal",
+  "sessions.col.project": "Project",
+  "sessions.col.uptime": "Uptime",
+  "sessions.col.notifications": "Notifs",
+  "sessions.col.actions": "Actions",
+  "sessions.badge.default": "default",
+  "sessions.badge.explicit": "explicit",
+  "sessions.badge.pool": "pool",
+  "sessions.pool.label": "Pool",
+  "sessions.pool.usage": "{used}/{total} slots in use",
+  "sessions.action.focus": "Focus terminal",
+  "sessions.action.show": "Show pet",
+  "sessions.action.hide": "Hide pet",
+  "sessions.action.disconnect": "Disconnect",
+  "sessions.action.confirm": "Confirm?",
+  "sessions.confinement.confined": "confined",
+  "sessions.confinement.minimized": "minimized",
+  "sessions.confinement.occluded": "occluded",
+  "sessions.confinement.freeRoam": "free-roam",
+  "sessions.disconnected.title": "Recently Disconnected",
+  "sessions.disconnected.reason.released": "released",
+  "sessions.disconnected.reason.expired": "expired",
+  "sessions.disconnected.reason.pid_dead": "pid dead",
 
   // --- Dashboard (renderer) ---
   "dashboard.loading": "동반자 지표를 수집하는 중...",
-  "dashboard.hero.eyebrow": "주요 동반자",
   "dashboard.hero.desc": "다음 코딩 세션을 위한 준비 완료.",
   "dashboard.hero.changePet": "펫 변경",
   "dashboard.lastActive.none": "아직 활동 없음",
-  "dashboard.update.available": "업데이트 사용 가능",
-  "dashboard.update.error": "확인 실패",
-  "dashboard.update.checking": "확인 중",
-  "dashboard.update.current": "최신 상태",
-  "dashboard.update.notChecked": "확인 안 함",
   "dashboard.stat.messages": "메시지",
   "dashboard.stat.messages.footer": "보낸 말풍선 총수",
   "dashboard.stat.reactions": "반응",
@@ -109,8 +136,6 @@ export const ko: Partial<Messages> = {
   "dashboard.system.catalog.offline": "오프라인",
   "dashboard.system.catalog.pets": "펫 {count}개",
   "dashboard.system.catalog.ready": "준비됨",
-  "dashboard.system.updates": "업데이트",
-  "dashboard.system.version": "버전",
 
   // --- Placeholder view (renderer) ---
   "placeholder.comingSoon": "출시 예정 • 다음 마이그레이션 대상",
@@ -209,12 +234,10 @@ export const ko: Partial<Messages> = {
   "settings.general.analytics.title": "개인정보 보호 사용 분석 공유",
   "settings.general.analytics.description": "OpenPets 개선에 도움을 줍니다. 프롬프트, 코드, 파일 경로, 터미널 명령, 펫 말풍선, 플러그인 설정 값은 수집하지 않습니다.",
   "settings.general.petScale.title": "펫 크기",
-  "settings.general.petScale.description": "기본 데스크톱 펫이 표시되는 크기를 조정합니다.",
+  "settings.general.petScale.description": "프리셋을 선택하거나 사용자 지정 값을 입력하세요.",
+  "settings.general.petScale.custom": "사용자 지정",
   "settings.general.resetPosition": "펫 위치 초기화",
   "settings.general.systemStatus": "시스템 상태",
-  "settings.general.updateAvailable": "업데이트 사용 가능",
-  "settings.general.checking": "확인 중…",
-  "settings.general.checkForUpdates": "업데이트 확인",
   "settings.toast.startupSaved": "시작 설정이 저장되었습니다.",
   "settings.toast.loginStartupSaved": "로그인 시작 설정이 저장되었습니다.",
   "settings.toast.analyticsSaved": "분석 설정이 저장되었습니다.",
@@ -227,8 +250,6 @@ export const ko: Partial<Messages> = {
   "settings.petPool.description": "When on, each concurrent agent session gets its own pet from the pool.",
   "settings.busy.saving": "저장 중",
   "settings.busy.resetting": "초기화 중",
-  "settings.busy.opening": "여는 중",
-  "settings.busy.checking": "확인 중",
 
   // --- Settings: LAN mode (renderer) ---
   "settings.lan.eyebrow": "오피스 펫",
@@ -249,14 +270,6 @@ export const ko: Partial<Messages> = {
   "settings.lan.tokenHintValue": "끝자리 {hint}",
   "settings.lan.currentOwner": "현재 소유자",
   "settings.lan.persistedOwner": "저장된 소유자",
-
-  // --- Settings: update status formatting (renderer) ---
-  "settings.update.notLoaded": "업데이트 상태가 아직 로드되지 않았습니다.",
-  "settings.update.checking": "업데이트를 확인하는 중…",
-  "settings.update.available": "버전 {version}을(를) 사용할 수 있습니다.",
-  "settings.update.current": "최신 상태입니다.",
-  "settings.update.failed": "업데이트 확인에 실패했습니다.",
-  "settings.update.version": "버전: {version}.",
 
   // --- Settings: reaction mapping (renderer) ---
   "settings.reactions.eyebrow": "동작",
@@ -557,4 +570,8 @@ export const ko: Partial<Messages> = {
   "settings.language.title": "언어",
   "settings.language.description": "OpenPets 메뉴와 창의 표시 언어입니다.",
   "settings.language.system": "시스템 기본값",
+
+  // --- Docs (renderer) ---
+  "docs.title": "문서",
+  "docs.placeholder": "곧 출시 — 가이드와 참조 자료를 여기에 추가할 예정입니다.",
 };

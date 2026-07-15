@@ -80,15 +80,19 @@ export const en = {
   // --- Navigation tabs (renderer) ---
   "nav.dashboard": "Dashboard",
   "nav.pets": "Pets",
+  "nav.sessions": "Sessions",
   "nav.settings": "Settings",
   "nav.plugins": "Plugins",
   "nav.integrations": "Integrations",
+  "nav.docs": "Docs",
 
   // --- Route metadata (renderer hero header) ---
   "route.dashboard.title": "Dashboard",
   "route.dashboard.description": "Overview of your active companions, status, and system metrics.",
   "route.pets.title": "Pets",
   "route.pets.description": "Install, import, preview, and choose your default desktop companion.",
+  "route.sessions.title": "Active Sessions",
+  "route.sessions.description": "Connected coding sessions and their pet assignments.",
   "route.settings.title": "Settings",
   "route.settings.description": "Configure startup behaviors, scale preferences, and animation settings.",
   "route.plugins.title": "Plugins",
@@ -98,19 +102,42 @@ export const en = {
 
   // --- App shell (renderer) ---
   "app.controlCenter": "Control Center",
-  "app.logo.alt": "OpenPets",
+
+  // --- Sessions ledger (renderer) ---
+  "sessions.loading": "Loading sessions…",
+  "sessions.title": "Active Sessions",
+  "sessions.empty.title": "No Active Sessions",
+  "sessions.empty.description": "Sessions appear here when an MCP client (Claude Code, Cursor, etc.) connects to OpenPets.",
+  "sessions.col.pet": "Pet",
+  "sessions.col.terminal": "Terminal",
+  "sessions.col.project": "Project",
+  "sessions.col.uptime": "Uptime",
+  "sessions.col.notifications": "Notifs",
+  "sessions.col.actions": "Actions",
+  "sessions.badge.default": "default",
+  "sessions.badge.explicit": "explicit",
+  "sessions.badge.pool": "pool",
+  "sessions.pool.label": "Pool",
+  "sessions.pool.usage": "{used}/{total} slots in use",
+  "sessions.action.focus": "Focus terminal",
+  "sessions.action.show": "Show pet",
+  "sessions.action.hide": "Hide pet",
+  "sessions.action.disconnect": "Disconnect",
+  "sessions.action.confirm": "Confirm?",
+  "sessions.confinement.confined": "confined",
+  "sessions.confinement.minimized": "minimized",
+  "sessions.confinement.occluded": "occluded",
+  "sessions.confinement.freeRoam": "free-roam",
+  "sessions.disconnected.title": "Recently Disconnected",
+  "sessions.disconnected.reason.released": "released",
+  "sessions.disconnected.reason.expired": "expired",
+  "sessions.disconnected.reason.pid_dead": "pid dead",
 
   // --- Dashboard (renderer) ---
   "dashboard.loading": "Gathering companion metrics...",
-  "dashboard.hero.eyebrow": "Primary Companion",
   "dashboard.hero.desc": "Ready for your next coding session.",
   "dashboard.hero.changePet": "Change Pet",
   "dashboard.lastActive.none": "No activity yet",
-  "dashboard.update.available": "Update available",
-  "dashboard.update.error": "Check failed",
-  "dashboard.update.checking": "Checking",
-  "dashboard.update.current": "Current",
-  "dashboard.update.notChecked": "Not checked",
   "dashboard.stat.messages": "Messages",
   "dashboard.stat.messages.footer": "Total speech bubbles sent",
   "dashboard.stat.reactions": "Reactions",
@@ -139,8 +166,6 @@ export const en = {
   "dashboard.system.catalog.offline": "Offline",
   "dashboard.system.catalog.pets": "{count} pets",
   "dashboard.system.catalog.ready": "Ready",
-  "dashboard.system.updates": "Updates",
-  "dashboard.system.version": "Version",
 
   // --- Placeholder view (renderer) ---
   "placeholder.comingSoon": "Coming Soon • Next Migration Target",
@@ -240,12 +265,10 @@ export const en = {
   "settings.general.analytics.title": "Share privacy-preserving usage analytics",
   "settings.general.analytics.description": "Help improve OpenPets. We never collect prompts, code, file paths, terminal commands, pet speech, or plugin config values.",
   "settings.general.petScale.title": "Pet scale",
-  "settings.general.petScale.description": "Adjust how large the default desktop pet appears.",
+  "settings.general.petScale.description": "Pick a preset or type a custom value.",
+  "settings.general.petScale.custom": "Custom",
   "settings.general.resetPosition": "Reset Pet Position",
   "settings.general.systemStatus": "System Status",
-  "settings.general.updateAvailable": "Update Available",
-  "settings.general.checking": "Checking…",
-  "settings.general.checkForUpdates": "Check for Updates",
   "settings.toast.startupSaved": "Startup preference saved.",
   "settings.toast.loginStartupSaved": "Login startup preference saved.",
   "settings.toast.analyticsSaved": "Analytics preference saved.",
@@ -267,8 +290,6 @@ export const en = {
   "settings.petPool.description": "When on, each concurrent agent session gets its own pet from the pool.",
   "settings.busy.saving": "Saving",
   "settings.busy.resetting": "Resetting",
-  "settings.busy.opening": "Opening",
-  "settings.busy.checking": "Checking",
 
   // --- Settings: LAN mode (renderer) ---
   "settings.lan.eyebrow": "Office Pet",
@@ -306,14 +327,6 @@ export const en = {
   "settings.lan.connected": "Connected",
   "settings.lan.noClients": "No LAN clients",
   "settings.lan.noClientsDescription": "Start LAN server/client mode to populate this list.",
-
-  // --- Settings: update status formatting (renderer) ---
-  "settings.update.notLoaded": "Update status has not loaded yet.",
-  "settings.update.checking": "Checking for updates…",
-  "settings.update.available": "Version {version} is available.",
-  "settings.update.current": "Up to date.",
-  "settings.update.failed": "Update check failed.",
-  "settings.update.version": "Version: {version}.",
 
   // --- Settings: reaction mapping (renderer) ---
   "settings.reactions.eyebrow": "Behavior",
@@ -629,4 +642,8 @@ export const en = {
   "settings.language.title": "Language",
   "settings.language.description": "Display language for OpenPets menus and windows.",
   "settings.language.system": "System default",
+
+  // --- Docs (renderer) ---
+  "docs.title": "Documentation",
+  "docs.placeholder": "Coming soon — we'll add guides and references here.",
 } as const;

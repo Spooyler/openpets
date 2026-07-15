@@ -50,15 +50,19 @@ export const ptBR: Partial<Messages> = {
   // --- Navigation tabs (renderer) ---
   "nav.dashboard": "Painel",
   "nav.pets": "Pets",
+  "nav.sessions": "Sessions",
   "nav.settings": "Configurações",
   "nav.plugins": "Plugins",
   "nav.integrations": "Integrações",
+  "nav.docs": "Docs",
 
   // --- Route metadata (renderer hero header) ---
   "route.dashboard.title": "Painel",
   "route.dashboard.description": "Visão geral dos seus companheiros ativos, status e métricas do sistema.",
   "route.pets.title": "Pets",
   "route.pets.description": "Instale, importe, visualize e escolha o seu companheiro de desktop padrão.",
+  "route.sessions.title": "Active Sessions",
+  "route.sessions.description": "Connected coding sessions and their pet assignments.",
   "route.settings.title": "Configurações",
   "route.settings.description": "Configure comportamentos de inicialização, preferências de escala e ajustes de animação.",
   "route.plugins.title": "Plugins",
@@ -68,19 +72,42 @@ export const ptBR: Partial<Messages> = {
 
   // --- App shell (renderer) ---
   "app.controlCenter": "Central de controle",
-  "app.logo.alt": "OpenPets",
+
+  // --- Sessions ledger (renderer) ---
+  "sessions.loading": "Loading sessions…",
+  "sessions.title": "Active Sessions",
+  "sessions.empty.title": "No Active Sessions",
+  "sessions.empty.description": "Sessions appear here when an MCP client (Claude Code, Cursor, etc.) connects to OpenPets.",
+  "sessions.col.pet": "Pet",
+  "sessions.col.terminal": "Terminal",
+  "sessions.col.project": "Project",
+  "sessions.col.uptime": "Uptime",
+  "sessions.col.notifications": "Notifs",
+  "sessions.col.actions": "Actions",
+  "sessions.badge.default": "default",
+  "sessions.badge.explicit": "explicit",
+  "sessions.badge.pool": "pool",
+  "sessions.pool.label": "Pool",
+  "sessions.pool.usage": "{used}/{total} slots in use",
+  "sessions.action.focus": "Focus terminal",
+  "sessions.action.show": "Show pet",
+  "sessions.action.hide": "Hide pet",
+  "sessions.action.disconnect": "Disconnect",
+  "sessions.action.confirm": "Confirm?",
+  "sessions.confinement.confined": "confined",
+  "sessions.confinement.minimized": "minimized",
+  "sessions.confinement.occluded": "occluded",
+  "sessions.confinement.freeRoam": "free-roam",
+  "sessions.disconnected.title": "Recently Disconnected",
+  "sessions.disconnected.reason.released": "released",
+  "sessions.disconnected.reason.expired": "expired",
+  "sessions.disconnected.reason.pid_dead": "pid dead",
 
   // --- Dashboard (renderer) ---
   "dashboard.loading": "Coletando métricas dos companheiros...",
-  "dashboard.hero.eyebrow": "Companheiro principal",
   "dashboard.hero.desc": "Pronto para a sua próxima sessão de programação.",
   "dashboard.hero.changePet": "Trocar pet",
   "dashboard.lastActive.none": "Nenhuma atividade ainda",
-  "dashboard.update.available": "Atualização disponível",
-  "dashboard.update.error": "Falha na verificação",
-  "dashboard.update.checking": "Verificando",
-  "dashboard.update.current": "Atual",
-  "dashboard.update.notChecked": "Não verificado",
   "dashboard.stat.messages": "Mensagens",
   "dashboard.stat.messages.footer": "Total de balões de fala enviados",
   "dashboard.stat.reactions": "Reações",
@@ -109,8 +136,6 @@ export const ptBR: Partial<Messages> = {
   "dashboard.system.catalog.offline": "Offline",
   "dashboard.system.catalog.pets": "{count} pets",
   "dashboard.system.catalog.ready": "Pronto",
-  "dashboard.system.updates": "Atualizações",
-  "dashboard.system.version": "Versão",
 
   // --- Placeholder view (renderer) ---
   "placeholder.comingSoon": "Em breve • Próximo alvo de migração",
@@ -209,12 +234,10 @@ export const ptBR: Partial<Messages> = {
   "settings.general.analytics.title": "Compartilhar analytics de uso com privacidade",
   "settings.general.analytics.description": "Ajude a melhorar o OpenPets. Nunca coletamos prompts, código, caminhos de arquivos, comandos de terminal, falas do pet ou valores de configuração de plugins.",
   "settings.general.petScale.title": "Escala do pet",
-  "settings.general.petScale.description": "Ajuste o tamanho com que o pet padrão aparece no desktop.",
+  "settings.general.petScale.description": "Escolha um preset ou digite um valor personalizado.",
+  "settings.general.petScale.custom": "Personalizado",
   "settings.general.resetPosition": "Redefinir posição do pet",
   "settings.general.systemStatus": "Status do sistema",
-  "settings.general.updateAvailable": "Atualização disponível",
-  "settings.general.checking": "Verificando…",
-  "settings.general.checkForUpdates": "Verificar atualizações",
   "settings.toast.startupSaved": "Preferência de inicialização salva.",
   "settings.toast.loginStartupSaved": "Preferência de inicialização no login salva.",
   "settings.toast.analyticsSaved": "Preferência de analytics salva.",
@@ -227,8 +250,6 @@ export const ptBR: Partial<Messages> = {
   "settings.petPool.description": "When on, each concurrent agent session gets its own pet from the pool.",
   "settings.busy.saving": "Salvando",
   "settings.busy.resetting": "Redefinindo",
-  "settings.busy.opening": "Abrindo",
-  "settings.busy.checking": "Verificando",
 
   // --- Settings: LAN mode (renderer) ---
   "settings.lan.eyebrow": "Pet de escritório",
@@ -249,14 +270,6 @@ export const ptBR: Partial<Messages> = {
   "settings.lan.tokenHintValue": "Termina em {hint}",
   "settings.lan.currentOwner": "Dono atual",
   "settings.lan.persistedOwner": "Dono salvo",
-
-  // --- Settings: update status formatting (renderer) ---
-  "settings.update.notLoaded": "O status de atualização ainda não foi carregado.",
-  "settings.update.checking": "Verificando atualizações…",
-  "settings.update.available": "A versão {version} está disponível.",
-  "settings.update.current": "Tudo atualizado.",
-  "settings.update.failed": "Falha na verificação de atualizações.",
-  "settings.update.version": "Versão: {version}.",
 
   // --- Settings: reaction mapping (renderer) ---
   "settings.reactions.eyebrow": "Comportamento",
@@ -557,4 +570,8 @@ export const ptBR: Partial<Messages> = {
   "settings.language.title": "Idioma",
   "settings.language.description": "Idioma de exibição dos menus e janelas do OpenPets.",
   "settings.language.system": "Padrão do sistema",
+
+  // --- Docs (renderer) ---
+  "docs.title": "Documentação",
+  "docs.placeholder": "Em breve — adicionaremos guias e referências aqui.",
 };

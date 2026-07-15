@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { I18nProvider, useI18n, type I18nSnapshot } from "./i18n";
 import "./styles.css";
-import openPetsLogoUrl from "../../../assets/openpets.webp";
 import defaultThumbUrl from "../../../assets/default-pet-thumbnail.png";
 
 import claudeLogoUrl from "../../../assets/integrations/claude.svg";
@@ -26,13 +25,16 @@ type UserSelectableAnimationState = "idle" | "review" | "running" | "waiting" | 
 type ReactionAnimationOverrides = Record<string, UserSelectableAnimationState>;
 type AnalyticsConsent = "unset" | "granted" | "denied";
 type PetPoolCandidate = { id: string; displayName: string };
-type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean }; petScaleOptions: PetScaleOption[]; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
+type PetScaleRange = { min: number; max: number; step: number };
+type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean }; petScaleOptions: PetScaleOption[]; petScaleRange: PetScaleRange; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
+type SessionLeaseSnapshot = { leaseId: string; targetKind: "default" | "explicit"; actualTargetPetId: string; actualTargetPetName: string; usingDefaultPet: boolean; requestedPetId?: string; fallbackReason?: string; clientPid?: number; terminalOwnerPid?: number; terminalAppName?: string; cwd?: string; acquiredAt: number; lastHeartbeatAt: number; lastActivityAt?: number; expiresAt: number; unresolvedNotifications: number; confinementState?: "confined" | "minimized" | "occluded" | "free-roam"; petVisible: boolean; petDismissed: boolean; canFocus: boolean; healthPct: number; displayPetId?: string; displayPetName?: string; displayPetOrigin?: "explicit" | "pool" };
+type DisconnectedSession = { actualPetName: string; targetKind: "default" | "explicit"; terminalAppName?: string; cwd?: string; clientPid?: number; disconnectedAt: number; reason: "released" | "expired" | "pid_dead" };
+type SessionsSnapshot = { sessions: SessionLeaseSnapshot[]; recentlyDisconnected: DisconnectedSession[]; pool: { used: number; total: number } | null; serverTime: number };
 type LaunchAtLoginState = { supported: boolean; enabled: boolean };
 type LanTopologyIssue = { code: "self_reference" | "missing_reverse"; host: string; edge: "left" | "right" | "up" | "down"; neighbor: string };
 type LanStatusSnapshot = { mode: "off" | "server" | "client"; localHost: string; serverUrl: string; port: number; auth: "token" | "none"; authSource: "env" | "stored" | "generated" | "none"; authInsecure: boolean; tokenHint: string | null; topologyHosts: number; topologyLinks: number; topologyIssues: LanTopologyIssue[]; currentHost: string | null; clients: Array<{ host: string; lastSeen: number; position?: { x: number; y: number } }>; updatedAt: number; persistedCurrentHost: string | null; persistedUpdatedAt: number | null };
-type UpdateStatus = { state: "idle" | "checking" | "available" | "current" | "error"; currentVersion: string; latestVersion?: string; releaseUrl?: string; checkedAt?: number; error?: string };
 type DashboardActivity = { messagesSent: number; reactionsSent: number; reactionCounts: Record<string, number>; perPetActivityCounts: Record<string, number>; lastActivityAt?: number };
-type DashboardSnapshot = { defaultPet: { id: string; displayName: string; previewSpriteUrl: string }; installedPetCount: number; catalog: { source: string; total?: number; page?: number; pageCount?: number; error?: string }; plugins: { installed: number; enabled: number; broken: number }; updateStatus: UpdateStatus; activity: DashboardActivity };
+type DashboardSnapshot = { defaultPet: { id: string; displayName: string; previewSpriteUrl: string }; installedPetCount: number; catalog: { source: string; total?: number; page?: number; pageCount?: number; error?: string }; plugins: { installed: number; enabled: number; broken: number }; activity: DashboardActivity };
 type ReactionAnimationSettings = { reactions: { id: string; label: string; description: string; defaultAnimation: UserSelectableAnimationState }[]; animations: { id: UserSelectableAnimationState; label: string; description: string }[]; sprite: { frameWidth: number; frameHeight: number; columns: number; rows: number; states: Record<UserSelectableAnimationState, { row: number; frames: number; durationMs: number; iterations?: number | "infinite" }> }; overrides: ReactionAnimationOverrides; previewSpriteUrl: string };
 type PluginFilter = "all" | "installed" | "catalog" | "local" | "broken";
 type PluginPermission =
@@ -69,6 +71,10 @@ type PluginEntry = { id: string; installed?: SafePluginRecord; catalog?: SafeCat
 type ControlCenterApi = {
   getPetsState(): Promise<StateSnapshot>;
   getDashboardSnapshot(): Promise<DashboardSnapshot>;
+  getSessionsSnapshot(): Promise<SessionsSnapshot>;
+  releaseSession(leaseId: string): Promise<{ released: boolean }>;
+  focusSession(leaseId: string): Promise<{ focused: boolean }>;
+  toggleSessionPet(leaseId: string): Promise<{ toggled: boolean }>;
   getSettingsState(): Promise<SettingsState>;
   getLanStatus(): Promise<LanStatusSnapshot>;
   setDesktopAnalyticsConsent(consent: AnalyticsConsent): Promise<SettingsState>;
@@ -77,9 +83,6 @@ type ControlCenterApi = {
   getReactionAnimationSettings(): Promise<ReactionAnimationSettings>;
   getLaunchAtLogin(): Promise<LaunchAtLoginState>;
   setLaunchAtLogin(enabled: boolean): Promise<LaunchAtLoginState>;
-  getUpdateStatus(): Promise<UpdateStatus>;
-  checkForUpdates(): Promise<UpdateStatus>;
-  openUpdateReleasePage(): Promise<void>;
   resetDefaultPetPosition(): Promise<SettingsState>;
   setPetPoolOrder(ids: string[]): Promise<SettingsState>;
   getPluginsSnapshot(): Promise<PluginServiceSnapshot>;
@@ -223,6 +226,29 @@ const EyeIcon = () => (
   <svg className="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
     <circle cx="12" cy="12" r="3" />
+  </svg>
+);
+
+const EyeOffIcon = () => (
+  <svg className="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+    <path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+    <line x1="2" y1="2" x2="22" y2="22" />
+  </svg>
+);
+
+const FocusIcon = () => (
+  <svg className="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="3" />
+    <path d="M3 12h3" /><path d="M18 12h3" />
+    <path d="M12 3v3" /><path d="M12 18v3" />
+  </svg>
+);
+
+const DisconnectIcon = () => (
+  <svg className="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
   </svg>
 );
 
@@ -371,7 +397,7 @@ const ShieldIcon = () => (
 );
 
 // Navigation Shell Types and Icons
-type Route = "dashboard" | "pets" | "settings" | "plugins" | "integrations";
+type Route = "dashboard" | "pets" | "sessions" | "settings" | "plugins" | "integrations" | "docs";
 
 const DashboardIcon = () => (
   <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -423,36 +449,217 @@ const IntegrationsIcon = () => (
   </svg>
 );
 
+const SessionsIcon = () => (
+  <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="4 17 10 11 4 5" />
+    <line x1="12" y1="19" x2="20" y2="19" />
+  </svg>
+);
+
+const DocsIcon = () => (
+  <svg className="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20" />
+  </svg>
+);
+
 const navTabs = [
   { id: "dashboard" as const, labelKey: "nav.dashboard", icon: <DashboardIcon /> },
   { id: "pets" as const, labelKey: "nav.pets", icon: <PetsIcon /> },
+  { id: "sessions" as const, labelKey: "nav.sessions", icon: <SessionsIcon /> },
   { id: "settings" as const, labelKey: "nav.settings", icon: <SettingsIcon /> },
   { id: "plugins" as const, labelKey: "nav.plugins", icon: <PluginsIcon /> },
   { id: "integrations" as const, labelKey: "nav.integrations", icon: <IntegrationsIcon /> },
+  { id: "docs" as const, labelKey: "nav.docs", icon: <DocsIcon /> },
 ];
 
-const routeMetadata: Record<Route, { titleKey: string; descKey: string }> = {
-  dashboard: {
-    titleKey: "route.dashboard.title",
-    descKey: "route.dashboard.description",
-  },
-  pets: {
-    titleKey: "route.pets.title",
-    descKey: "route.pets.description",
-  },
-  settings: {
-    titleKey: "route.settings.title",
-    descKey: "route.settings.description",
-  },
-  plugins: {
-    titleKey: "route.plugins.title",
-    descKey: "route.plugins.description",
-  },
-  integrations: {
-    titleKey: "route.integrations.title",
-    descKey: "route.integrations.description",
-  },
-};
+function DisconnectButton({ leaseId, onDisconnect }: { leaseId: string; onDisconnect: () => void }) {
+  const { t } = useI18n();
+  const [confirming, setConfirming] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+  const handleClick = () => {
+    if (confirming) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      setConfirming(false);
+      onDisconnect();
+    } else {
+      setConfirming(true);
+      timerRef.current = setTimeout(() => setConfirming(false), 3000);
+    }
+  };
+  return (
+    <button className={`sessions-action-btn ${confirming ? "sessions-action-btn-danger" : ""}`} onClick={handleClick} title={confirming ? t("sessions.action.confirm") : t("sessions.action.disconnect")}>
+      {confirming ? t("sessions.action.confirm") : <DisconnectIcon />}
+    </button>
+  );
+}
+
+function SessionsView() {
+  const { t } = useI18n();
+  const [snapshot, setSnapshot] = useState<SessionsSnapshot | null>(null);
+  const [error, setError] = useState("");
+  const [, setTick] = useState(0);
+
+  const load = async () => {
+    try {
+      const next = await api.getSessionsSnapshot();
+      setSnapshot(next);
+      setError("");
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err));
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    const interval = setInterval(() => void load(), 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const now = snapshot?.serverTime ?? Date.now();
+
+  const formatUptime = (acquiredAt: number) => {
+    const seconds = Math.max(0, Math.floor((now - acquiredAt) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+  };
+
+  const formatRelative = (ts: number) => {
+    const delta = Math.max(0, Math.floor((now - ts) / 1000));
+    if (delta < 60) return `${delta}s ago`;
+    if (delta < 3600) return `${Math.floor(delta / 60)}m ago`;
+    return `${Math.floor(delta / 3600)}h ago`;
+  };
+
+  const shortenCwd = (cwd?: string) => {
+    if (!cwd) return "—";
+    const parts = cwd.replace(/\\/g, "/").split("/");
+    return parts[parts.length - 1] || cwd;
+  };
+
+  const healthColor = (pct: number) => pct > 0.5 ? "sessions-health-green" : pct > 0.2 ? "sessions-health-yellow" : "sessions-health-red";
+
+  const reasonClass: Record<string, string> = { released: "sessions-reason-released", expired: "sessions-reason-expired", pid_dead: "sessions-reason-pid_dead" };
+
+  if (!snapshot) {
+    return (
+      <div className="flex flex-col gap-6 h-full">
+        <GlassCard className="flex h-full flex-col items-center justify-center gap-4 text-center py-16">
+          <p className="text-sm font-semibold text-slatecopy">{error || t("sessions.loading")}</p>
+          {error && <Button variant="secondary" size="compact" icon={<RefreshIcon />} onClick={() => void load()}>{t("common.retry")}</Button>}
+        </GlassCard>
+      </div>
+    );
+  }
+
+  const hasActive = snapshot.sessions.length > 0;
+  const hasDisconnected = snapshot.recentlyDisconnected.length > 0;
+
+  if (!hasActive && !hasDisconnected) {
+    return (
+      <div className="flex flex-col gap-6 h-full">
+        <GlassCard className="flex h-full flex-col items-center justify-center gap-4 text-center py-16">
+          <SessionsIcon />
+          <p className="text-sm font-semibold text-slatecopy">{t("sessions.empty.title")}</p>
+          <p className="text-xs text-slatecopy" style={{ maxWidth: 340 }}>{t("sessions.empty.description")}</p>
+        </GlassCard>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sessions-layout">
+      <GlassCard>
+        <div className="sessions-header">
+          <h3 className="text-sm font-semibold text-slatecopy">{t("sessions.title")}</h3>
+          <span className="sessions-count">{snapshot.sessions.length}</span>
+        </div>
+
+        {snapshot.pool && (
+          <div className="sessions-pool">
+            <span className="font-semibold">{t("sessions.pool.label")}</span>
+            <div className="sessions-pool-bar">
+              <div className="sessions-pool-fill" style={{ width: `${snapshot.pool.total > 0 ? (snapshot.pool.used / snapshot.pool.total) * 100 : 0}%` }} />
+            </div>
+            <span>{t("sessions.pool.usage").replace("{used}", String(snapshot.pool.used)).replace("{total}", String(snapshot.pool.total))}</span>
+          </div>
+        )}
+
+        {hasActive && (
+          <div className="sessions-table">
+            <div className="sessions-table-header">
+              <span>{t("sessions.col.pet")}</span>
+              <span>{t("sessions.col.terminal")}</span>
+              <span>{t("sessions.col.project")}</span>
+              <span>{t("sessions.col.uptime")}</span>
+              <span>{t("sessions.col.notifications")}</span>
+              <span>{t("sessions.col.actions")}</span>
+            </div>
+            {snapshot.sessions.map((s) => (
+              <div key={s.leaseId} className="sessions-table-row">
+                <span className="sessions-cell-pet">
+                  <span className={`sessions-health-dot ${healthColor(s.healthPct)}`} title={`Health: ${Math.round(s.healthPct * 100)}%`} />
+                  <span className="sessions-pet-name">{s.displayPetName ?? s.actualTargetPetName}</span>
+                  <span className={`pill text-[9px] px-1.5 py-0 ${s.displayPetOrigin === "pool" ? "pill-orange" : s.usingDefaultPet ? "pill-blue" : "pill-purple"}`}>
+                    {s.displayPetOrigin === "pool" ? t("sessions.badge.pool") : s.usingDefaultPet ? t("sessions.badge.default") : t("sessions.badge.explicit")}
+                  </span>
+                </span>
+                <span className="sessions-cell-terminal">
+                  {s.terminalAppName || "—"}
+                  {s.confinementState && <span className="sessions-confinement"> · {t(`sessions.confinement.${s.confinementState === "free-roam" ? "freeRoam" : s.confinementState}`)}</span>}
+                </span>
+                <span className="sessions-cell-cwd" title={s.cwd}>{shortenCwd(s.cwd)}</span>
+                <span className="sessions-cell-uptime font-mono text-[12px]">{formatUptime(s.acquiredAt)}</span>
+                <span>
+                  {s.unresolvedNotifications > 0 && <span className="sessions-notif-badge">{s.unresolvedNotifications}</span>}
+                </span>
+                <span className="sessions-actions">
+                  {s.canFocus && (
+                    <button className="sessions-action-btn" onClick={() => void api.focusSession(s.leaseId)} title={t("sessions.action.focus")}>
+                      <FocusIcon />
+                    </button>
+                  )}
+                  {!s.usingDefaultPet && (
+                    <button className="sessions-action-btn" onClick={() => { void api.toggleSessionPet(s.leaseId).then(() => void load()); }} title={s.petVisible ? t("sessions.action.hide") : t("sessions.action.show")}>
+                      {s.petVisible ? <EyeIcon /> : <EyeOffIcon />}
+                    </button>
+                  )}
+                  <DisconnectButton leaseId={s.leaseId} onDisconnect={() => { void api.releaseSession(s.leaseId).then(() => void load()); }} />
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {hasDisconnected && (
+          <>
+            <div className="sessions-disconnected-title">{t("sessions.disconnected.title")}</div>
+            <div className="sessions-table" style={{ paddingTop: 0 }}>
+              {snapshot.recentlyDisconnected.map((d, i) => (
+                <div key={i} className="sessions-disconnected-row">
+                  <span className="truncate">{d.actualPetName}</span>
+                  <span>{d.terminalAppName || "—"}</span>
+                  <span className="truncate font-mono text-[11px]" title={d.cwd}>{shortenCwd(d.cwd)}</span>
+                  <span className="font-mono text-[11px]">{formatRelative(d.disconnectedAt)}</span>
+                  <span><span className={`sessions-reason-badge ${reasonClass[d.reason] ?? ""}`}>{t(`sessions.disconnected.reason.${d.reason}`)}</span></span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </GlassCard>
+    </div>
+  );
+}
 
 function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
   const { t } = useI18n();
@@ -482,7 +689,7 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
     );
   }
 
-  const { activity, defaultPet, plugins, installedPetCount, updateStatus, catalog } = snapshot;
+  const { activity, defaultPet, plugins, installedPetCount, catalog } = snapshot;
 
   // Find top pet by activity or fallback to default
   const topPetId = Object.entries(activity.perPetActivityCounts).sort(([, a], [, b]) => b - a)[0]?.[0];
@@ -505,27 +712,23 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
     .slice(0, 4);
   const maxCompanionActivity = Math.max(...topCompanionEntries.map(([, count]) => count), 1);
   const lastActiveLabel = activity.lastActivityAt ? new Date(activity.lastActivityAt).toLocaleString() : t("dashboard.lastActive.none");
-  const updateLabel = updateStatus.state === "available" ? t("dashboard.update.available") : updateStatus.state === "error" ? t("dashboard.update.error") : updateStatus.state === "checking" ? t("dashboard.update.checking") : updateStatus.state === "current" ? t("dashboard.update.current") : t("dashboard.update.notChecked");
 
   return (
     <div className="dashboard-layout">
       {error && <div className="error">{error}</div>}
 
-      <section className="dashboard-hero">
-        <div className="dashboard-hero-content">
-          <p className="eyebrow !text-blue-100 opacity-80">{t("dashboard.hero.eyebrow")}</p>
-          <h2 className="dashboard-hero-title">{defaultPet.displayName}</h2>
-          <p className="dashboard-hero-desc">
-            {t("dashboard.hero.desc")}
-          </p>
+      <GlassCard className="flex items-center gap-6 p-6">
+        <div className="flex-1 min-w-0">
+          <p className="font-monoDisplay text-xs font-black uppercase tracking-widest text-slatecopy mb-1">{t("dashboard.hero.desc")}</p>
+          <h2 className="font-monoDisplay text-3xl font-black text-navy truncate">{defaultPet.displayName}</h2>
           <div className="flex gap-3 mt-3">
             <Button variant="secondary" size="compact" onClick={() => onNavigate("pets")}>{t("dashboard.hero.changePet")}</Button>
           </div>
         </div>
-        <div className="dashboard-hero-pet">
+        <div className="flex shrink-0 items-center justify-center">
           <SpriteFrame src={defaultPet.previewSpriteUrl} label={defaultPet.displayName} state="idle" size="detail" />
         </div>
-      </section>
+      </GlassCard>
 
       <div className="dashboard-grid">
         <article className="dashboard-stat-card">
@@ -667,23 +870,6 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
               </div>
               <span className="dashboard-system-value">{catalog.error ? t("dashboard.system.catalog.offline") : catalog.total ? t("dashboard.system.catalog.pets", { count: catalog.total }) : t("dashboard.system.catalog.ready")}</span>
             </div>
-
-            <div className="dashboard-system-item">
-              <div className="dashboard-system-info">
-                <div className="dashboard-system-icon"><ShieldIcon /></div>
-                <span className="dashboard-system-label">{t("dashboard.system.updates")}</span>
-              </div>
-              <StatusPill tone={updateStatus.state === "available" ? "orange" : "blue"}>
-                {updateLabel}
-              </StatusPill>
-            </div>
-          </div>
-
-          <div className="mt-auto pt-4 border-t border-blue-100/30">
-             <div className="flex items-center justify-between text-[10px] font-bold text-slatecopy uppercase tracking-wider">
-               <span>{t("dashboard.system.version")}</span>
-               <span className="font-mono">{updateStatus.currentVersion}</span>
-             </div>
           </div>
         </GlassCard>
       </div>
@@ -691,20 +877,14 @@ function DashboardView({ onNavigate }: { onNavigate: (route: Route) => void }) {
   );
 }
 
-function PlaceholderView({ route }: { route: "dashboard" }) {
+function DocsView() {
   const { t } = useI18n();
-  const meta = routeMetadata[route];
   return (
-    <div className="grid grid-cols-1 w-full">
-      <GlassCard className="flex flex-col items-center justify-center text-center py-16 px-8 h-full min-h-[420px]">
-        <div className="p-4 rounded-3xl bg-blue-50/80 border border-blue-100/50 mb-6 text-brand">
-          {route === "dashboard" && <DashboardIcon />}
-        </div>
-        <h2 className="font-monoDisplay text-2xl font-black mb-2 text-navy">{t(meta.titleKey)}</h2>
-        <p className="text-sm text-slatecopy max-w-md mb-6">{t(meta.descKey)}</p>
-        <span className="inline-flex items-center rounded-full bg-blue-50/80 px-4 py-1.5 text-xs font-bold text-brand border border-blue-200/50">
-          {t("placeholder.comingSoon")}
-        </span>
+    <div className="flex flex-col gap-6 h-full">
+      <GlassCard className="flex h-full flex-col items-center justify-center gap-4 text-center py-16">
+        <DocsIcon />
+        <h2 className="font-monoDisplay text-2xl font-black text-navy">{t("docs.title")}</h2>
+        <p className="text-sm text-slatecopy max-w-md">{t("docs.placeholder")}</p>
       </GlassCard>
     </div>
   );
@@ -747,7 +927,7 @@ const statusPillToneClass = {
 } as const;
 
 function isRoute(value: string | null | undefined): value is Route {
-  return value === "dashboard" || value === "pets" || value === "settings" || value === "plugins" || value === "integrations";
+  return value === "dashboard" || value === "pets" || value === "sessions" || value === "settings" || value === "plugins" || value === "integrations" || value === "docs";
 }
 
 function initialControlCenterRoute(): Route {
@@ -942,14 +1122,14 @@ function PetPoolOrderList({
   }
 
   return (
-    <div className="flex flex-col border-t border-blue-50">
+    <div className="flex flex-col border-t border-stone-50">
       {order.length === 0 && (
         <p className="px-5 py-4 text-xs text-slatecopy">No pets in the pool yet. Add one below.</p>
       )}
       {order.map((id, idx) => (
         <div
           key={id}
-          className="flex items-center gap-3 border-b border-blue-50 px-5 py-3 transition-colors hover:bg-white/80 last:border-b-0"
+          className="flex items-center gap-3 border-b border-stone-50 px-5 py-3 transition-colors hover:bg-white/80 last:border-b-0"
         >
           <span className="w-14 shrink-0 font-mono text-xs font-bold text-slatecopy">
             {`Slot ${idx + 1}`}
@@ -1022,15 +1202,6 @@ function ToggleRow({ title, description, checked, disabled, onChange, testId }: 
   </label>;
 }
 
-function formatUpdateStatus(status: UpdateStatus | null, t: (key: string, vars?: Record<string, string | number>) => string): string {
-  if (!status) return t("settings.update.notLoaded");
-  if (status.state === "checking") return t("settings.update.checking");
-  if (status.state === "available") return t("settings.update.available", { version: status.latestVersion ?? t("common.latest") });
-  if (status.state === "current") return t("settings.update.current");
-  if (status.state === "error") return status.error || t("settings.update.failed");
-  return t("settings.update.version", { version: status.currentVersion });
-}
-
 function ReactionPreviewSprite({ settings, state }: { settings: ReactionAnimationSettings; state: UserSelectableAnimationState }) {
   const { t } = useI18n();
   const frame = { width: settings.sprite.frameWidth, height: settings.sprite.frameHeight };
@@ -1055,7 +1226,6 @@ function SettingsView() {
   const [reactionSettings, setReactionSettings] = useState<ReactionAnimationSettings | null>(null);
   const [launchAtLogin, setLaunchAtLogin] = useState<LaunchAtLoginState | null>(null);
   const [lanStatus, setLanStatus] = useState<LanStatusSnapshot | null>(null);
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [activeTab, setActiveTab] = useState<"general" | "reactions" | "plugins" | "lan">("general");
   const [pluginsSnapshot, setPluginsSnapshot] = useState<PluginServiceSnapshot | null>(null);
   const [platformSettings, setPlatformSettings] = useState<PluginPlatformSettings | null>(null);
@@ -1068,11 +1238,10 @@ function SettingsView() {
 
   async function loadSettings() {
     setError("");
-    const [nextSettings, nextReactions, nextLaunch, nextUpdate, nextPlatform, nextAiKey, nextLanStatus, nextPluginsSnapshot] = await Promise.all([
+    const [nextSettings, nextReactions, nextLaunch, nextPlatform, nextAiKey, nextLanStatus, nextPluginsSnapshot] = await Promise.all([
       api.getSettingsState(),
       api.getReactionAnimationSettings(),
       api.getLaunchAtLogin(),
-      api.getUpdateStatus(),
       api.getPluginPlatformSettings().catch(() => null),
       api.getPluginAiApiKeyStatus().catch(() => ({ hasKey: false })),
       api.getLanStatus().catch(() => null),
@@ -1081,14 +1250,10 @@ function SettingsView() {
     setSettings(nextSettings);
     setReactionSettings(nextReactions);
     setLaunchAtLogin(nextLaunch);
-    setUpdateStatus(nextUpdate);
     setPlatformSettings(nextPlatform);
     setAiKeyStatus(nextAiKey);
     setLanStatus(nextLanStatus);
     setPluginsSnapshot(nextPluginsSnapshot);
-    if (nextUpdate.state === "checking") {
-      void api.checkForUpdates().then(setUpdateStatus).catch((err) => setError(String(err?.message ?? err)));
-    }
   }
 
   useEffect(() => { void loadSettings().catch((err) => setError(String(err?.message ?? err))); }, []);
@@ -1229,9 +1394,13 @@ function SettingsView() {
                     <strong>{t("settings.general.petScale.title")}</strong>
                     <small>{t("settings.general.petScale.description")}</small>
                   </div>
-                  <select className="settings-select" value={settings?.preferences.petScale ?? ""} disabled={!settings || !!busy} onChange={(event) => patchPreferences({ petScale: Number(event.target.value) }, t("settings.toast.petScaleSaved"))}>
-                    {(settings?.petScaleOptions ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
+                  <div className="settings-scale-controls">
+                    <select className="settings-select" value={(settings?.petScaleOptions ?? []).some((o) => o.value === settings?.preferences.petScale) ? settings?.preferences.petScale ?? "" : ""} disabled={!settings || !!busy} onChange={(event) => { if (event.target.value) patchPreferences({ petScale: Number(event.target.value) }, t("settings.toast.petScaleSaved")); }}>
+                      <option value="" disabled>{t("settings.general.petScale.custom")}</option>
+                      {(settings?.petScaleOptions ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </select>
+                    <input type="number" className="settings-scale-input" value={settings?.preferences.petScale ?? ""} min={settings?.petScaleRange.min ?? 0.1} max={settings?.petScaleRange.max ?? 3} step={settings?.petScaleRange.step ?? 0.01} disabled={!settings || !!busy} onChange={(event) => { const v = Number(event.target.value); if (Number.isFinite(v)) patchPreferences({ petScale: v }, t("settings.toast.petScaleSaved")); }} />
+                  </div>
                 </div>
                 <div className="settings-row">
                   <div className="settings-row-info">
@@ -1265,23 +1434,6 @@ function SettingsView() {
 
               <div className="settings-actions">
                 <Button variant="secondary" size="compact" disabled={!!busy} onClick={() => void run(t("settings.busy.resetting"), async () => { setSettings(await api.resetDefaultPetPosition()); setMessage(t("settings.toast.positionReset")); })}>{t("settings.general.resetPosition")}</Button>
-              </div>
-
-              <div className="settings-system-footer">
-                <div className="settings-system-info">
-                  <RefreshIcon />
-                  <span>{t("settings.general.systemStatus")}</span>
-                  <span className="settings-system-version">{updateStatus?.currentVersion}</span>
-                  <span className="opacity-60">{formatUpdateStatus(updateStatus, t)}</span>
-                </div>
-                <div className="flex gap-2">
-                  {updateStatus?.state === "available" && (
-                    <Button variant="primary" size="compact" disabled={!!busy} onClick={() => void run(t("settings.busy.opening"), async () => { await api.openUpdateReleasePage(); })}>{t("settings.general.updateAvailable")}</Button>
-                  )}
-                  <Button variant="secondary" size="compact" disabled={!!busy || updateStatus?.state === "checking"} onClick={() => void run(t("settings.busy.checking"), async () => { setUpdateStatus(await api.checkForUpdates()); })}>
-                    {busy === t("settings.busy.checking") ? t("settings.general.checking") : t("settings.general.checkForUpdates")}
-                  </Button>
-                </div>
               </div>
             </div>
 
@@ -2251,7 +2403,7 @@ function IntegrationsView() {
                 <>
                   <section className="plugin-section">
                     <div className="plugin-section-title"><small>{t("integrations.connection")}</small><strong>{t("integrations.statusRouting")}</strong></div>
-                    <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/50 border border-blue-100/50">
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-stone-50/50 border border-stone-100/50">
                       <div className="flex flex-col">
                         <strong className="text-sm text-navy">{snapshot.status.label}</strong>
                         <small className="text-xs text-slatecopy">{snapshot.status.details}</small>
@@ -2341,7 +2493,7 @@ function IntegrationsView() {
                 <>
                   <section className="plugin-section">
                     <div className="plugin-section-title"><small>{t("integrations.connection")}</small><strong>{t("integrations.globalSetup")}</strong></div>
-                    <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/50 border border-blue-100/50">
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-stone-50/50 border border-stone-100/50">
                       <div className="flex flex-col">
                         <strong className="text-sm text-navy">{snapshot.opencodeStatus.label}</strong>
                         <small className="text-xs text-slatecopy">{snapshot.opencodeStatus.details}</small>
@@ -2395,7 +2547,7 @@ function IntegrationsView() {
                 <>
                   <section className="plugin-section">
                     <div className="plugin-section-title"><small>{t("integrations.connection")}</small><strong>{t("integrations.globalMcp")}</strong></div>
-                    <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/50 border border-blue-100/50">
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-stone-50/50 border border-stone-100/50">
                       <div className="flex flex-col">
                         <strong className="text-sm text-navy">{snapshot.cursorStatus.label}</strong>
                         <small className="text-xs text-slatecopy">{snapshot.cursorStatus.details}</small>
@@ -2459,23 +2611,23 @@ function IntegrationsView() {
                   <div className="mt-3 p-4 rounded-2xl bg-navy/5 border border-navy/5 flex flex-col gap-3">
                     <div className="flex flex-col gap-1">
                       <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("integrations.pi.globalInstall")}</span>
-                      <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">pi install npm:@open-pets/pi</code>
+                      <code className="bg-white px-2 py-1 rounded border border-stone-100 text-brand text-xs">pi install npm:@open-pets/pi</code>
                     </div>
                     <div className="flex flex-col gap-1">
                       <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("integrations.pi.projectInstall")}</span>
-                      <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">pi install -l npm:@open-pets/pi</code>
+                      <code className="bg-white px-2 py-1 rounded border border-stone-100 text-brand text-xs">pi install -l npm:@open-pets/pi</code>
                     </div>
                     <div className="flex flex-col gap-1">
                       <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("integrations.pi.remove")}</span>
-                      <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">pi remove npm:@open-pets/pi</code>
+                      <code className="bg-white px-2 py-1 rounded border border-stone-100 text-brand text-xs">pi remove npm:@open-pets/pi</code>
                     </div>
                   </div>
-                  <div className="mt-3 p-4 rounded-2xl bg-blue-50/50 border border-blue-100/60 flex flex-col gap-2">
+                  <div className="mt-3 p-4 rounded-2xl bg-stone-50/50 border border-stone-100/60 flex flex-col gap-2">
                     <span className="text-[10px] font-bold text-slatecopy uppercase tracking-wider">{t("integrations.pi.slashCommands")}</span>
-                    <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets status</code>
-                    <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets test</code>
-                    <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets react &lt;reaction&gt;</code>
-                    <code className="bg-white px-2 py-1 rounded border border-blue-100 text-brand text-xs">/openpets say &lt;message&gt;</code>
+                    <code className="bg-white px-2 py-1 rounded border border-stone-100 text-brand text-xs">/openpets status</code>
+                    <code className="bg-white px-2 py-1 rounded border border-stone-100 text-brand text-xs">/openpets test</code>
+                    <code className="bg-white px-2 py-1 rounded border border-stone-100 text-brand text-xs">/openpets react &lt;reaction&gt;</code>
+                    <code className="bg-white px-2 py-1 rounded border border-stone-100 text-brand text-xs">/openpets say &lt;message&gt;</code>
                   </div>
                   <p className="text-xs text-slatecopy mt-2">
                     {t("integrations.pi.outro")}
@@ -3047,44 +3199,47 @@ function ControlCenter() {
     finally { setBusy(""); }
   }
 
-  const currentMeta = routeMetadata[currentRoute];
-
   return (
     <main className="app-shell">
-      <header className="hero">
-        <div className="hero-content">
-          <p className="eyebrow">{t("app.controlCenter")}</p>
-          <h1>{t(currentMeta.titleKey)}</h1>
-          <p className="hero-desc">{t(currentMeta.descKey)}</p>
+      <header className="top-bar">
+        <div className="top-bar-brand">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+            <circle cx="7" cy="7" r="2.5" />
+            <circle cx="17" cy="7" r="2.5" />
+            <circle cx="5" cy="15" r="2.5" />
+            <circle cx="19" cy="15" r="2.5" />
+            <ellipse cx="12" cy="19.5" rx="3.5" ry="2.5" />
+          </svg>
+          <span>OpenPets</span>
         </div>
-        <div className="hero-logo-container">
-          <img src={openPetsLogoUrl} className="hero-brand-logo" alt={t("app.logo.alt")} />
-        </div>
+        <nav className="top-bar-nav">
+          {navTabs.map((tab) => (
+            <button
+              key={tab.id}
+              className={`nav-tab ${currentRoute === tab.id ? "active" : ""}`}
+              onClick={() => setCurrentRoute(tab.id)}
+            >
+              {tab.icon}
+              <span>{t(tab.labelKey)}</span>
+            </button>
+          ))}
+        </nav>
       </header>
-
-      <nav className="nav-bar">
-        {navTabs.map((tab) => (
-          <button
-            key={tab.id}
-            className={`nav-tab ${currentRoute === tab.id ? "active" : ""}`}
-            onClick={() => setCurrentRoute(tab.id)}
-          >
-            {tab.icon}
-            <span>{t(tab.labelKey)}</span>
-          </button>
-        ))}
-      </nav>
 
       {error && <div className="error">{error}</div>}
 
       {currentRoute === "dashboard" ? (
         <DashboardView onNavigate={setCurrentRoute} />
+      ) : currentRoute === "sessions" ? (
+        <SessionsView />
       ) : currentRoute === "settings" ? (
         <SettingsView />
       ) : currentRoute === "plugins" ? (
         <PluginsView />
       ) : currentRoute === "integrations" ? (
         <IntegrationsView />
+      ) : currentRoute === "docs" ? (
+        <DocsView />
       ) : (
         <div className="layout">
           <GlassCard className="gallery">

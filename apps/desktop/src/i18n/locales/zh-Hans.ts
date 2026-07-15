@@ -50,15 +50,19 @@ export const zhHans: Partial<Messages> = {
   // --- Navigation tabs (renderer) ---
   "nav.dashboard": "仪表盘",
   "nav.pets": "宠物",
+  "nav.sessions": "Sessions",
   "nav.settings": "设置",
   "nav.plugins": "插件",
   "nav.integrations": "集成",
+  "nav.docs": "文档",
 
   // --- Route metadata (renderer hero header) ---
   "route.dashboard.title": "仪表盘",
   "route.dashboard.description": "查看活跃伙伴、状态及系统指标的概览。",
   "route.pets.title": "宠物",
   "route.pets.description": "安装、导入、预览并选择你的默认桌面伙伴。",
+  "route.sessions.title": "Active Sessions",
+  "route.sessions.description": "Connected coding sessions and their pet assignments.",
   "route.settings.title": "设置",
   "route.settings.description": "配置启动行为、缩放偏好和动画设置。",
   "route.plugins.title": "插件",
@@ -68,19 +72,42 @@ export const zhHans: Partial<Messages> = {
 
   // --- App shell (renderer) ---
   "app.controlCenter": "控制中心",
-  "app.logo.alt": "OpenPets",
+
+  // --- Sessions ledger (renderer) ---
+  "sessions.loading": "Loading sessions…",
+  "sessions.title": "Active Sessions",
+  "sessions.empty.title": "No Active Sessions",
+  "sessions.empty.description": "Sessions appear here when an MCP client (Claude Code, Cursor, etc.) connects to OpenPets.",
+  "sessions.col.pet": "Pet",
+  "sessions.col.terminal": "Terminal",
+  "sessions.col.project": "Project",
+  "sessions.col.uptime": "Uptime",
+  "sessions.col.notifications": "Notifs",
+  "sessions.col.actions": "Actions",
+  "sessions.badge.default": "default",
+  "sessions.badge.explicit": "explicit",
+  "sessions.badge.pool": "pool",
+  "sessions.pool.label": "Pool",
+  "sessions.pool.usage": "{used}/{total} slots in use",
+  "sessions.action.focus": "Focus terminal",
+  "sessions.action.show": "Show pet",
+  "sessions.action.hide": "Hide pet",
+  "sessions.action.disconnect": "Disconnect",
+  "sessions.action.confirm": "Confirm?",
+  "sessions.confinement.confined": "confined",
+  "sessions.confinement.minimized": "minimized",
+  "sessions.confinement.occluded": "occluded",
+  "sessions.confinement.freeRoam": "free-roam",
+  "sessions.disconnected.title": "Recently Disconnected",
+  "sessions.disconnected.reason.released": "released",
+  "sessions.disconnected.reason.expired": "expired",
+  "sessions.disconnected.reason.pid_dead": "pid dead",
 
   // --- Dashboard (renderer) ---
   "dashboard.loading": "正在收集伙伴指标...",
-  "dashboard.hero.eyebrow": "主要伙伴",
   "dashboard.hero.desc": "已准备好开始你的下一次编程。",
   "dashboard.hero.changePet": "更换宠物",
   "dashboard.lastActive.none": "暂无活动",
-  "dashboard.update.available": "有可用更新",
-  "dashboard.update.error": "检查失败",
-  "dashboard.update.checking": "检查中",
-  "dashboard.update.current": "当前版本",
-  "dashboard.update.notChecked": "未检查",
   "dashboard.stat.messages": "消息",
   "dashboard.stat.messages.footer": "发送的气泡总数",
   "dashboard.stat.reactions": "反应",
@@ -109,8 +136,6 @@ export const zhHans: Partial<Messages> = {
   "dashboard.system.catalog.offline": "离线",
   "dashboard.system.catalog.pets": "{count} 个宠物",
   "dashboard.system.catalog.ready": "就绪",
-  "dashboard.system.updates": "更新",
-  "dashboard.system.version": "版本",
 
   // --- Placeholder view (renderer) ---
   "placeholder.comingSoon": "敬请期待 • 下一个迁移目标",
@@ -209,12 +234,10 @@ export const zhHans: Partial<Messages> = {
   "settings.general.analytics.title": "分享保护隐私的使用分析",
   "settings.general.analytics.description": "帮助改进 OpenPets。我们不会收集提示词、代码、文件路径、终端命令、宠物气泡文本或插件配置值。",
   "settings.general.petScale.title": "宠物大小",
-  "settings.general.petScale.description": "调整默认桌面宠物的显示大小。",
+  "settings.general.petScale.description": "选择预设大小或输入自定义值。",
+  "settings.general.petScale.custom": "自定义",
   "settings.general.resetPosition": "重置宠物位置",
   "settings.general.systemStatus": "系统状态",
-  "settings.general.updateAvailable": "有可用更新",
-  "settings.general.checking": "检查中…",
-  "settings.general.checkForUpdates": "检查更新",
   "settings.toast.startupSaved": "启动偏好已保存。",
   "settings.toast.loginStartupSaved": "登录启动偏好已保存。",
   "settings.toast.analyticsSaved": "分析偏好已保存。",
@@ -227,8 +250,6 @@ export const zhHans: Partial<Messages> = {
   "settings.petPool.description": "When on, each concurrent agent session gets its own pet from the pool.",
   "settings.busy.saving": "保存中",
   "settings.busy.resetting": "重置中",
-  "settings.busy.opening": "打开中",
-  "settings.busy.checking": "检查中",
 
   // --- Settings: LAN mode (renderer) ---
   "settings.lan.eyebrow": "办公室宠物",
@@ -249,14 +270,6 @@ export const zhHans: Partial<Messages> = {
   "settings.lan.tokenHintValue": "结尾为 {hint}",
   "settings.lan.currentOwner": "当前所有者",
   "settings.lan.persistedOwner": "已保存所有者",
-
-  // --- Settings: update status formatting (renderer) ---
-  "settings.update.notLoaded": "更新状态尚未加载。",
-  "settings.update.checking": "正在检查更新…",
-  "settings.update.available": "版本 {version} 可用。",
-  "settings.update.current": "已是最新。",
-  "settings.update.failed": "更新检查失败。",
-  "settings.update.version": "版本：{version}。",
 
   // --- Settings: reaction mapping (renderer) ---
   "settings.reactions.eyebrow": "行为",
@@ -557,4 +570,8 @@ export const zhHans: Partial<Messages> = {
   "settings.language.title": "语言",
   "settings.language.description": "OpenPets 菜单和窗口的显示语言。",
   "settings.language.system": "跟随系统",
+
+  // --- Docs (renderer) ---
+  "docs.title": "文档",
+  "docs.placeholder": "即将推出 — 我们将在此添加指南和参考资料。",
 };
