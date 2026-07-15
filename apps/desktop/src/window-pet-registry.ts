@@ -202,7 +202,35 @@ export class WindowPetRegistry {
     const changed: string[] = [];
     const binding = this.#bindings.get(windowKey);
     if (binding && binding.store.resolveWindow(windowKey)) changed.push(binding.petId);
-    this.defaultStore.resolveWindow(windowKey);
+    if (this.defaultStore.resolveWindow(windowKey)) {
+      // Default store changed — caller should refresh the default pet view.
+    }
+    return changed;
+  }
+
+  /** Resolve notifications for ALL window keys that share a terminal PID. */
+  resolveWindowFocusByPid(ownerPid: number): readonly string[] {
+    const changed: string[] = [];
+    const pidKey = `p:${ownerPid}`;
+    // Resolve on any binding whose sessions include this PID.
+    for (const [wk, binding] of this.#bindings) {
+      for (const session of binding.sessions.values()) {
+        if (session.terminalOwnerPid === ownerPid) {
+          if (binding.store.resolveWindow(wk)) changed.push(binding.petId);
+          // Also resolve entries keyed by p:pid or w:windowId for this session.
+          binding.store.resolveWindow(pidKey);
+          if (session.terminalWindowId !== undefined) binding.store.resolveWindow(`w:${session.terminalWindowId}`);
+          break;
+        }
+      }
+    }
+    // Default store: resolve by both p:pid and any w:windowId matching sessions with this PID.
+    this.defaultStore.resolveWindow(pidKey);
+    for (const session of this.#defaultSessions.values()) {
+      if (session.terminalOwnerPid === ownerPid && session.terminalWindowId !== undefined) {
+        this.defaultStore.resolveWindow(`w:${session.terminalWindowId}`);
+      }
+    }
     return changed;
   }
 

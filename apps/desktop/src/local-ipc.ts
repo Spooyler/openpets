@@ -170,9 +170,7 @@ export async function startLocalIpcServer(): Promise<void> {
   // unresolved notification rows keyed to that window and refresh the view.
   subscribeActiveWindowTracking((win) => {
     if (!win) return;
-    for (const key of [windowKeyForIdentity(win.id, win.ownerPid), windowKeyForIdentity(undefined, win.ownerPid)]) {
-      for (const petId of windowPetRegistry.resolveWindowFocus(key)) refreshAgentPetNotifications(petId);
-    }
+    for (const petId of windowPetRegistry.resolveWindowFocusByPid(win.ownerPid)) refreshAgentPetNotifications(petId);
     refreshDefaultPetNotifications();
   });
 
