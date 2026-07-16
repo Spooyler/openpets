@@ -13,6 +13,7 @@ Provides modular, reusable components for the OpenPets ecosystem:
 - **opencode**: OpenCode editor integration (plugin hooks, config management)
 - **claude**: Claude Code integration (hook execution, config management)
 - **cursor**: Cursor editor integration (MCP configuration, project rules)
+- **vscode**: VS Code editor integration (user-level MCP configuration)
 - **pi**: Pi coding-agent extension integration (event handling, slash commands)
 - **install-pet**: Standalone pet installer from gallery catalog
 - **sdk**: Public SDK v3 type definitions and deterministic testing harness for plugin authors (SuperPlugins)
@@ -70,6 +71,7 @@ SDK Type definitions & Test Harness (packages/sdk/)
 - `claude` depends on: `client`, `agent-events`
 - `opencode` depends on: `client`, `agent-events`
 - `cursor` depends on: `client`
+- `vscode` has no workspace dependencies (pure config-file management; consumed by `desktop`)
 - `pi` depends on: `client`, `agent-events`
 - `install-pet` depends on: `client`
 - `sdk` (type-only and test harness) is consumed by template code scaffolded by `cli`
@@ -99,3 +101,4 @@ All packages ultimately communicate with the OpenPets desktop app via the IPC pr
 | `pet-format/` | Pet package identity marker package. | [View Map](pet-format/codemap.md) |
 | `pi/` | Pi coding-agent extension integration package. | [View Map](pi/codemap.md) |
 | `sdk/` | Public plugin SDK v3 type surface and test harness. | [View Map](sdk/codemap.md) |
+| `vscode/` | VS Code user-level MCP config integration package. | [View Map](vscode/codemap.md) |
