@@ -448,5 +448,18 @@
   .sessions-reason-released { @apply bg-slate-100 text-slate-600; }
   .sessions-reason-expired { @apply bg-amber-50 text-amber-700; }
   .sessions-reason-pid_dead { @apply bg-red-50 text-red-600; }
+  .sessions-group { margin-bottom: 10px; }
+  .sessions-group-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 6px 8px; margin-top: 6px;
+    border-bottom: 1px solid rgba(168, 162, 158, 0.2);
+    font-size: 12px; font-weight: 600; color: #78716c;
+  }
+  .sessions-group-title { display: inline-flex; align-items: center; gap: 6px; }
+  .sessions-pet-picker {
+    font-size: 11px; padding: 2px 6px; border-radius: 6px;
+    border: 1px solid rgba(168, 162, 158, 0.4); background: rgba(255, 255, 255, 0.72);
+    color: #2c2825;
+  }
 
 }

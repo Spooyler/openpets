@@ -132,6 +132,11 @@ export const en = {
   "sessions.disconnected.reason.released": "released",
   "sessions.disconnected.reason.expired": "expired",
   "sessions.disconnected.reason.pid_dead": "pid dead",
+  "sessions.group.defaultPet": "Default pet",
+  "sessions.group.identifying": "Identifying…",
+  "sessions.picker.default": "Default",
+  "sessions.picker.inUse": "{name} (in use)",
+  "sessions.picker.label": "Assign pet",
 
   // --- Dashboard (renderer) ---
   "dashboard.loading": "Gathering companion metrics...",

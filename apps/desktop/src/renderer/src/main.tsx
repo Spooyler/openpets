@@ -27,9 +27,9 @@ type AnalyticsConsent = "unset" | "granted" | "denied";
 type PetPoolCandidate = { id: string; displayName: string };
 type PetScaleRange = { min: number; max: number; step: number };
 type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean }; petScaleOptions: PetScaleOption[]; petScaleRange: PetScaleRange; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
-type SessionLeaseSnapshot = { leaseId: string; targetKind: "default" | "explicit"; actualTargetPetId: string; actualTargetPetName: string; usingDefaultPet: boolean; requestedPetId?: string; fallbackReason?: string; clientPid?: number; terminalOwnerPid?: number; terminalAppName?: string; cwd?: string; acquiredAt: number; lastHeartbeatAt: number; lastActivityAt?: number; expiresAt: number; unresolvedNotifications: number; confinementState?: "confined" | "minimized" | "occluded" | "free-roam"; petVisible: boolean; petDismissed: boolean; canFocus: boolean; healthPct: number; displayPetId?: string; displayPetName?: string; displayPetOrigin?: "explicit" | "pool" };
+type SessionLeaseSnapshot = { leaseId: string; targetKind: "default" | "explicit"; actualTargetPetId: string; actualTargetPetName: string; usingDefaultPet: boolean; requestedPetId?: string; fallbackReason?: string; clientPid?: number; terminalOwnerPid?: number; terminalAppName?: string; cwd?: string; acquiredAt: number; lastHeartbeatAt: number; lastActivityAt?: number; expiresAt: number; unresolvedNotifications: number; confinementState?: "confined" | "minimized" | "occluded" | "free-roam"; petVisible: boolean; petDismissed: boolean; canFocus: boolean; healthPct: number; displayPetId?: string; displayPetName?: string; displayPetOrigin?: "explicit" | "pool"; windowKey?: string };
 type DisconnectedSession = { actualPetName: string; targetKind: "default" | "explicit"; terminalAppName?: string; cwd?: string; clientPid?: number; disconnectedAt: number; reason: "released" | "expired" | "pid_dead" };
-type SessionsSnapshot = { sessions: SessionLeaseSnapshot[]; recentlyDisconnected: DisconnectedSession[]; pool: { used: number; total: number } | null; serverTime: number };
+type SessionsSnapshot = { sessions: SessionLeaseSnapshot[]; recentlyDisconnected: DisconnectedSession[]; pool: { used: number; total: number } | null; serverTime: number; assignablePets: { id: string; displayName: string; inUse: boolean }[] };
 type LaunchAtLoginState = { supported: boolean; enabled: boolean };
 type LanTopologyIssue = { code: "self_reference" | "missing_reverse"; host: string; edge: "left" | "right" | "up" | "down"; neighbor: string };
 type LanStatusSnapshot = { mode: "off" | "server" | "client"; localHost: string; serverUrl: string; port: number; auth: "token" | "none"; authSource: "env" | "stored" | "generated" | "none"; authInsecure: boolean; tokenHint: string | null; topologyHosts: number; topologyLinks: number; topologyIssues: LanTopologyIssue[]; currentHost: string | null; clients: Array<{ host: string; lastSeen: number; position?: { x: number; y: number } }>; updatedAt: number; persistedCurrentHost: string | null; persistedUpdatedAt: number | null };
@@ -75,6 +75,8 @@ type ControlCenterApi = {
   releaseSession(leaseId: string): Promise<{ released: boolean }>;
   focusSession(leaseId: string): Promise<{ focused: boolean }>;
   toggleSessionPet(leaseId: string): Promise<{ toggled: boolean }>;
+  assignWindowPet(windowKey: string, petId: string | null): Promise<{ assigned: boolean }>;
+  clearProjectPetAssignments(): Promise<SettingsState>;
   getSettingsState(): Promise<SettingsState>;
   getLanStatus(): Promise<LanStatusSnapshot>;
   setDesktopAnalyticsConsent(consent: AnalyticsConsent): Promise<SettingsState>;
@@ -576,6 +578,15 @@ function SessionsView() {
     );
   }
 
+  const IDENTIFYING = "__identifying__";
+  const groups = new Map<string, SessionLeaseSnapshot[]>();
+  for (const s of snapshot.sessions) {
+    const key = s.windowKey ?? IDENTIFYING;
+    const list = groups.get(key);
+    if (list) list.push(s);
+    else groups.set(key, [s]);
+  }
+
   return (
     <div className="sessions-layout">
       <GlassCard>
@@ -604,39 +615,79 @@ function SessionsView() {
               <span>{t("sessions.col.notifications")}</span>
               <span>{t("sessions.col.actions")}</span>
             </div>
-            {snapshot.sessions.map((s) => (
-              <div key={s.leaseId} className="sessions-table-row">
-                <span className="sessions-cell-pet">
-                  <span className={`sessions-health-dot ${healthColor(s.healthPct)}`} title={`Health: ${Math.round(s.healthPct * 100)}%`} />
-                  <span className="sessions-pet-name">{s.displayPetName ?? s.actualTargetPetName}</span>
-                  <span className={`pill text-[9px] px-1.5 py-0 ${s.displayPetOrigin === "pool" ? "pill-orange" : s.usingDefaultPet ? "pill-blue" : "pill-purple"}`}>
-                    {s.displayPetOrigin === "pool" ? t("sessions.badge.pool") : s.usingDefaultPet ? t("sessions.badge.default") : t("sessions.badge.explicit")}
-                  </span>
-                </span>
-                <span className="sessions-cell-terminal">
-                  {s.terminalAppName || "—"}
-                  {s.confinementState && <span className="sessions-confinement"> · {t(`sessions.confinement.${s.confinementState === "free-roam" ? "freeRoam" : s.confinementState}`)}</span>}
-                </span>
-                <span className="sessions-cell-cwd" title={s.cwd}>{shortenCwd(s.cwd)}</span>
-                <span className="sessions-cell-uptime font-mono text-[12px]">{formatUptime(s.acquiredAt)}</span>
-                <span>
-                  {s.unresolvedNotifications > 0 && <span className="sessions-notif-badge">{s.unresolvedNotifications}</span>}
-                </span>
-                <span className="sessions-actions">
-                  {s.canFocus && (
-                    <button className="sessions-action-btn" onClick={() => void api.focusSession(s.leaseId)} title={t("sessions.action.focus")}>
-                      <FocusIcon />
-                    </button>
-                  )}
-                  {!s.usingDefaultPet && (
-                    <button className="sessions-action-btn" onClick={() => { void api.toggleSessionPet(s.leaseId).then(() => void load()); }} title={s.petVisible ? t("sessions.action.hide") : t("sessions.action.show")}>
-                      {s.petVisible ? <EyeIcon /> : <EyeOffIcon />}
-                    </button>
-                  )}
-                  <DisconnectButton leaseId={s.leaseId} onDisconnect={() => { void api.releaseSession(s.leaseId).then(() => void load()); }} />
-                </span>
-              </div>
-            ))}
+            {[...groups.entries()].map(([groupKey, groupSessions]) => {
+              const isIdentifying = groupKey === IDENTIFYING;
+              const lead = groupSessions[0]!;
+              const groupPetId = isIdentifying ? undefined : lead.displayPetId;
+              const groupPetName = groupPetId ? (lead.displayPetName ?? groupPetId) : undefined;
+              return (
+                <div key={groupKey} className="sessions-group">
+                  <div className="sessions-group-header">
+                    <span className="sessions-group-title">
+                      {isIdentifying ? t("sessions.group.identifying") : (lead.terminalAppName || "—")}
+                      {!isIdentifying && <span className="sessions-pet-name">{groupPetName ?? t("sessions.group.defaultPet")}</span>}
+                      {!isIdentifying && (
+                        <span className={`pill text-[9px] px-1.5 py-0 ${lead.displayPetOrigin === "pool" ? "pill-orange" : groupPetId ? "pill-purple" : "pill-blue"}`}>
+                          {lead.displayPetOrigin === "pool" ? t("sessions.badge.pool") : groupPetId ? t("sessions.badge.explicit") : t("sessions.badge.default")}
+                        </span>
+                      )}
+                    </span>
+                    {!isIdentifying && (
+                      <label className="sessions-pet-picker-label" title={t("sessions.picker.label")}>
+                        <select
+                          className="sessions-pet-picker"
+                          value={groupPetId ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            void api.assignWindowPet(groupKey, v === "" ? null : v).then(() => void load());
+                          }}
+                        >
+                          <option value="">{groupPetId ? t("sessions.picker.default") : `${t("sessions.picker.default")} — ${groupPetName ?? ""}`.trim()}</option>
+                          {snapshot.assignablePets.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.inUse && p.id !== groupPetId ? t("sessions.picker.inUse").replace("{name}", p.displayName) : p.displayName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                  {groupSessions.map((s) => (
+                    <div key={s.leaseId} className="sessions-table-row">
+                      <span className="sessions-cell-pet">
+                        <span className={`sessions-health-dot ${healthColor(s.healthPct)}`} title={`Health: ${Math.round(s.healthPct * 100)}%`} />
+                        <span className="sessions-pet-name">{s.displayPetName ?? s.actualTargetPetName}</span>
+                        <span className={`pill text-[9px] px-1.5 py-0 ${s.displayPetOrigin === "pool" ? "pill-orange" : s.usingDefaultPet ? "pill-blue" : "pill-purple"}`}>
+                          {s.displayPetOrigin === "pool" ? t("sessions.badge.pool") : s.usingDefaultPet ? t("sessions.badge.default") : t("sessions.badge.explicit")}
+                        </span>
+                      </span>
+                      <span className="sessions-cell-terminal">
+                        {s.terminalAppName || "—"}
+                        {s.confinementState && <span className="sessions-confinement"> · {t(`sessions.confinement.${s.confinementState === "free-roam" ? "freeRoam" : s.confinementState}`)}</span>}
+                      </span>
+                      <span className="sessions-cell-cwd" title={s.cwd}>{shortenCwd(s.cwd)}</span>
+                      <span className="sessions-cell-uptime font-mono text-[12px]">{formatUptime(s.acquiredAt)}</span>
+                      <span>
+                        {s.unresolvedNotifications > 0 && <span className="sessions-notif-badge">{s.unresolvedNotifications}</span>}
+                      </span>
+                      <span className="sessions-actions">
+                        {s.canFocus && (
+                          <button className="sessions-action-btn" onClick={() => void api.focusSession(s.leaseId)} title={t("sessions.action.focus")}>
+                            <FocusIcon />
+                          </button>
+                        )}
+                        {!s.usingDefaultPet && (
+                          <button className="sessions-action-btn" onClick={() => { void api.toggleSessionPet(s.leaseId).then(() => void load()); }} title={s.petVisible ? t("sessions.action.hide") : t("sessions.action.show")}>
+                            {s.petVisible ? <EyeIcon /> : <EyeOffIcon />}
+                          </button>
+                        )}
+                        <DisconnectButton leaseId={s.leaseId} onDisconnect={() => { void api.releaseSession(s.leaseId).then(() => void load()); }} />
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
           </div>
         )}
 
