@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { errorResponse, maxIpcMessageBytes, parseIpcRequest, validateReaction, validateSayMessage, validateInstallLocalKind, validateInstallLocalPath, validateCwd } from "../src/local-ipc-protocol.js";
+import { errorResponse, maxIpcMessageBytes, parseIpcRequest, validateReaction, validateSayMessage, validateInstallLocalKind, validateInstallLocalPath, validateCwd, validateRequestedPetId } from "../src/local-ipc-protocol.js";
 
 const token = "test-token";
 const valid = {
@@ -63,5 +63,14 @@ assert.equal(validateCwd("C:\\Users\\me\\fraud_project"), "C:\\Users\\me\\fraud_
 assert.equal(validateCwd("/home/me/api-fix"), "/home/me/api-fix");
 assert.equal(validateCwd("x".repeat(1025)), undefined, "cwd >1024 chars ignored");
 assert.equal(validateCwd("bad\u0000path"), undefined, "control chars rejected");
+
+// --- validateRequestedPetId (tri-state: string | null | undefined) ---
+assert.equal(validateRequestedPetId(undefined), undefined, "absent stays undefined (unspecified)");
+assert.equal(validateRequestedPetId(null), null, "null passes through (explicitly-default request)");
+assert.equal(validateRequestedPetId("  fox  "), "fox", "string trimmed");
+assert.equal(validateRequestedPetId("   "), undefined, "blank collapses to undefined");
+assert.throws(() => validateRequestedPetId(42), "non-string rejected");
+assert.throws(() => validateRequestedPetId("bad\\pet"), "path-like ids rejected");
+assert.throws(() => validateRequestedPetId("x".repeat(129)), "oversized ids rejected");
 
 console.log("Local IPC protocol validation passed.");

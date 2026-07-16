@@ -67,7 +67,7 @@ export interface OpenPetsClient {
   listPets(): Promise<OpenPetsPetListResult>;
   installPet(petId: string): Promise<OpenPetsPetInstallResult>;
   installLocalPet(path: string, options: { readonly kind: "zip" | "folder" }): Promise<OpenPetsPetInstallResult>;
-  acquireLease(options?: { readonly requestedPetId?: string }): Promise<OpenPetsLeaseResult>;
+  acquireLease(options?: { readonly requestedPetId?: string | null }): Promise<OpenPetsLeaseResult>;
   heartbeatLease(leaseId: string): Promise<{ readonly leaseId: string; readonly expiresAt: number }>;
   releaseLease(leaseId: string): Promise<{ readonly released: boolean }>;
   react(reaction: OpenPetsReaction, options?: { readonly leaseId?: string; readonly clientAncestorPids?: readonly number[] }): Promise<unknown>;

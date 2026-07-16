@@ -103,8 +103,9 @@ export function validateOptionalLeaseId(value: unknown): string | undefined {
   return value;
 }
 
-export function validateRequestedPetId(value: unknown): string | undefined {
+export function validateRequestedPetId(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
+  if (value === null) return null; // tri-state: explicitly-default request
   if (typeof value !== "string") throw new IpcProtocolError("invalid_params", "Requested pet id must be a string.");
   const trimmed = value.trim();
   if (trimmed.length < 1) return undefined;

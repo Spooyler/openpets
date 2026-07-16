@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { parseIpcEndpoint, validateDiscovery } from "../src/discovery.js";
-import { parsePetInstallResult, parsePetListResult } from "../src/index.js";
+import { createOpenPetsClient, parsePetInstallResult, parsePetListResult } from "../src/index.js";
 import { OpenPetsClientError, parseIpcResponse, validateReaction } from "../src/protocol.js";
 
 const baseDiscovery = {
@@ -66,6 +70,46 @@ assert.deepEqual(parsePetListResult({ ok: true, defaultPetId: "builtin", pets: [
 assertRejects(() => parsePetListResult({ ok: true, pets: [{ id: "fixer" }], defaultPetId: "builtin" }));
 assert.deepEqual(parsePetInstallResult({ ok: true, petId: "fixer", displayName: "Fixer", installed: true }), { ok: true, petId: "fixer", displayName: "Fixer", installed: true });
 assertRejects(() => parsePetInstallResult({ ok: true, petId: "fixer" }));
+
+// --- Tri-state requestedPetId serialization on lease.acquire ---
+// A live loopback IPC server captures the exact params the client puts on the
+// wire: null (explicitly-default adopt) must survive serialization; an
+// unspecified requestedPetId must stay absent.
+{
+  const captured: Record<string, unknown>[] = [];
+  const server = net.createServer((socket) => {
+    let buffer = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      const newline = buffer.indexOf("\n");
+      if (newline === -1) return;
+      const request = JSON.parse(buffer.slice(0, newline)) as { id: string; params?: Record<string, unknown> };
+      captured.push(request.params ?? {});
+      socket.write(`${JSON.stringify({ id: request.id, ok: true, result: { leaseId: "contract-lease", targetKind: "default", actualTargetPetId: "fox", actualTargetPetName: "Fox", usingDefaultPet: true, expiresAt: Date.now() + 15_000, leaseActive: true } })}\n`);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as net.AddressInfo).port;
+  const dir = mkdtempSync(join(tmpdir(), "openpets-contract-"));
+  const discoveryPath = join(dir, "ipc.json");
+  writeFileSync(discoveryPath, JSON.stringify({ ...baseDiscovery, endpoint: `tcp://127.0.0.1:${port}` }));
+  try {
+    const client = createOpenPetsClient({ discoveryPath });
+    await client.acquireLease({ requestedPetId: null });
+    await client.acquireLease();
+    const [capturedParams, capturedParamsNoOption] = captured;
+    assert.ok(capturedParams && capturedParamsNoOption, "both lease.acquire requests were captured");
+    // Tri-state: null must survive serialization (explicitly-default adopt).
+    assert.ok("requestedPetId" in capturedParams, "requestedPetId key is present on the wire for null");
+    assert.equal(capturedParams.requestedPetId, null, "null requestedPetId is sent, not dropped");
+    // And for acquireLease() with no options, requestedPetId must be absent:
+    assert.ok(!("requestedPetId" in capturedParamsNoOption) || capturedParamsNoOption.requestedPetId === undefined, "unspecified requestedPetId stays absent on the wire");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 console.log("Client protocol validation passed.");
 

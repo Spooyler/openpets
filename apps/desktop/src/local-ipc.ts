@@ -557,7 +557,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       graceTimer.unref?.();
     }
     trackDesktopEvent("desktop_lease_acquired", { requested_pet: requestedPetId ? "explicit" : "default", target_kind: lease.targetKind, fallback_reason: lease.fallbackReason });
-    warnPetFallback(requestedPetId, lease.fallbackReason, warnedFallbackPets);
+    warnPetFallback(requestedPetId ?? undefined, lease.fallbackReason, warnedFallbackPets);
     // Resolve terminal window identity asynchronously (non-blocking).
     // Only attempt on macOS where window-bounds polling is supported.
     if (clientPid !== undefined && isConfinementSupported()) {

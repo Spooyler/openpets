@@ -317,7 +317,10 @@ async function checkT7EnsureLeaseHeartbeatFirst(): Promise<void> {
  * (b) later re-acquires (ensureLease) use the ADOPTED pet, not the --pet config;
  * (c) invalid pet ids are rejected without touching the lease;
  * (d) omitting petId returns to the default pet, and that choice also sticks
- *     for later re-acquires.
+ *     for later re-acquires;
+ * (e) adopt-to-default sends requestedPetId=null on the wire — Task 4 tri-state:
+ *     it must NOT collapse to absent (which the desktop reads as "unspecified",
+ *     not "explicitly default").
  */
 async function checkT9Adopt(): Promise<void> {
   const calls: string[] = [];
@@ -327,10 +330,12 @@ async function checkT9Adopt(): Promise<void> {
     listPets: async () => ({ ok: true as const, pets: [], defaultPetId: "builtin" }),
     installPet: async () => { throw new Error("unused"); },
     installLocalPet: async () => { throw new Error("unused"); },
-    acquireLease: async (opts?: { readonly requestedPetId?: string }) => {
+    acquireLease: async (opts?: { readonly requestedPetId?: string | null }) => {
       leaseCounter += 1;
       const requested = opts?.requestedPetId;
-      calls.push(`acquire:${requested ?? "<default>"}`);
+      // Distinguish the tri-state on the wire: null (explicitly default) must
+      // record differently from undefined (unspecified — no options passed).
+      calls.push(`acquire:${requested === null ? "null" : requested ?? "<default>"}`);
       return requested
         ? { leaseId: `t9-lease-${leaseCounter}`, requestedPetId: requested, targetKind: "explicit" as const, actualTargetPetId: requested, actualTargetPetName: requested, usingDefaultPet: false, expiresAt: Date.now() + 15_000, leaseActive: true }
         : { leaseId: `t9-lease-${leaseCounter}`, requestedPetId: undefined, targetKind: "default" as const, actualTargetPetId: "fox", actualTargetPetName: "Fox", usingDefaultPet: true, expiresAt: Date.now() + 15_000, leaseActive: true };
@@ -379,14 +384,20 @@ async function checkT9Adopt(): Promise<void> {
     const back = await mc.callTool({ name: "openpets_adopt", arguments: {} }, CallToolResultSchema);
     if (back.isError) throw new Error(`T9d: adopt-to-default failed: ${JSON.stringify(back.content)}`);
     if (lease.requestedPetId !== null) throw new Error("T9d: adopting the default pet must persist as null.");
+    // (e) adopt-to-default must send requestedPetId=null on the wire — not
+    // collapse it to absent (Task 4 tri-state fix).
+    if (!calls.includes("acquire:null")) throw new Error(`T9e: adopt-to-default did not send requestedPetId=null on the wire. Calls: ${calls.join(",")}`);
     const backStructured = back.structuredContent as { readonly usingDefaultPet?: boolean } | undefined;
     if (backStructured?.usingDefaultPet !== true) throw new Error("T9d: adopt result did not switch to the default pet.");
     lease.lease = undefined;
     const react2 = await mc.callTool({ name: "openpets_react", arguments: { reaction: "waving" } }, CallToolResultSchema);
     if (react2.isError) throw new Error(`T9d: react failed: ${JSON.stringify(react2.content)}`);
     const lastAcquire = [...calls].reverse().find((c) => c.startsWith("acquire:"));
-    if (lastAcquire !== "acquire:<default>") {
-      throw new Error(`T9d: re-acquire after adopting default must not request the configured pet. Calls: ${calls.join(",")}`);
+    // Re-acquire after adopting default must keep requesting null (explicitly
+    // default), not collapse to absent (which would fall back to the
+    // configured pet if one were set).
+    if (lastAcquire !== "acquire:null") {
+      throw new Error(`T9d: re-acquire after adopting default must send null, not collapse to absent. Calls: ${calls.join(",")}`);
     }
   } finally {
     await mc.close();
