@@ -633,7 +633,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const sessionKey = rawLease ? sessionKeyForLease(rawLease) : null;
     const result = leaseManager.release(leaseId);
     if (sessionKey) {
-      projectMemoryWrites.delete(sessionKey);
+      if (!sessionHasOtherLiveLease(sessionKey, leaseId)) projectMemoryWrites.delete(sessionKey);
       windowPetRegistry.onSessionGone(sessionKey);
     }
     return result;
@@ -753,6 +753,22 @@ export function sessionKeyForLease(lease: PetLease): string | null {
 }
 
 /**
+ * True when a live lease OTHER than excludeLeaseId still resolves to sessionKey —
+ * the session continues under a different lease (e.g. an adopt lease swap, where
+ * a new lease is acquired for the same clientPid:sessionNonce before the old one
+ * is released). Callers must not clear the projectMemoryWrites guard for that
+ * sessionKey in this case: the guard exists to stop a re-acquire on the
+ * surviving lease from re-sending the session's original --pet and clobbering a
+ * newer project-memory write.
+ */
+function sessionHasOtherLiveLease(sessionKey: string, excludeLeaseId: string): boolean {
+  for (const lease of leaseManager.getAllRawLeases()) {
+    if (lease.leaseId !== excludeLeaseId && sessionKeyForLease(lease) === sessionKey) return true;
+  }
+  return false;
+}
+
+/**
  * Snapshot leaseId→sessionKey for every identified lease (those with a resolved
  * terminal identity — exactly the sessions the registry tracks). Taken BEFORE a
  * cleanup pass releases leases, so cleanupReleasedLeases can still map a released
@@ -778,7 +794,7 @@ function captureSessionKeysByLeaseId(): Map<string, string> {
 function notifyLeaseGone(lease: { readonly leaseId: string; readonly targetKind: string }, sessionKey: string | null): void {
   if (lease.targetKind === "explicit") unsubscribeConfinement(lease.leaseId);
   if (sessionKey) {
-    projectMemoryWrites.delete(sessionKey);
+    if (!sessionHasOtherLiveLease(sessionKey, lease.leaseId)) projectMemoryWrites.delete(sessionKey);
     windowPetRegistry.onSessionGone(sessionKey);
   }
 }
@@ -798,7 +814,7 @@ function releaseExplicitLease(leaseId: string): { readonly released: boolean } {
   unsubscribeConfinement(leaseId);
   const result = leaseManager.release(leaseId);
   if (sessionKey) {
-    projectMemoryWrites.delete(sessionKey);
+    if (!sessionHasOtherLiveLease(sessionKey, leaseId)) projectMemoryWrites.delete(sessionKey);
     windowPetRegistry.onSessionGone(sessionKey);
   }
   return result;
@@ -1259,7 +1275,7 @@ export function releaseSessionFromUi(leaseId: string): boolean {
     const sessionKey = sessionKeyForLease(raw);
     leaseManager.release(leaseId);
     if (sessionKey) {
-      projectMemoryWrites.delete(sessionKey);
+      if (!sessionHasOtherLiveLease(sessionKey, leaseId)) projectMemoryWrites.delete(sessionKey);
       windowPetRegistry.onSessionGone(sessionKey);
     }
   }
