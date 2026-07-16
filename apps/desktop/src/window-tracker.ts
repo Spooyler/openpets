@@ -25,6 +25,7 @@ import {
   isWin32MinimizedBounds,
 } from "./window-tracker-ppid.js";
 import { createLatchedTick } from "./window-tracker-latch.js";
+import { isDesktopShellWindow, selectTerminalWindow } from "./window-select.js";
 
 // Re-export for consumers that already import these through window-tracker.
 export {
@@ -49,7 +50,14 @@ export interface TrackedWindow {
   readonly id: number;
   readonly ownerPid: number;
   readonly ownerName: string;
+  /** Executable path of the owning process, when the platform provides it. */
+  readonly ownerPath?: string;
+  readonly title: string;
   readonly bounds: WindowBounds;
+  /** True when the window exists but is minimized (win32 only — other
+   *  platforms never enumerate minimized windows). Minimized windows count
+   *  for PPID→terminal identity matching but are never confinement targets. */
+  readonly minimized?: boolean;
 }
 
 export interface TerminalWindowInfo {
@@ -82,30 +90,34 @@ async function openWindows(): Promise<TrackedWindow[]> {
   return raw.flatMap((w): TrackedWindow[] => {
     if (!isGetWindowsEntry(w)) return [];
     // On Windows, get-windows does not filter IsIconic (minimized) windows.
-    // Minimized windows are parked off-screen at ~(-32000, -32000).
-    // Filter them out here so the confinement logic sees the same invariant
-    // as on macOS (where get-windows already excludes minimized windows).
-    if (process.platform === "win32" && isWin32MinimizedBounds(w.bounds.x, w.bounds.y)) {
-      return [];
-    }
+    // Minimized windows are parked off-screen at ~(-32000, -32000). Keep them
+    // but tag them: they must still count for PPID→terminal identity matching
+    // (a minimized VS Code still hosts the session — without this the chain
+    // walk climbs past it to explorer.exe), while confinement/occlusion only
+    // ever considers on-screen windows.
+    const minimized = process.platform === "win32" && isWin32MinimizedBounds(w.bounds.x, w.bounds.y);
     return [{
       id: w.id,
       ownerPid: w.owner.processId,
       ownerName: w.owner.name,
+      ownerPath: typeof w.owner.path === "string" ? w.owner.path : undefined,
+      title: typeof w.title === "string" ? w.title : "",
       bounds: {
         x: w.bounds.x,
         y: w.bounds.y,
         width: w.bounds.width,
         height: w.bounds.height,
       },
+      minimized,
     }];
   });
 }
 
 function isGetWindowsEntry(w: unknown): w is {
   id: number;
-  owner: { processId: number; name: string };
+  owner: { processId: number; name: string; path?: unknown };
   bounds: { x: number; y: number; width: number; height: number };
+  title?: unknown;
 } {
   if (typeof w !== "object" || w === null) return false;
   const obj = w as Record<string, unknown>;
@@ -202,6 +214,15 @@ function isPlatformSupported(): boolean {
  * denied. On Windows and Linux no special permission is required.
  */
 export async function listWindows(): Promise<TrackedWindow[]> {
+  return (await listAllWindows()).filter((w) => !w.minimized);
+}
+
+/**
+ * Like listWindows but INCLUDES minimized windows (win32). Only for identity
+ * matching — a minimized terminal still hosts its sessions. Confinement and
+ * occlusion consumers must use listWindows / filter on `minimized`.
+ */
+async function listAllWindows(): Promise<TrackedWindow[]> {
   if (!isPlatformSupported()) return [];
   try {
     const windows = await openWindows();
@@ -222,42 +243,44 @@ export async function listWindows(): Promise<TrackedWindow[]> {
  * Given the PID of an MCP client process (e.g. opencode), walk up the PPID
  * chain to find the terminal emulator window hosting that client.
  *
+ * @param cwd Optional session working directory — disambiguates WHICH window
+ *            hosts the session when the terminal process owns several
+ *            (multi-window apps like VS Code run one process for all windows).
+ *
  * @returns TerminalWindowInfo describing confinement state, or null if the
  *          terminal cannot be identified.
  */
-export async function findTerminalWindowForPid(clientPid: number): Promise<TerminalWindowInfo | null> {
+export async function findTerminalWindowForPid(clientPid: number, cwd?: string): Promise<TerminalWindowInfo | null> {
   if (!isPlatformSupported() || clientPid <= 0) return null;
 
   try {
-    const windows = await listWindows();
-    const found = await findTerminalPidInChain(clientPid, windows);
+    const all = await listAllWindows();
+    // The desktop shell (explorer.exe) sits in every GUI app's ancestor chain
+    // and owns visible windows — never a valid terminal match.
+    const found = await findTerminalPidInChain(clientPid, all.filter((w) => !isDesktopShellWindow(w.ownerPath)));
     if (!found) {
       // Case (A): zero windows → likely a Screen Recording permission gap (macOS).
       // Case (B): windows present but no terminal ancestor in PPID chain.
       info("window-tracker", "no terminal found in ppid chain", {
         clientPid,
-        windowCount: windows.length,
+        windowCount: all.length,
       });
       return null;
     }
 
     const { pid: terminalPid, appName } = found;
-    // All windows for this terminal PID (there may be several tabs/panes).
-    const termWindows = windows.filter((w) => w.ownerPid === terminalPid);
+    // On-screen windows for this terminal PID (there may be several tabs/panes).
+    const termWindows = all.filter((w) => w.ownerPid === terminalPid && !w.minimized);
 
     if (termWindows.length === 0) {
-      // PID exists (we found it in PPID chain) but it has no on-screen window →
-      // treat as minimized. On Windows this path is reached for truly hidden
-      // windows (not just minimized — those are filtered in openWindows()).
+      // The terminal process owns windows (it matched in the PPID chain) but
+      // none are on screen → minimized or hidden.
       return { window: null, terminalPid, appName, isMinimized: true, isOccluded: false };
     }
 
-    // Use the largest terminal window as the confinement target.
-    const target = termWindows.reduce((best, w) =>
-      w.bounds.width * w.bounds.height > best.bounds.width * best.bounds.height ? w : best,
-    );
+    const target = selectTerminalWindow(termWindows, cwd)!;
 
-    const occluded = isWindowOccluded(target, windows, process.pid);
+    const occluded = isWindowOccluded(target, all.filter((w) => !w.minimized), process.pid);
     return { window: target, terminalPid, appName, isMinimized: false, isOccluded: occluded };
   } catch (error) {
     warn("window-tracker", "findTerminalWindowForPid failed", { clientPid, error: String(error) });
@@ -341,7 +364,7 @@ async function pollActiveWindow(): Promise<void> {
 type PollerCallback = (info: TerminalWindowInfo) => void;
 type PollerNullCallback = () => void;
 
-const pollerSubscriptions = new Map<string, { clientPid: number; callback: PollerCallback; onNull?: PollerNullCallback }>();
+const pollerSubscriptions = new Map<string, { clientPid: number; callback: PollerCallback; onNull?: PollerNullCallback; cwd?: string; lastWindowId?: number }>();
 let pollerTimer: NodeJS.Timeout | null = null;
 const pollerIntervalMs = 500;
 
@@ -350,6 +373,8 @@ const pollerIntervalMs = 500;
  * - `callback` is called ~every 500ms when the terminal IS found.
  * - `onNull` (optional) is called when the terminal is NOT found on a tick,
  *   allowing callers to implement exponential backoff for the null-resolve case.
+ * - `cwd` (optional) disambiguates which window hosts the session when the
+ *   terminal process owns several (multi-window apps like VS Code).
  * Returns an unsubscribe function.
  */
 export function subscribeWindowTracking(
@@ -357,8 +382,9 @@ export function subscribeWindowTracking(
   clientPid: number,
   callback: PollerCallback,
   onNull?: PollerNullCallback,
+  cwd?: string,
 ): () => void {
-  pollerSubscriptions.set(subscriptionId, { clientPid, callback, onNull });
+  pollerSubscriptions.set(subscriptionId, { clientPid, callback, onNull, cwd });
   startPollerIfNeeded();
   return () => {
     pollerSubscriptions.delete(subscriptionId);
@@ -378,30 +404,31 @@ async function pollAll(): Promise<void> {
 
   if (pollerSubscriptions.size === 0) return;
   // Batch: one openWindows() call, share result across all subscriptions.
-  let windows: TrackedWindow[];
+  let all: TrackedWindow[];
   try {
-    windows = await listWindows();
+    all = await listAllWindows();
   } catch {
-    return; // listWindows already logs; just skip this tick
+    return; // listAllWindows already logs; just skip this tick
   }
+  const chainWindows = all.filter((w) => !isDesktopShellWindow(w.ownerPath));
+  const visibleWindows = all.filter((w) => !w.minimized);
 
   for (const [, sub] of pollerSubscriptions) {
     try {
-      const found = await findTerminalPidInChainCached(sub.clientPid, windows);
+      const found = await findTerminalPidInChainCached(sub.clientPid, chainWindows);
       if (!found) {
         sub.onNull?.();
         continue;
       }
 
-      const termWindows = windows.filter((w) => w.ownerPid === found.pid);
+      const termWindows = visibleWindows.filter((w) => w.ownerPid === found.pid);
       if (termWindows.length === 0) {
         sub.callback({ window: null, terminalPid: found.pid, appName: found.appName, isMinimized: true, isOccluded: false });
         continue;
       }
-      const target = termWindows.reduce((best, w) =>
-        w.bounds.width * w.bounds.height > best.bounds.width * best.bounds.height ? w : best,
-      );
-      const occluded = isWindowOccluded(target, windows, process.pid);
+      const target = selectTerminalWindow(termWindows, sub.cwd, sub.lastWindowId)!;
+      sub.lastWindowId = target.id;
+      const occluded = isWindowOccluded(target, visibleWindows, process.pid);
       sub.callback({ window: target, terminalPid: found.pid, appName: found.appName, isMinimized: false, isOccluded: occluded });
     } catch (error) {
       debug("window-tracker", "poll subscription error", { error: String(error) });

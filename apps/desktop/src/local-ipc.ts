@@ -892,7 +892,7 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
 
   const deps: ConfinementPollerDeps = {
     findTerminal: async (pid) => {
-      const termInfo = await findTerminalWindowForPid(pid);
+      const termInfo = await findTerminalWindowForPid(pid, lease.cwd);
       // Diagnostic: distinguish (A) zero windows [permission], (B) no ancestor,
       // (C) resolved. window-tracker already logs windowCount at info level.
       if (!termInfo) {
@@ -912,13 +912,14 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
       }
       return termInfo;
     },
-    subscribe: (id, pid, onFound, onNull) => subscribeWindowTracking(id, pid, onFound, onNull),
+    subscribe: (id, pid, onFound, onNull) => subscribeWindowTracking(id, pid, onFound, onNull, lease.cwd),
     setIdentity: (termInfo) => {
-      leaseManager.setTerminalIdentity(leaseId, {
+      const changed = leaseManager.setTerminalIdentity(leaseId, {
         terminalOwnerPid: termInfo.terminalPid,
         terminalAppName: termInfo.appName,
         terminalWindowId: termInfo.window?.id,
       });
+      if (!changed) return;
       void captureClientAncestry(leaseId, clientPid);
       // Identity resolved → let the registry bind/spawn the pet for this window.
       registerIdentifiedSession(leaseId);
@@ -977,9 +978,10 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
  */
 async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: number): Promise<void> {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    if (!leaseManager.getRawLease(leaseId)) return;
+    const rawLease = leaseManager.getRawLease(leaseId);
+    if (!rawLease) return;
     try {
-      const termInfo = await findTerminalWindowForPid(clientPid);
+      const termInfo = await findTerminalWindowForPid(clientPid, rawLease.cwd);
       if (termInfo) {
         leaseManager.setTerminalIdentity(leaseId, {
           terminalOwnerPid: termInfo.terminalPid,
@@ -1012,15 +1014,21 @@ async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: n
  * resolveTerminalIdentity but starts after identity is already resolved.
  */
 async function subscribePoolConfinement(leaseId: string, clientPid: number, petId: string): Promise<void> {
+  const leaseCwd = leaseManager.getRawLease(leaseId)?.cwd;
   const deps: ConfinementPollerDeps = {
-    findTerminal: (pid) => findTerminalWindowForPid(pid),
-    subscribe: (id, pid, onFound, onNull) => subscribeWindowTracking(id, pid, onFound, onNull),
+    findTerminal: (pid) => findTerminalWindowForPid(pid, leaseCwd),
+    subscribe: (id, pid, onFound, onNull) => subscribeWindowTracking(id, pid, onFound, onNull, leaseCwd),
     setIdentity: (termInfo) => {
-      leaseManager.setTerminalIdentity(leaseId, {
+      const changed = leaseManager.setTerminalIdentity(leaseId, {
         terminalOwnerPid: termInfo.terminalPid,
         terminalAppName: termInfo.appName,
         terminalWindowId: termInfo.window?.id,
       });
+      // Keep the registry's window binding in sync with a real identity change
+      // (e.g. the session's window closed and it re-resolved elsewhere) —
+      // otherwise the lease's windowKey drifts from the binding and say/react
+      // silently misroutes to the default pet.
+      if (changed) registerIdentifiedSession(leaseId);
     },
     applyUpdate: (termInfo) => {
       const windowKey = windowKeyForIdentity(termInfo.window?.id, termInfo.terminalPid);
@@ -1318,6 +1326,13 @@ export function assignWindowPet(windowKey: string, petId: string | null): boolea
   for (const lease of leaseManager.getAllRawLeases()) {
     if (!lease.terminalOwnerPid) continue;
     if (windowKeyForIdentity(lease.terminalWindowId, lease.terminalOwnerPid) !== windowKey) continue;
+    // A default-coverage session has no confinement poller yet (only pool-drawn
+    // and explicit-lease pets get one at identity time) — without this the
+    // assigned pet spawns but never follows the window. Double-subscribe is
+    // guarded per-lease inside resolveAndSubscribe.
+    if (petId !== null && lease.clientPid) {
+      void subscribePoolConfinement(lease.leaseId, lease.clientPid, petId);
+    }
     if (!lease.cwd) continue;
     const sessionKey = sessionKeyForLease(lease);
     if (petId === null) {

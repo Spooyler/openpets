@@ -334,14 +334,25 @@ export class LeaseManager {
 
   /**
    * Update the terminal window identity on an existing lease.
-   * Called asynchronously after the PPID-walk resolves.
+   * Called asynchronously after the PPID-walk resolves — and again on every
+   * poller tick, so an unchanged identity is a silent no-op.
+   *
+   * @returns true when the identity differs from what the lease already held.
    */
-  setTerminalIdentity(leaseId: string, info: { terminalOwnerPid: number; terminalAppName: string; terminalWindowId?: number }): void {
+  setTerminalIdentity(leaseId: string, info: { terminalOwnerPid: number; terminalAppName: string; terminalWindowId?: number }): boolean {
     const lease = this.#leases.get(leaseId);
-    if (!lease) return;
+    if (!lease) return false;
+    if (
+      lease.terminalOwnerPid === info.terminalOwnerPid &&
+      lease.terminalAppName === info.terminalAppName &&
+      lease.terminalWindowId === info.terminalWindowId
+    ) {
+      return false;
+    }
     const updated: PetLease = { ...lease, ...info };
     this.#leases.set(leaseId, updated);
     this.#onLog("debug", "terminal identity set", { leaseId, terminalOwnerPid: info.terminalOwnerPid, terminalAppName: info.terminalAppName, terminalWindowId: info.terminalWindowId });
+    return true;
   }
 
   /** Record the client's ancestor PID chain (resolved with terminal identity). */
