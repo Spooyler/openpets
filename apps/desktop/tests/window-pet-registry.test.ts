@@ -154,4 +154,94 @@ assert.equal((calls[0]!.args as string[])[2], "window-dead");
   assert.equal(registry3.sessionFocusTarget("unknown-key"), null, "unknown session key returns null");
 }
 
+// --- Task 3 scenarios: project memory, explicit-default, assignPetToWindow ---
+function makeRecorder() {
+  const recorded: Call[] = [];
+  return {
+    recorded,
+    cb: {
+      spawnPet: (...args: unknown[]) => recorded.push({ fn: "spawn", args }),
+      closePet: (...args: unknown[]) => recorded.push({ fn: "close", args }),
+      rebindPet: (...args: unknown[]) => recorded.push({ fn: "rebind", args }),
+      sessionEndedNotice: (...args: unknown[]) => recorded.push({ fn: "notice", args }),
+    },
+  };
+}
+
+// Memory beats pool; pool draw reports via onPoolPetDrawn.
+{
+  const { recorded, cb } = makeRecorder();
+  const drawn: Array<[string | undefined, string]> = [];
+  const reg = new WindowPetRegistry({
+    callbacks: cb,
+    isPidAlive: () => true,
+    drawPoolPet: () => "poolpet",
+    resolveRememberedPet: (cwd) => (cwd === "/proj/a" ? "membot" : null),
+    onPoolPetDrawn: (cwd, petId) => drawn.push([cwd, petId]),
+  });
+  const sA = { sessionKey: "1:a", leaseId: "LA", terminalOwnerPid: 10, terminalWindowId: 1, label: "a", cwd: "/proj/a" };
+  assert.equal(reg.onSessionIdentified(sA, undefined, true), "membot", "memory wins over pool");
+  assert.deepEqual(recorded.map((c) => c.fn), ["spawn"]);
+  assert.deepEqual(drawn, [], "no pool draw when memory hit");
+  const sB = { sessionKey: "2:b", leaseId: "LB", terminalOwnerPid: 20, terminalWindowId: 2, label: "b", cwd: "/proj/b" };
+  assert.equal(reg.onSessionIdentified(sB, undefined, true), "poolpet", "no memory → pool draw");
+  assert.deepEqual(drawn, [["/proj/b", "poolpet"]], "pool draw reported with cwd");
+}
+
+// Memory respects user-closed windows and is skipped when pool disabled? No —
+// memory applies regardless of poolEnabled; only user-closed suppresses it.
+{
+  const { cb } = makeRecorder();
+  const reg = new WindowPetRegistry({
+    callbacks: cb,
+    isPidAlive: () => true,
+    resolveRememberedPet: () => "membot",
+  });
+  const s = { sessionKey: "3:c", leaseId: "LC", terminalOwnerPid: 30, terminalWindowId: 3, label: "c", cwd: "/proj/c" };
+  assert.equal(reg.onSessionIdentified(s, undefined, false), "membot", "memory applies with pool off");
+  reg.onUserClosedPet("w:3");
+  const s2 = { sessionKey: "4:d", leaseId: "LD", terminalOwnerPid: 30, terminalWindowId: 3, label: "d", cwd: "/proj/c" };
+  assert.equal(reg.onSessionIdentified(s2, undefined, false), null, "user-closed window suppresses memory bind");
+}
+
+// Explicit-default (null): unbinds, marks user-closed, session falls to default coverage.
+{
+  const { recorded, cb } = makeRecorder();
+  const reg = new WindowPetRegistry({ callbacks: cb, isPidAlive: () => true });
+  const s = { sessionKey: "5:e", leaseId: "LE", terminalOwnerPid: 50, terminalWindowId: 5, label: "e" };
+  assert.equal(reg.onSessionIdentified(s, "fox", false), "fox");
+  recorded.length = 0;
+  assert.equal(reg.onSessionIdentified(s, null, true), null, "null → default coverage");
+  assert.deepEqual(recorded.map((c) => c.fn), ["close"], "binding closed");
+  assert.equal((recorded[0]!.args as unknown[])[2], "user-closed", "close reason user-closed");
+  assert.equal(reg.petForWindow("w:5"), null);
+  // Pool must not re-draw for this window afterwards.
+  const s2 = { sessionKey: "6:f", leaseId: "LF", terminalOwnerPid: 50, terminalWindowId: 5, label: "f" };
+  assert.equal(reg.onSessionIdentified(s2, undefined, true), null, "no re-draw after explicit default");
+}
+
+// assignPetToWindow: bind parked default sessions; move; unbind.
+{
+  const { recorded, cb } = makeRecorder();
+  const reg = new WindowPetRegistry({ callbacks: cb, isPidAlive: () => true });
+  const s1 = { sessionKey: "7:g", leaseId: "LG", terminalOwnerPid: 70, terminalWindowId: 7, label: "g" };
+  const s2 = { sessionKey: "8:h", leaseId: "LH", terminalOwnerPid: 80, terminalWindowId: 8, label: "h" };
+  assert.equal(reg.onSessionIdentified(s1, undefined, false), null, "parked on default");
+  assert.equal(reg.assignPetToWindow("w:7", "fox"), true, "binds parked sessions");
+  assert.equal(reg.petForWindow("w:7"), "fox");
+  assert.equal(reg.displayPetForSession("7:g")?.petId, "fox", "session attached to new binding");
+  // Move semantics: assigning fox to another window steals it.
+  assert.equal(reg.onSessionIdentified(s2, undefined, false), null);
+  recorded.length = 0;
+  assert.equal(reg.assignPetToWindow("w:8", "fox"), true, "move steals from w:7");
+  assert.equal(reg.petForWindow("w:7"), null);
+  assert.equal(reg.petForWindow("w:8"), "fox");
+  // Unbind: sessions fall to default, window suppressed.
+  assert.equal(reg.assignPetToWindow("w:8", null), true, "unbind succeeds");
+  assert.equal(reg.petForWindow("w:8"), null);
+  assert.equal(reg.onSessionIdentified(s2, undefined, true), null, "no pool re-draw after UI default");
+  // Assigning to a window with no sessions at all fails.
+  assert.equal(reg.assignPetToWindow("w:99", "fox"), false, "no sessions → false");
+}
+
 console.log("Window pet registry passed.");

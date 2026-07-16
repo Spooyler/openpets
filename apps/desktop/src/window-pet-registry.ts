@@ -20,6 +20,7 @@ export interface RegistrySessionInfo {
   readonly terminalOwnerPid: number;
   readonly terminalWindowId?: number;
   readonly label: string;
+  readonly cwd?: string;
 }
 
 export type PetCloseReason = "window-dead" | "session-ended" | "user-closed" | "rebind" | "pool-disabled";
@@ -57,6 +58,8 @@ export class WindowPetRegistry {
   readonly #isPidAlive: (pid: number) => boolean;
   readonly #drawPoolPet: (occupiedPetIds: ReadonlySet<string>) => string | null;
   readonly #storeFactory: () => NotificationStore;
+  readonly #resolveRememberedPet: (cwd: string | undefined, occupiedPetIds: ReadonlySet<string>) => string | null;
+  readonly #onPoolPetDrawn: (cwd: string | undefined, petId: string) => void;
 
   readonly #bindings = new Map<WindowKey, Binding>();
   readonly #sessionWindows = new Map<string, WindowKey>(); // binding membership only
@@ -70,18 +73,31 @@ export class WindowPetRegistry {
     isPidAlive?: (pid: number) => boolean;
     drawPoolPet?: (occupiedPetIds: ReadonlySet<string>) => string | null;
     storeFactory?: () => NotificationStore;
+    resolveRememberedPet?: (cwd: string | undefined, occupiedPetIds: ReadonlySet<string>) => string | null;
+    onPoolPetDrawn?: (cwd: string | undefined, petId: string) => void;
   }) {
     this.#callbacks = options.callbacks;
     this.#now = options.now ?? Date.now;
     this.#isPidAlive = options.isPidAlive ?? defaultIsPidAlive;
     this.#drawPoolPet = options.drawPoolPet ?? (() => null);
     this.#storeFactory = options.storeFactory ?? (() => new NotificationStore());
+    this.#resolveRememberedPet = options.resolveRememberedPet ?? (() => null);
+    this.#onPoolPetDrawn = options.onPoolPetDrawn ?? (() => {});
     this.defaultStore = this.#storeFactory();
   }
 
-  onSessionIdentified(session: RegistrySessionInfo, requestedPetId: string | undefined, poolEnabled: boolean): string | null {
+  onSessionIdentified(session: RegistrySessionInfo, requestedPetId: string | null | undefined, poolEnabled: boolean): string | null {
     const windowKey = windowKeyForIdentity(session.terminalWindowId, session.terminalOwnerPid);
     this.#detachFromStaleWindow(session.sessionKey, windowKey);
+
+    // Explicitly default (adopt-to-default / UI "Default"): unbind and suppress
+    // future auto-binds for this window; the session falls to default coverage.
+    if (requestedPetId === null) {
+      this.#userClosedWindows.add(windowKey);
+      if (this.#bindings.has(windowKey)) this.#closeBinding(windowKey, "user-closed");
+      this.#trackDefault(session);
+      return null;
+    }
 
     if (requestedPetId !== undefined) {
       this.#userClosedWindows.delete(windowKey);
@@ -94,13 +110,24 @@ export class WindowPetRegistry {
       return existing.petId;
     }
 
-    if (poolEnabled && !this.#userClosedWindows.has(windowKey)) {
-      const drawn = this.#drawPoolPet(new Set(this.boundPetIds()));
-      if (drawn !== null) {
-        const binding = this.#createBinding(windowKey, drawn, "pool");
+    if (!this.#userClosedWindows.has(windowKey)) {
+      // Project memory: a previously-called pet for this session's project.
+      const remembered = this.#resolveRememberedPet(session.cwd, new Set(this.boundPetIds()));
+      if (remembered !== null) {
+        const binding = this.#createBinding(windowKey, remembered, "explicit");
         this.#attachSession(windowKey, binding, session);
-        this.#callbacks.spawnPet(windowKey, drawn);
-        return drawn;
+        this.#callbacks.spawnPet(windowKey, remembered);
+        return remembered;
+      }
+      if (poolEnabled) {
+        const drawn = this.#drawPoolPet(new Set(this.boundPetIds()));
+        if (drawn !== null) {
+          const binding = this.#createBinding(windowKey, drawn, "pool");
+          this.#attachSession(windowKey, binding, session);
+          this.#onPoolPetDrawn(session.cwd, drawn);
+          this.#callbacks.spawnPet(windowKey, drawn);
+          return drawn;
+        }
       }
     }
 
@@ -141,6 +168,48 @@ export class WindowPetRegistry {
   onUserClosedPet(windowKey: WindowKey): void {
     this.#userClosedWindows.add(windowKey);
     if (this.#bindings.has(windowKey)) this.#closeBinding(windowKey, "user-closed");
+  }
+
+  /**
+   * Control-Center assignment: "this window's pet is now X" (petId) or
+   * "this window returns to the default pet" (null). Move semantics match
+   * onSessionAdopted; null matches onUserClosedPet (suppresses auto-binds).
+   * Returns false when the window has no sessions to (re)bind.
+   */
+  assignPetToWindow(windowKey: WindowKey, petId: string | null): boolean {
+    if (petId === null) {
+      const had = this.#bindings.has(windowKey) || this.#hasDefaultSessionsForWindow(windowKey);
+      this.#userClosedWindows.add(windowKey);
+      if (this.#bindings.has(windowKey)) this.#closeBinding(windowKey, "user-closed");
+      return had;
+    }
+    this.#userClosedWindows.delete(windowKey);
+    const current = this.#bindings.get(windowKey);
+    if (current && current.petId === petId) return true;
+    const otherKey = this.windowForPet(petId);
+    if (otherKey !== null && otherKey !== windowKey) this.#closeBinding(otherKey, "rebind");
+    if (current) {
+      const fromPetId = current.petId;
+      current.petId = petId;
+      current.origin = "explicit";
+      this.#callbacks.rebindPet(windowKey, fromPetId, petId);
+      return true;
+    }
+    const parked = [...this.#defaultSessions.values()].filter(
+      (s) => windowKeyForIdentity(s.terminalWindowId, s.terminalOwnerPid) === windowKey,
+    );
+    if (parked.length === 0) return false;
+    const binding = this.#createBinding(windowKey, petId, "explicit");
+    for (const session of parked) this.#attachSession(windowKey, binding, session);
+    this.#callbacks.spawnPet(windowKey, petId);
+    return true;
+  }
+
+  #hasDefaultSessionsForWindow(windowKey: WindowKey): boolean {
+    for (const s of this.#defaultSessions.values()) {
+      if (windowKeyForIdentity(s.terminalWindowId, s.terminalOwnerPid) === windowKey) return true;
+    }
+    return false;
   }
 
   onPoolDisabled(): void {

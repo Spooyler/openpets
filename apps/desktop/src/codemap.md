@@ -44,10 +44,10 @@ local-ipc.ts → parseIpcRequest() → handleRequest()
         ├── onExpired → notifyLeaseGone() (internal release teardown)
         └── Logging via logger.ts (ipc, lease scopes)
     └── window-pet-registry.ts (window-keyed pet lifecycle)
-        ├── onSessionIdentified() after terminal identity resolution
+        ├── onSessionIdentified() after terminal identity resolution — resolves existing binding → remembered project pet → pool draw → default coverage; requestedPetId === null explicitly defaults (unbind + suppress auto-binds)
         ├── onSessionGone() on release/expiry/PID-death
         ├── Per-binding NotificationStore for badge/flyout
-        └── Pool draw at identity time (per-window, not per-session)
+        └── Pool draw at identity time (per-window, not per-session); assignPetToWindow() handles Control-Center-driven binds/moves/unbinds
 ```
 
 **Pet Display Flow**:
