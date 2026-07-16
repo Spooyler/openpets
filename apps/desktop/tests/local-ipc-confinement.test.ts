@@ -1,5 +1,8 @@
 /** Executable confinement subscription and lease-authorization regression tests. */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { resolveAndSubscribe, type ConfinementPollerDeps } from "../src/confinement-poller.js";
 import type { TerminalWindowInfo } from "../src/window-tracker.js";
