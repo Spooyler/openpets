@@ -5,7 +5,8 @@ export type LeaseFallbackReason = "invalid_pet_id" | "pet_not_installed" | "pet_
 
 export interface PetLease {
   readonly leaseId: string;
-  readonly requestedPetId?: string;
+  /** string = explicit pet · null = explicitly default (adopted) · undefined = unspecified. */
+  readonly requestedPetId?: string | null;
   readonly targetKind: LeaseTargetKind;
   readonly actualPetId: string;
   readonly fallbackReason?: LeaseFallbackReason;
@@ -120,7 +121,7 @@ export class LeaseManager {
     this.#isPetEligible = options.isPetEligible;
   }
 
-  acquire(requestedPetId?: string, clientPid?: number, sessionNonce?: string, cwd?: string): LeaseSnapshot {
+  acquire(requestedPetId?: string | null, clientPid?: number, sessionNonce?: string, cwd?: string): LeaseSnapshot {
     const now = this.#now();
 
     // FIX M1 + FIX 1: Idempotent per-clientPid lease reuse, guarded by sessionNonce.
@@ -161,7 +162,7 @@ export class LeaseManager {
     // Map.set below MUST remain synchronous with no await between them.
     // Two concurrent acquire(undefined) calls could otherwise be assigned the
     // same pool slot before either is registered.
-    const target = this.#resolveTarget(requestedPetId);
+    const target = this.#resolveTarget(requestedPetId ?? undefined);
     const lease: PetLease = {
       leaseId: randomUUID(),
       requestedPetId,
@@ -464,7 +465,7 @@ export class LeaseManager {
     const targetKind = lease.targetKind;
     return {
       leaseId: lease.leaseId,
-      requestedPetId: lease.requestedPetId,
+      requestedPetId: lease.requestedPetId ?? undefined,
       targetKind,
       actualTargetPetId: actualPetId,
       actualTargetPetName: this.#getPetDisplayName(actualPetId, targetKind),

@@ -107,3 +107,26 @@ console.log("Lease manager validation passed.");
   assert.equal(pidClosed.join(","), "rex", "onLastExplicitLease should fire after dead PID lease release.");
   console.log("checkPidLiveness: dead PID — PASS");
 }
+
+// Tri-state requestedPetId: null = explicitly default.
+{
+  const triManager = new LeaseManager({
+    ttlMs: 60_000,
+    now: () => 1_000,
+    resolveTarget: (id) => id ? { targetKind: "explicit", actualPetId: id } : { targetKind: "default", actualPetId: "builtin" },
+    getDefaultPetId: () => "builtin",
+    getPetDisplayName: (petId) => petId,
+  });
+  const lease = triManager.acquire(null, 4242, "nonce-null");
+  assert.equal(lease.targetKind, "default", "null resolves to default target");
+  assert.equal(lease.requestedPetId, undefined, "snapshot hides null (wire response stays string|undefined)");
+  const raw = triManager.getRawLease(lease.leaseId);
+  assert.equal(raw?.requestedPetId, null, "raw lease preserves null");
+  // Reuse: same pid+nonce+null → same lease.
+  const again = triManager.acquire(null, 4242, "nonce-null");
+  assert.equal(again.leaseId, lease.leaseId, "null-for-null reuses lease");
+  // Mismatch: same pid+nonce but explicit pet → fresh lease.
+  const switched = triManager.acquire("fox", 4242, "nonce-null");
+  assert.notEqual(switched.leaseId, lease.leaseId, "null vs explicit is a mismatch → fresh acquire");
+  console.log("tri-state requestedPetId — PASS");
+}
