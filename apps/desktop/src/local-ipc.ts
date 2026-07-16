@@ -3,21 +3,22 @@ import net from "node:net";
 
 import { Notification, shell, systemPreferences } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, scheduleFarewellClose, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, setAgentPetUserClosedAccessor, setAgentSessionFocusTargetAccessor, showAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, hideAgentPet, isAgentPetDismissed, isAgentPetHidden, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, scheduleFarewellClose, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, setAgentPetUserClosedAccessor, setAgentSessionFocusTargetAccessor, showAgentPet, unhideAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultSessionFocusTargetAccessor, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
-import { createStaleLeaseStatus, LeaseManager, type PetLease } from "./lease-manager.js";
+import { createStaleLeaseStatus, LeaseManager, type LeaseSnapshot, type PetLease } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
 import { stat } from "node:fs/promises";
 import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, okResponse, parseIpcRequest, validateCwd, validateInstallLocalKind, validateInstallLocalPath, validateInstallPetId, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
 import { installPet, installPetFromFolderWithResult, installPetFromZipFileWithResult } from "./pet-installation.js";
-import { clearConfinementState, setConfinementState } from "./confinement-manager.js";
+import { clearConfinementState, getConfinementState, setConfinementState } from "./confinement-manager.js";
 import { isConfinementSupported } from "./capabilities.js";
 import { resolveAndSubscribe, type ConfinementPollerDeps } from "./confinement-poller.js";
 import { findTerminalWindowForPid, getAncestorPidChain, subscribeActiveWindowTracking, subscribeWindowTracking, type TerminalWindowInfo } from "./window-tracker.js";
+import { focusTerminalWindow } from "./terminal-focus.js";
 import { warnPetFallback } from "./pet-fallback-notify.js";
 import { getEligiblePoolPetIds } from "./pet-pool.js";
 import { t } from "./i18n/index.js";
@@ -28,6 +29,84 @@ let ipcServer: net.Server | null = null;
 let ipcDiscovery: OpenPetsDiscoveryFile | null = null;
 let leaseCleanupTimer: NodeJS.Timeout | null = null;
 let agentConnectedTracked = false;
+
+interface DisconnectedSession {
+  readonly actualPetName: string;
+  readonly targetKind: "default" | "explicit";
+  readonly terminalAppName?: string;
+  readonly cwd?: string;
+  readonly clientPid?: number;
+  readonly disconnectedAt: number;
+  readonly reason: "released" | "expired" | "pid_dead";
+}
+
+export interface EnrichedSessionSnapshot extends LeaseSnapshot {
+  readonly unresolvedNotifications: number;
+  readonly confinementState?: "confined" | "minimized" | "occluded" | "free-roam";
+  readonly petVisible: boolean;
+  readonly petDismissed: boolean;
+  readonly canFocus: boolean;
+  readonly healthPct: number;
+  /** The pet actually displayed for this session (may differ from lease target when pool-assigned). */
+  readonly displayPetId?: string;
+  readonly displayPetName?: string;
+  readonly displayPetOrigin?: "explicit" | "pool";
+}
+
+const recentlyDisconnected: DisconnectedSession[] = [];
+const maxDisconnectedHistory = 10;
+
+/** Sessions blocked from re-acquiring after UI disconnect. Keyed by sessionNonce → clientPid. */
+const blockedSessions = new Map<string, number>();
+
+function isSessionBlocked(sessionNonce: string | undefined, clientPid: number | undefined): boolean {
+  if (!sessionNonce || !blockedSessions.has(sessionNonce)) return false;
+  const blockedPid = blockedSessions.get(sessionNonce)!;
+  if (clientPid !== undefined && clientPid !== blockedPid) {
+    blockedSessions.delete(sessionNonce);
+    return false;
+  }
+  try {
+    process.kill(blockedPid, 0);
+  } catch {
+    blockedSessions.delete(sessionNonce);
+    return false;
+  }
+  return true;
+}
+
+function recordDisconnection(lease: PetLease, reason: DisconnectedSession["reason"]): void {
+  const petName = lease.targetKind === "default"
+    ? getCurrentDefaultPet().displayName
+    : getPetDisplayName(lease.actualPetId);
+  recentlyDisconnected.unshift({
+    actualPetName: petName,
+    targetKind: lease.targetKind,
+    terminalAppName: lease.terminalAppName,
+    cwd: lease.cwd,
+    clientPid: lease.clientPid,
+    disconnectedAt: Date.now(),
+    reason,
+  });
+  if (recentlyDisconnected.length > maxDisconnectedHistory) {
+    recentlyDisconnected.length = maxDisconnectedHistory;
+  }
+}
+
+function recordDisconnectionFromSnapshot(s: LeaseSnapshot, reason: DisconnectedSession["reason"]): void {
+  recentlyDisconnected.unshift({
+    actualPetName: s.actualTargetPetName,
+    targetKind: s.targetKind,
+    terminalAppName: s.terminalAppName,
+    cwd: s.cwd,
+    clientPid: s.clientPid,
+    disconnectedAt: Date.now(),
+    reason,
+  });
+  if (recentlyDisconnected.length > maxDisconnectedHistory) {
+    recentlyDisconnected.length = maxDisconnectedHistory;
+  }
+}
 /** leaseId → window-tracking unsubscribe function (for confined agent pets). */
 const confinementUnsubscribers = new Map<string, () => void>();
 const leaseManager = new LeaseManager({
@@ -40,7 +119,10 @@ const leaseManager = new LeaseManager({
   // expiry (e.g. after laptop sleep), ahead of the next 5s cleanup tick. Notify
   // the registry the same way the cleanup pass does so the pet binding doesn't
   // leak until the tick catches up.
-  onExpired: (lease) => notifyLeaseGone(lease, sessionKeyForLease(lease)),
+  onExpired: (lease) => {
+    recordDisconnection(lease, "expired");
+    notifyLeaseGone(lease, sessionKeyForLease(lease));
+  },
 });
 
 // Pet lifecycle is driven by window→pet bindings, not lease counts: the registry
@@ -161,8 +243,12 @@ export async function startLocalIpcServer(): Promise<void> {
     // once released, a lease's raw record (and its sessionNonce) is gone, so the
     // returned snapshots can no longer be turned into a registry sessionKey.
     const sessionKeys = captureSessionKeysByLeaseId();
-    cleanupReleasedLeases(leaseManager.cleanupExpired(), sessionKeys);
-    cleanupReleasedLeases(leaseManager.checkPidLiveness(), sessionKeys);
+    const expiredSnapshots = leaseManager.cleanupExpired();
+    for (const s of expiredSnapshots) recordDisconnectionFromSnapshot(s, "expired");
+    cleanupReleasedLeases(expiredSnapshots, sessionKeys);
+    const pidDeadSnapshots = leaseManager.checkPidLiveness();
+    for (const s of pidDeadSnapshots) recordDisconnectionFromSnapshot(s, "pid_dead");
+    cleanupReleasedLeases(pidDeadSnapshots, sessionKeys);
   }, 5_000);
   leaseCleanupTimer.unref?.();
 
@@ -448,6 +534,10 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const sessionNonce = validateSessionNonce(params.sessionNonce);
     const cwd = validateCwd(params.cwd);
     debug("ipc", "lease acquire requested", { requestId: request.id, requestedPetId, clientPid, sessionNonce });
+    if (isSessionBlocked(sessionNonce, clientPid)) {
+      debug("ipc", "lease acquire rejected — session blocked", { requestId: request.id, sessionNonce, clientPid });
+      throw new IpcProtocolError("session_blocked", "Session was disconnected from the UI.");
+    }
     const lease = leaseManager.acquire(requestedPetId, clientPid, sessionNonce, cwd);
     // Spawning now happens when the session's terminal identity resolves (via
     // the registry). Identity can lag a beat, so give an explicit lease a 3s
@@ -491,10 +581,8 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const params = isRecord(request.params) ? request.params : {};
     const leaseId = validateRequiredLeaseId(params.leaseId);
     debug("ipc", "lease release requested", { requestId: request.id, leaseId });
-    // Explicit leases clean up their confinement subscription in
-    // releaseExplicitLease; both paths notify the registry the session is gone
-    // (sessionKey captured before release, since release drops the raw lease).
     const rawLease = leaseManager.getRawLease(leaseId);
+    if (rawLease) recordDisconnection(rawLease, "released");
     if (rawLease?.targetKind === "explicit") {
       return releaseExplicitLease(leaseId);
     }
@@ -1027,4 +1115,112 @@ function getPetDisplayName(petId: string): string {
 
 function isPetEligible(petId: string): boolean {
   return getAppStateSnapshot().pets.installed.some((pet) => pet.id === petId && !pet.broken);
+}
+
+export function getSessionsSnapshot(): {
+  sessions: readonly EnrichedSessionSnapshot[];
+  recentlyDisconnected: readonly DisconnectedSession[];
+  pool: { used: number; total: number } | null;
+  serverTime: number;
+} {
+  const now = Date.now();
+  const rawLeases = leaseManager.getAllRawLeases();
+  const state = getAppStateSnapshot();
+  const ttlMs = 15_000;
+
+  const sessions: EnrichedSessionSnapshot[] = rawLeases.map((lease) => {
+    const snap = leaseManager.snapshot(lease);
+    const sessionKey = sessionKeyForLease(lease);
+    const store = sessionKey ? windowPetRegistry.storeForSession(sessionKey) : null;
+    const unresolvedNotifications = store?.unresolvedCount() ?? 0;
+
+    let confinementState: EnrichedSessionSnapshot["confinementState"];
+    if (lease.targetKind === "explicit") {
+      const conf = getConfinementState(lease.actualPetId);
+      if (conf) {
+        if (conf.terminalMinimized) confinementState = "minimized";
+        else if (conf.terminalOccluded) confinementState = "occluded";
+        else if (conf.terminalBounds) confinementState = "confined";
+        else confinementState = "free-roam";
+      }
+    }
+
+    let petVisible = true;
+    let petDismissed = false;
+    if (lease.targetKind === "explicit") {
+      petDismissed = isAgentPetDismissed(lease.actualPetId);
+      petVisible = !petDismissed && !isAgentPetHidden(lease.actualPetId);
+    }
+
+    const focusTarget = sessionKey ? windowPetRegistry.sessionFocusTarget(sessionKey) : null;
+    const canFocus = focusTarget !== null;
+
+    const elapsed = now - lease.lastHeartbeatAt;
+    const healthPct = Math.max(0, Math.min(1, 1 - elapsed / ttlMs));
+
+    const displayPet = sessionKey ? windowPetRegistry.displayPetForSession(sessionKey) : null;
+    const displayPetId = displayPet?.petId;
+    const displayPetName = displayPetId ? getPetDisplayName(displayPetId) : undefined;
+    const displayPetOrigin = displayPet?.origin;
+
+    return { ...snap, unresolvedNotifications, confinementState, petVisible, petDismissed, canFocus, healthPct, displayPetId, displayPetName, displayPetOrigin };
+  });
+
+  const poolOrder = state.preferences.petPoolOrder;
+  let pool: { used: number; total: number } | null = null;
+  if (poolOrder && poolOrder.length > 0) {
+    const eligibleSet = new Set(getEligiblePoolPetIds(state.pets.installed, builtInPet.id, state.preferences.defaultPetId));
+    const totalSlots = poolOrder.filter(id => eligibleSet.has(id)).length;
+    const usedSlots = poolOrder.filter(id => eligibleSet.has(id) && leaseManager.countExplicitLeases(id) > 0).length;
+    pool = { used: usedSlots, total: totalSlots };
+  }
+
+  return { sessions, recentlyDisconnected: [...recentlyDisconnected], pool, serverTime: now };
+}
+
+export function releaseSessionFromUi(leaseId: string): boolean {
+  const raw = leaseManager.getRawLease(leaseId);
+  if (!raw) return false;
+  if (raw.sessionNonce && raw.clientPid) {
+    blockedSessions.set(raw.sessionNonce, raw.clientPid);
+    info("ipc", "session blocked from re-acquire", { leaseId, sessionNonce: raw.sessionNonce, clientPid: raw.clientPid });
+  }
+  recordDisconnection(raw, "released");
+  const petId = raw.actualPetId;
+  if (raw.targetKind === "explicit") {
+    releaseExplicitLease(leaseId);
+    if (leaseManager.countExplicitLeases(petId) === 0) {
+      clearAgentPetLeaseState(petId);
+      clearConfinementState(petId);
+    }
+  } else {
+    const sessionKey = sessionKeyForLease(raw);
+    leaseManager.release(leaseId);
+    if (sessionKey) windowPetRegistry.onSessionGone(sessionKey);
+  }
+  return true;
+}
+
+export async function focusSessionTerminal(leaseId: string): Promise<boolean> {
+  const raw = leaseManager.getRawLease(leaseId);
+  if (!raw) return false;
+  const sessionKey = sessionKeyForLease(raw);
+  const target = sessionKey ? windowPetRegistry.sessionFocusTarget(sessionKey) : null;
+  if (!target) return false;
+  return focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId);
+}
+
+export function toggleSessionPetVisibility(leaseId: string): boolean {
+  const raw = leaseManager.getRawLease(leaseId);
+  if (!raw || raw.targetKind !== "explicit") return false;
+  const petId = raw.actualPetId;
+  if (isAgentPetDismissed(petId)) {
+    clearAgentPetDismissal(petId);
+    showAgentPet(petId);
+  } else if (isAgentPetHidden(petId)) {
+    unhideAgentPet(petId);
+  } else {
+    hideAgentPet(petId);
+  }
+  return true;
 }

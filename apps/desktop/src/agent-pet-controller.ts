@@ -109,6 +109,24 @@ export function hasHiddenAgentPets(): boolean {
   return hiddenAgentPets.size > 0;
 }
 
+export function isAgentPetHidden(petId: string): boolean {
+  return hiddenAgentPets.has(petId);
+}
+
+export function isAgentPetDismissed(petId: string): boolean {
+  return dismissedAgentPets.has(petId);
+}
+
+export function unhideAgentPet(petId: string): void {
+  if (!hiddenAgentPets.has(petId)) return;
+  hiddenAgentPets.delete(petId);
+  const window = agentPetWindows.get(petId);
+  if (window && !window.isDestroyed()) {
+    window.showInactive();
+    info("pet.agent", "unhide requested", { petId, windowId: window.id });
+  }
+}
+
 /** Reveal every hidden agent pet (tray: Show hidden pets). */
 export function showHiddenAgentPets(): void {
   const petIds = [...hiddenAgentPets];

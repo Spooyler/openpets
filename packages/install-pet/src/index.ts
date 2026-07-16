@@ -554,7 +554,7 @@ function normalizeState(value: unknown, userData: string): OpenPetsState {
       defaultPetId,
       openDefaultPetOnLaunch: typeof preferences.openDefaultPetOnLaunch === "boolean" ? preferences.openDefaultPetOnLaunch : true,
       speechBubblesEnabled: true,
-      petScale: typeof preferences.petScale === "number" ? preferences.petScale : 1,
+      petScale: typeof preferences.petScale === "number" && Number.isFinite(preferences.petScale) ? Math.round(Math.max(0.1, Math.min(3, preferences.petScale)) * 100) / 100 : 0.75,
       onboardingCompleted: typeof preferences.onboardingCompleted === "boolean" ? preferences.onboardingCompleted : false,
       claudeCommandPath: typeof preferences.claudeCommandPath === "string" ? preferences.claudeCommandPath : undefined,
       opencodeCommandPath: typeof preferences.opencodeCommandPath === "string" ? preferences.opencodeCommandPath : undefined,

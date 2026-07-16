@@ -7,6 +7,7 @@ import { app, BrowserWindow, dialog, ipcMain, protocol, shell, type IpcMainInvok
 import { getAgentSetupSnapshot, runAgentSetupAction, updateAgentSetupCommandPaths } from "./agent-setup.js";
 import { refreshAgentPetContent } from "./agent-pet-controller.js";
 import { getAppStateSnapshot, getDesktopAnalyticsConsentState, normalizePetPoolOrder, petScaleOptions, setDesktopAnalyticsConsent, setPetPoolOrder, updatePreferences } from "./app-state.js";
+import { minPetScale, maxPetScale } from "./app-state-core.js";
 import { applyRoamingToAllPets } from "./pet-roaming-controller.js";
 import { classifyAnalyticsError, trackDesktopAnalyticsConsentChanged, trackDesktopEvent } from "./analytics.js";
 import { createAppIcon } from "./assets.js";
@@ -27,12 +28,13 @@ import { getPluginService, type PluginConfigSoundPickResult, type PluginServiceR
 import { defaultPetSprite, reactionAnimationMetadata, selectableAnimationMetadata } from "./reaction-animation-mapping.js";
 import { readSafePluginManifest } from "./plugin-manifest-reader.js";
 import { registerPluginAssetProtocol } from "./plugin-asset-protocol.js";
+import { focusSessionTerminal, getSessionsSnapshot, releaseSessionFromUi, toggleSessionPetVisibility } from "./local-ipc.js";
 import { checkForGitHubReleaseUpdate, getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 
 type InternalUiWindowKind = "control-center";
-export type ControlCenterRoute = "dashboard" | "pets" | "settings" | "plugins" | "integrations";
+export type ControlCenterRoute = "dashboard" | "pets" | "sessions" | "settings" | "plugins" | "integrations";
 
-const controlCenterRoutes = new Set<ControlCenterRoute>(["dashboard", "pets", "settings", "plugins", "integrations"]);
+const controlCenterRoutes = new Set<ControlCenterRoute>(["dashboard", "pets", "sessions", "settings", "plugins", "integrations"]);
 let controlCenterWindow: BrowserWindow | null = null;
 let internalUiHandlersInstalled = false;
 let pendingControlCenterRoute: ControlCenterRoute | null = null;
@@ -77,6 +79,7 @@ function getPetsStateSnapshot(): { preferences: { defaultPetId: string }; pets: 
 function getSettingsStateSnapshot(): {
   preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "petScale" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "petConfinementEnabled" | "petCrossDisplayEnabled" | "petGravityEnabled">;
   petScaleOptions: typeof petScaleOptions;
+  petScaleRange: { min: number; max: number; step: number };
   analytics: ReturnType<typeof getDesktopAnalyticsConsentState>;
   /** Non-broken, non-built-in installed pets available for pool selection. */
   petPoolCandidates: ReadonlyArray<{ readonly id: string; readonly displayName: string }>;
@@ -94,6 +97,7 @@ function getSettingsStateSnapshot(): {
       petGravityEnabled: state.preferences.petGravityEnabled,
     },
     petScaleOptions,
+    petScaleRange: { min: minPetScale, max: maxPetScale, step: 0.01 },
     analytics: getDesktopAnalyticsConsentState(),
     petPoolCandidates: state.pets.installed
       .filter((p) => !p.builtIn && !p.broken && p.id !== state.preferences.defaultPetId)
@@ -192,6 +196,29 @@ export function installInternalUiHandlers(): void {
   ipcMain.handle("openpets:get-lan-status", (event) => {
     assertAllowedSender(event, ["control-center"]);
     return getLanStatusSnapshot();
+  });
+
+  ipcMain.handle("openpets:get-sessions-snapshot", (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    return getSessionsSnapshot();
+  });
+
+  ipcMain.handle("openpets:session-release", (event, leaseId: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (typeof leaseId !== "string") throw new Error("Invalid lease ID.");
+    return { released: releaseSessionFromUi(leaseId) };
+  });
+
+  ipcMain.handle("openpets:session-focus", async (event, leaseId: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (typeof leaseId !== "string") throw new Error("Invalid lease ID.");
+    return { focused: await focusSessionTerminal(leaseId) };
+  });
+
+  ipcMain.handle("openpets:session-toggle-pet", (event, leaseId: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (typeof leaseId !== "string") throw new Error("Invalid lease ID.");
+    return { toggled: toggleSessionPetVisibility(leaseId) };
   });
 
   ipcMain.handle("openpets:set-desktop-analytics-consent", (event, consent: unknown) => {

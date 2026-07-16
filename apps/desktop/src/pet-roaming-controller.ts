@@ -125,12 +125,12 @@ const defaultSpriteBaseWidth = 192;
 export function scurryAllPetsToEdge(): void {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { screen } = require("electron") as typeof import("electron");
-  let petScale = 1;
+  let petScale = 0.75;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const appState = require("./app-state.js") as { getAppStateSnapshot: () => { preferences: { petScale: number } } };
-    petScale = appState.getAppStateSnapshot().preferences.petScale || 1;
-  } catch { /* fallback to scale 1 */ }
+    petScale = appState.getAppStateSnapshot().preferences.petScale || 0.75;
+  } catch { /* fallback to default scale */ }
   const spriteWidth = Math.ceil(defaultSpriteBaseWidth * petScale);
   for (const [petId, accessor] of livePets) {
     const window = accessor();

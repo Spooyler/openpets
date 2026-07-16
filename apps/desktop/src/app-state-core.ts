@@ -3,17 +3,20 @@ export interface OnboardingPreferenceLike {
 }
 
 export const petScaleOptions = [
-  { label: "XS", value: 0.5 },
-  { label: "Small", value: 0.75 },
-  { label: "Medium", value: 1 },
-  { label: "Large", value: 1.25 },
-  { label: "Huge", value: 1.5 },
+  { label: "XS", value: 0.35 },
+  { label: "Small", value: 0.5 },
+  { label: "Medium", value: 0.75 },
+  { label: "Large", value: 1 },
+  { label: "Huge", value: 1.25 },
 ] as const;
-export type PetScaleValue = typeof petScaleOptions[number]["value"];
-export const defaultPetScale: PetScaleValue = 1;
+export const minPetScale = 0.1;
+export const maxPetScale = 3;
+export type PetScaleValue = number;
+export const defaultPetScale: PetScaleValue = 0.75;
 
 export function normalizePetScale(value: unknown): PetScaleValue {
-  return petScaleOptions.find((option) => option.value === value)?.value ?? defaultPetScale;
+  if (typeof value !== "number" || !Number.isFinite(value)) return defaultPetScale;
+  return Math.round(Math.max(minPetScale, Math.min(maxPetScale, value)) * 100) / 100;
 }
 
 export function normalizeOnboardingCompleted(value: OnboardingPreferenceLike): boolean {

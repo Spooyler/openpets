@@ -67,9 +67,8 @@ export function validatePreferencePatch(value: unknown): PreferencePatch {
   }
 
   if ("petScale" in value) {
-    const scale = normalizePetScale(value.petScale);
-    if (scale !== value.petScale) throw new Error("Invalid pet scale value.");
-    patch.petScale = scale;
+    if (typeof value.petScale !== "number" || !Number.isFinite(value.petScale)) throw new Error("Invalid pet scale value.");
+    patch.petScale = normalizePetScale(value.petScale);
   }
 
   if ("reactionAnimationOverrides" in value) {

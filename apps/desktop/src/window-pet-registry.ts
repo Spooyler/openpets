@@ -179,6 +179,13 @@ export class WindowPetRegistry {
     return null;
   }
 
+  displayPetForSession(sessionKey: string): { petId: string; origin: "explicit" | "pool" } | null {
+    const windowKey = this.#sessionWindows.get(sessionKey);
+    if (windowKey === undefined) return null;
+    const binding = this.#bindings.get(windowKey);
+    return binding ? { petId: binding.petId, origin: binding.origin } : null;
+  }
+
   storeForPet(petId: string): NotificationStore | null {
     const windowKey = this.windowForPet(petId);
     return windowKey !== null ? this.#bindings.get(windowKey)!.store : null;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { defaultPetScale, deriveDisplayKey, markOnboardingCompleted, normalizeOnboardingCompleted, normalizePetScale, petScaleOptions } from "../src/app-state-core.js";
+import { defaultPetScale, deriveDisplayKey, markOnboardingCompleted, maxPetScale, minPetScale, normalizeOnboardingCompleted, normalizePetScale, petScaleOptions } from "../src/app-state-core.js";
 
 assert.equal(normalizeOnboardingCompleted({}), false);
 assert.equal(normalizeOnboardingCompleted({ onboardingCompleted: true }), true);
@@ -39,14 +39,23 @@ assert.equal(preferencePatch.defaultPetId, "built-in");
 assert.equal(preferencePatch.openDefaultPetOnLaunch, true);
 assert.equal(preferencePatch.speechBubblesEnabled, true);
 
-assert.equal(defaultPetScale, 1);
-assert.deepEqual(petScaleOptions.map((option) => option.value), [0.5, 0.75, 1, 1.25, 1.5]);
+assert.equal(defaultPetScale, 0.75);
+assert.deepEqual(petScaleOptions.map((option) => option.value), [0.35, 0.5, 0.75, 1, 1.25]);
+// Predefined steps are preserved exactly
+assert.equal(normalizePetScale(0.35), 0.35);
 assert.equal(normalizePetScale(0.5), 0.5);
 assert.equal(normalizePetScale(0.75), 0.75);
 assert.equal(normalizePetScale(1), 1);
 assert.equal(normalizePetScale(1.25), 1.25);
-assert.equal(normalizePetScale(1.5), 1.5);
-assert.equal(normalizePetScale(0.56), defaultPetScale);
+// Arbitrary values within range are accepted
+assert.equal(normalizePetScale(0.56), 0.56);
+assert.equal(normalizePetScale(0.8), 0.8);
+assert.equal(normalizePetScale(2), 2);
+assert.equal(normalizePetScale(1.337), 1.34);
+// Clamped to bounds
+assert.equal(normalizePetScale(0.01), minPetScale);
+assert.equal(normalizePetScale(5), maxPetScale);
+// Non-number input falls back to default
 assert.equal(normalizePetScale("1"), defaultPetScale);
 assert.equal(normalizePetScale(Number.NaN), defaultPetScale);
 assert.equal(normalizePetScale(Number.POSITIVE_INFINITY), defaultPetScale);
