@@ -183,9 +183,22 @@ export class WindowPetRegistry {
       if (this.#bindings.has(windowKey)) this.#closeBinding(windowKey, "user-closed");
       return had;
     }
-    this.#userClosedWindows.delete(windowKey);
+    // Validate the target window can accept the pet BEFORE mutating anything —
+    // a stale UI snapshot can request a steal into a window whose sessions all
+    // disconnected since render. Discovering that after already stealing from
+    // the other window (or clearing user-closed) would leave the pet bound
+    // nowhere while having mutated two pieces of state for a "failed" assign.
     const current = this.#bindings.get(windowKey);
-    if (current && current.petId === petId) return true;
+    if (current && current.petId === petId) {
+      this.#userClosedWindows.delete(windowKey);
+      return true;
+    }
+    const parked = [...this.#defaultSessions.values()].filter(
+      (s) => windowKeyForIdentity(s.terminalWindowId, s.terminalOwnerPid) === windowKey,
+    );
+    if (!current && parked.length === 0) return false;
+
+    this.#userClosedWindows.delete(windowKey);
     const otherKey = this.windowForPet(petId);
     if (otherKey !== null && otherKey !== windowKey) this.#closeBinding(otherKey, "rebind");
     if (current) {
@@ -195,10 +208,6 @@ export class WindowPetRegistry {
       this.#callbacks.rebindPet(windowKey, fromPetId, petId);
       return true;
     }
-    const parked = [...this.#defaultSessions.values()].filter(
-      (s) => windowKeyForIdentity(s.terminalWindowId, s.terminalOwnerPid) === windowKey,
-    );
-    if (parked.length === 0) return false;
     const binding = this.#createBinding(windowKey, petId, "explicit");
     for (const session of parked) this.#attachSession(windowKey, binding, session);
     this.#callbacks.spawnPet(windowKey, petId);

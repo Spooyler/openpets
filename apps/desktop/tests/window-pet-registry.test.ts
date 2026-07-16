@@ -236,12 +236,37 @@ function makeRecorder() {
   assert.equal(reg.assignPetToWindow("w:8", "fox"), true, "move steals from w:7");
   assert.equal(reg.petForWindow("w:7"), null);
   assert.equal(reg.petForWindow("w:8"), "fox");
+  assert.equal(reg.displayPetForSession("7:g"), null, "stolen-from window's session falls to default coverage");
   // Unbind: sessions fall to default, window suppressed.
   assert.equal(reg.assignPetToWindow("w:8", null), true, "unbind succeeds");
   assert.equal(reg.petForWindow("w:8"), null);
   assert.equal(reg.onSessionIdentified(s2, undefined, true), null, "no pool re-draw after UI default");
   // Assigning to a window with no sessions at all fails.
   assert.equal(reg.assignPetToWindow("w:99", "fox"), false, "no sessions → false");
+}
+
+// Regression: assignPetToWindow must validate the target window BEFORE
+// stealing the pet from wherever it's currently bound. A stale UI snapshot
+// (target window's sessions all disconnected between render and click) must
+// fail cleanly, without stealing from the source window or clearing the
+// target window's user-closed suppression.
+{
+  const { recorded, cb } = makeRecorder();
+  const reg = new WindowPetRegistry({
+    callbacks: cb,
+    isPidAlive: () => true,
+    drawPoolPet: (occupied) => (occupied.has("dog") ? null : "dog"),
+  });
+  const sBound = { sessionKey: "9:i", leaseId: "LI", terminalOwnerPid: 90, terminalWindowId: 9, label: "i" };
+  assert.equal(reg.onSessionIdentified(sBound, "fox", false), "fox", "fox bound to w:9");
+  recorded.length = 0;
+  assert.equal(reg.assignPetToWindow("w:10", "fox"), false, "target window has no sessions to accept the pet");
+  assert.deepEqual(recorded.map((c) => c.fn), [], "no steal, no rebind — validation failed before any mutation");
+  assert.equal(reg.petForWindow("w:9"), "fox", "fox's original binding is untouched");
+  // If the failed assign had wrongly cleared w:10's user-closed suppression,
+  // this pool draw would instead be suppressed.
+  const s10 = { sessionKey: "10:j", leaseId: "LJ", terminalOwnerPid: 100, terminalWindowId: 10, label: "j" };
+  assert.equal(reg.onSessionIdentified(s10, undefined, true), "dog", "w:10's user-closed state was not touched by the failed assign");
 }
 
 console.log("Window pet registry passed.");
