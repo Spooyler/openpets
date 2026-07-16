@@ -49,10 +49,11 @@ export interface LeaseContext {
   requestedPetId?: string | null;
 }
 
-/** Effective pet id for (re)acquiring this session's lease. */
-export function resolveRequestedPetId(lease: LeaseContext | undefined, configuredPetId: string | undefined): string | undefined {
+/** Effective pet id for (re)acquiring this session's lease.
+ *  string = explicit pet · null = explicitly default (adopted) · undefined = unspecified. */
+export function resolveRequestedPetId(lease: LeaseContext | undefined, configuredPetId: string | undefined): string | null | undefined {
   if (!lease || lease.requestedPetId === undefined) return configuredPetId;
-  return lease.requestedPetId ?? undefined;
+  return lease.requestedPetId;
 }
 
 export interface ToolContext {
@@ -138,7 +139,9 @@ export async function handleAdopt(input: unknown, context: ToolContext): Promise
   try {
     const client = context.client ?? createOpenPetsClient();
     // Acquire the new lease first so a failure leaves the current pet working.
-    const newLease = await client.acquireLease({ requestedPetId });
+    // Omitting petId means "adopt the default pet" — send null explicitly (not
+    // absent) so the desktop treats this as an explicit choice, not "unspecified".
+    const newLease = await client.acquireLease({ requestedPetId: requestedPetId ?? null });
     const previousLeaseId = leaseContext.lease?.leaseId ?? leaseContext.staleLeaseId;
     if (previousLeaseId && previousLeaseId !== newLease.leaseId) {
       try { await client.releaseLease(previousLeaseId); } catch { /* best effort */ }
