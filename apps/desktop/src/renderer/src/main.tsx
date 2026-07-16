@@ -475,7 +475,7 @@ const navTabs = [
 function DisconnectButton({ leaseId, onDisconnect }: { leaseId: string; onDisconnect: () => void }) {
   const { t } = useI18n();
   const [confirming, setConfirming] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
   const handleClick = () => {
     if (confirming) {
