@@ -54,6 +54,7 @@
     "@open-pets/claude": "workspace:*",
     "@open-pets/cli": "workspace:*",
     "@open-pets/cursor": "workspace:*",
+    "@open-pets/vscode": "workspace:*",
     "@open-pets/mcp": "workspace:*",
     "@open-pets/opencode": "workspace:*",
     "get-windows": "^9.3.0",

@@ -655,7 +655,7 @@ export function installInternalUiHandlers(): void {
 
   ipcMain.handle("openpets:agent-setup-action", async (event, action: unknown, selectedPetId: unknown, commandMode: unknown) => {
     assertAllowedSender(event, ["control-center"]);
-    if (action !== "configure" && action !== "replace" && action !== "remove" && action !== "install-memory" && action !== "doctor-hooks" && action !== "install-hooks" && action !== "uninstall-hooks" && action !== "doctor-statusline" && action !== "install-statusline" && action !== "uninstall-statusline" && action !== "opencode-install" && action !== "opencode-remove" && action !== "cursor-install" && action !== "cursor-replace" && action !== "cursor-remove") {
+    if (action !== "configure" && action !== "replace" && action !== "remove" && action !== "install-memory" && action !== "doctor-hooks" && action !== "install-hooks" && action !== "uninstall-hooks" && action !== "doctor-statusline" && action !== "install-statusline" && action !== "uninstall-statusline" && action !== "opencode-install" && action !== "opencode-remove" && action !== "cursor-install" && action !== "cursor-replace" && action !== "cursor-remove" && action !== "vscode-install" && action !== "vscode-replace" && action !== "vscode-remove") {
       throw new Error("Invalid agent setup action.");
     }
 
@@ -692,6 +692,7 @@ async function chooseLocalPetImportKind(owner: BrowserWindow | undefined): Promi
 function integrationTypeForSetupAction(action: string): string {
   if (action.startsWith("opencode-")) return "opencode";
   if (action.startsWith("cursor-")) return "cursor";
+  if (action.startsWith("vscode-")) return "vscode";
   if (action.includes("hook") || action === "install-memory") return "claude";
   return "claude";
 }

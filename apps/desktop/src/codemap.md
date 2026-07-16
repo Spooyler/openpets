@@ -77,7 +77,8 @@ windows.ts (IPC handlers)
     │   ├── install-memory (claude-memory.ts)
     │   └── install-hooks/uninstall-hooks/doctor-hooks (@open-pets/claude)
     ├── OpenCode global config management (@open-pets/opencode)
-    └── Cursor global MCP config management (@open-pets/cursor)
+    ├── Cursor global MCP config management (@open-pets/cursor)
+    └── VS Code global MCP config management (@open-pets/vscode)
 ```
 
 **Pet Installation Flow**:
@@ -159,6 +160,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
   - `@open-pets/claude`: `buildClaudeMcpPreview`, `installClaudeHooks`, `doctorClaudeHooks`, etc.
   - `@open-pets/opencode`: `prepareOpenCodeGlobalSetup`, `doctorOpenCodeGlobalSetup`
   - `@open-pets/cursor`: `planCursorMcpInstall`, `executeCursorMcpWrite`, `buildCursorRulesPreview`, etc.
+  - `@open-pets/vscode`: `planVsCodeMcpInstall`, `executeVsCodeMcpWrite`, `getVsCodeGlobalMcpPath`, etc.
   - `@open-pets/cli`: Version lookup for bundled mode
   - `@open-pets/plugin-sdk`: Published SDK contract mirrored by the desktop bridge and conformance checks
 
@@ -254,7 +256,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `plugin-voice.ts`: Voice/TTS and one-shot listen facade gated by settings and permissions.
 
 **Agent Integration**:
-- `agent-setup.ts`: Claude/OpenCode/Cursor detection, MCP configuration, hooks management, action journaling
+- `agent-setup.ts`: Claude/OpenCode/Cursor/VS Code detection, MCP configuration, hooks management, action journaling
 - `claude-memory.ts`: Claude instructions file management (`~/.claude/openpets.md`)
 - `update-checker.ts`: GitHub release polling, update status
 - `update-version.ts`: Version parsing and comparison
@@ -274,7 +276,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 | CLI via IPC | `local-ipc.ts` | `pet.react`, `pet.say`, `lease.*` |
 | `lease-manager.ts` | `agent-pet-controller.ts` | Show/close agent pets |
 | `windows.ts` | Renderer | State snapshots via IPC invoke |
-| `agent-setup.ts` | Claude/OpenCode/Cursor CLI | MCP add/remove, config writes |
+| `agent-setup.ts` | Claude/OpenCode/Cursor/VS Code | MCP add/remove, config writes |
 | All modules | `logger.ts` | Structured logs to `userData/logs/openpets.log` |
 | Plugin catalog | `plugin-catalog.ts`/`plugin-service.ts` | Discoverable plugin metadata filtered by app version and install state |
 | Plugin ZIP/local folder | `plugin-package.ts`/`plugin-local-loader.ts` | Validated manifest snapshot installed under `userData/plugins*` |

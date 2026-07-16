@@ -47,6 +47,7 @@ const behaviorTests = [
   ".test-dist/tests/confinement-poller-backoff.test.js",
   ".test-dist/tests/window-tracker.test.js",
   ".test-dist/tests/window-tracker-chain.test.js",
+  ".test-dist/tests/window-select.test.js",
   ".test-dist/tests/window-tracker-win32.test.js",
   ".test-dist/tests/window-tracker-reentry.test.js",
   ".test-dist/tests/capabilities-win32.test.js",
@@ -84,6 +85,7 @@ const contractTests = [
 const distChecks = [
   "dist/check-opencode-desktop-setup.js",
   "dist/check-cursor-desktop.js",
+  "dist/check-vscode-desktop.js",
   "dist/check-packaging-contract.js",
 ];
 

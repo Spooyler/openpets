@@ -7,12 +7,13 @@ import { app } from "electron";
 import { buildClaudeMcpGetCommand, buildClaudeMcpPreview, classifyClaudeMcpStatus, createOpenPetsHookSettingsPreview, doctorClaudeHooks, doctorClaudeStatusline, installClaudeHooks, installClaudeStatusline, mapAsarPathToUnpacked, uninstallClaudeHooks, uninstallClaudeStatusline, type ClaudeCommandSpec, type ClaudeHookDoctorResult, type ClaudeMcpPreview, type ClaudeStatuslineDoctorResult, type OpenPetsCommandMode, type ParsedClaudeMcpEntry } from "@open-pets/claude";
 import { buildCursorRulesPreview, classifyCursorMcpStatus, executeCursorMcpWrite, getCursorGlobalMcpPath, planCursorMcpInstall, planCursorMcpRemove, planCursorMcpReplace, readCursorMcpConfig, type CursorMcpStatusResult } from "@open-pets/cursor";
 import { buildOpenPetsOnlyPreview, type RedactedPreview } from "@open-pets/cursor";
+import { buildOpenPetsOnlyPreview as buildVsCodeOpenPetsOnlyPreview, classifyVsCodeMcpStatus, executeVsCodeMcpWrite, getVsCodeGlobalMcpPath, planVsCodeMcpInstall, planVsCodeMcpRemove, planVsCodeMcpReplace, readVsCodeMcpConfig, type VsCodeMcpStatusResult } from "@open-pets/vscode";
 import { doctorOpenCodeGlobalSetup, getGlobalOpenCodeConfigDir, parseOpenCodeConfig, prepareOpenCodeGlobalRemove, prepareOpenCodeGlobalSetup, writePreparedOpenCodeGlobalRemove, writePreparedOpenCodeGlobalSetup } from "@open-pets/opencode";
 
 import { getAppStateSnapshot, updatePreferences, type InstalledPetState, type OpenPetsStateV1 } from "./app-state.js";
 import { doctorClaudeOpenPetsMemory, installClaudeOpenPetsMemory, uninstallClaudeOpenPetsMemory, type ClaudeOpenPetsMemoryStatus } from "./claude-memory.js";
 
-export type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "doctor-statusline" | "install-statusline" | "uninstall-statusline" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
+export type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "doctor-statusline" | "install-statusline" | "uninstall-statusline" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove" | "vscode-install" | "vscode-replace" | "vscode-remove";
 export type JournalAction = "configure" | "update" | "replace" | "remove";
 
 export interface AgentSetupPetOption {
@@ -48,6 +49,8 @@ export interface AgentSetupSnapshot {
   readonly opencodePreview: OpenCodeSetupPreview;
   readonly cursorStatus: CursorSetupStatus;
   readonly cursorPreview: CursorSetupPreview;
+  readonly vscodeStatus: VsCodeSetupStatus;
+  readonly vscodePreview: VsCodeSetupPreview;
   readonly commandPaths: AgentSetupCommandPaths;
   readonly busy: boolean;
   readonly lastAction?: AgentSetupActionResult;
@@ -98,6 +101,23 @@ export interface CursorSetupPreview {
   readonly commandMode: "published" | "local" | "bundled";
 }
 
+export interface VsCodeSetupStatus {
+  readonly state: "configured" | "needs_setup" | "not_detected" | "error" | "conflict" | "needs_update";
+  readonly label: string;
+  readonly details: string;
+  readonly configPath: string;
+  readonly canInstall: boolean;
+  readonly canReplace: boolean;
+  readonly canRemove: boolean;
+}
+
+export interface VsCodeSetupPreview {
+  readonly global: true;
+  readonly configPath: string;
+  readonly mcpEntry: RedactedPreview;
+  readonly commandMode: "published" | "local" | "bundled";
+}
+
 export interface AgentSetupActionResult {
   readonly ok: boolean;
   readonly action: AgentSetupAction;
@@ -143,6 +163,7 @@ export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandMode
   const memoryStatus = { ...rawMemoryStatus, claudeMdPath: formatUserPath(rawMemoryStatus.claudeMdPath) ?? rawMemoryStatus.claudeMdPath, openPetsMemoryPath: formatUserPath(rawMemoryStatus.openPetsMemoryPath) ?? rawMemoryStatus.openPetsMemoryPath };
   const opencode = await getOpenCodeSetup(commandMode, petId);
   const cursor = await getCursorSetup(commandMode, petId);
+  const vscode = await getVsCodeSetup(commandMode, petId);
 
   return {
     selectedPetId: petId,
@@ -158,6 +179,8 @@ export async function getAgentSetupSnapshot(selectedPetId?: unknown, commandMode
     opencodePreview: opencode.preview,
     cursorStatus: cursor.status,
     cursorPreview: cursor.preview,
+    vscodeStatus: vscode.status,
+    vscodePreview: vscode.preview,
     commandPaths: getAgentSetupCommandPaths(),
     busy: operationRunning,
     lastAction,
@@ -270,6 +293,9 @@ async function runAction(action: AgentSetupAction, selectedPetId: string | undef
   if (action === "cursor-install") return installCursorGlobal(selectedPetId, commandMode);
   if (action === "cursor-replace") return replaceCursorGlobal(selectedPetId, commandMode);
   if (action === "cursor-remove") return removeCursorGlobal();
+  if (action === "vscode-install") return installVsCodeGlobal(selectedPetId, commandMode);
+  if (action === "vscode-replace") return replaceVsCodeGlobal(selectedPetId, commandMode);
+  if (action === "vscode-remove") return removeVsCodeGlobal();
   if (action === "doctor-hooks") {
     const doctor = safeDoctorClaudeHooks(commandMode, selectedPetId);
     writeActionJournal({ action: "update", selectedPetId, command: createHookJournalCommand("doctor-hooks", selectedPetId), previousStatus: doctor.status, success: doctor.status !== "error", message: doctor.message });
@@ -480,6 +506,74 @@ function mapCursorStatusToLabel(status: CursorMcpStatusResult["status"]): string
   }
 }
 
+async function getVsCodeSetup(commandMode: OpenPetsCommandMode, selectedPetId: string | undefined): Promise<{ readonly status: VsCodeSetupStatus; readonly preview: VsCodeSetupPreview }> {
+  void commandMode;
+  const configPath = getVsCodeGlobalMcpPath(process.platform, app.getPath("home"), app.getPath("appData"));
+  const petId = selectedPetId || undefined;
+  const mcpVersion = getMcpPackageVersion();
+
+  const configResult = readVsCodeMcpConfig(configPath);
+  const statusResult = classifyVsCodeMcpStatus(configResult, configPath, { mcpVersion, petId, commandMode: "published" });
+
+  const state = mapVsCodeStatusToState(statusResult.status);
+  const label = mapVsCodeStatusToLabel(statusResult.status);
+  const details = statusResult.message;
+
+  return {
+    status: {
+      state,
+      label,
+      details,
+      configPath: formatUserPath(configPath) ?? configPath,
+      canInstall: statusResult.canInstall,
+      canReplace: statusResult.canReplace,
+      canRemove: statusResult.canRemove,
+    },
+    preview: {
+      global: true,
+      configPath: formatUserPath(configPath) ?? configPath,
+      mcpEntry: buildVsCodeOpenPetsOnlyPreview({ mcpVersion, petId, commandMode: "published" }),
+      commandMode: "published",
+    },
+  };
+}
+
+function mapVsCodeStatusToState(status: VsCodeMcpStatusResult["status"]): VsCodeSetupStatus["state"] {
+  switch (status) {
+    case "installed":
+      return "configured";
+    case "missing":
+      return "needs_setup";
+    case "needs-update":
+      return "needs_update";
+    case "conflict":
+      return "conflict";
+    case "invalid":
+    case "error":
+      return "error";
+    default:
+      return "error";
+  }
+}
+
+function mapVsCodeStatusToLabel(status: VsCodeMcpStatusResult["status"]): string {
+  switch (status) {
+    case "installed":
+      return "Configured";
+    case "missing":
+      return "Not configured";
+    case "needs-update":
+      return "Needs update";
+    case "conflict":
+      return "Conflict";
+    case "invalid":
+    case "error":
+      return "Config error";
+    default:
+      return "Checking";
+  }
+}
+
 function getAgentSetupCommandPaths(): AgentSetupCommandPaths {
   const preferences = getAppStateSnapshot().preferences;
   return {
@@ -619,6 +713,63 @@ async function removeCursorGlobal(): Promise<AgentSetupActionResult> {
     return { ok: false, action: "cursor-remove", message: "Failed to plan Cursor MCP remove.", changed: false };
   } catch (error) {
     return { ok: false, action: "cursor-remove", message: error instanceof Error ? error.message : "Cursor MCP remove failed.", changed: false };
+  }
+}
+
+async function installVsCodeGlobal(selectedPetId: string | undefined, commandMode: OpenPetsCommandMode): Promise<AgentSetupActionResult> {
+  void commandMode;
+  try {
+    const configPath = getVsCodeGlobalMcpPath(process.platform, app.getPath("home"), app.getPath("appData"));
+    const mcpVersion = getMcpPackageVersion();
+    const plan = planVsCodeMcpInstall(configPath, { mcpVersion, petId: selectedPetId || undefined, commandMode: "published" });
+    if ("ok" in plan && !plan.ok) {
+      return { ok: false, action: "vscode-install", message: plan.message, changed: false };
+    }
+    if ("targetPath" in plan) {
+      executeVsCodeMcpWrite(plan);
+      const backupMsg = plan.backupPath ? ` Backup: ${formatUserPath(plan.backupPath) ?? plan.backupPath}.` : "";
+      return { ok: true, action: "vscode-install", message: `Installed VS Code OpenPets MCP config at ${formatUserPath(configPath) ?? configPath}.${backupMsg} VS Code may need to be restarted or reloaded.`, changed: true };
+    }
+    return { ok: false, action: "vscode-install", message: "Failed to plan VS Code MCP install.", changed: false };
+  } catch (error) {
+    return { ok: false, action: "vscode-install", message: error instanceof Error ? error.message : "VS Code MCP install failed.", changed: false };
+  }
+}
+
+async function replaceVsCodeGlobal(selectedPetId: string | undefined, commandMode: OpenPetsCommandMode): Promise<AgentSetupActionResult> {
+  void commandMode;
+  try {
+    const configPath = getVsCodeGlobalMcpPath(process.platform, app.getPath("home"), app.getPath("appData"));
+    const mcpVersion = getMcpPackageVersion();
+    const plan = planVsCodeMcpReplace(configPath, { mcpVersion, petId: selectedPetId || undefined, commandMode: "published" });
+    if ("ok" in plan && !plan.ok) {
+      return { ok: false, action: "vscode-replace", message: plan.message, changed: false };
+    }
+    if ("targetPath" in plan) {
+      executeVsCodeMcpWrite(plan);
+      const backupMsg = plan.backupPath ? ` Backup: ${formatUserPath(plan.backupPath) ?? plan.backupPath}.` : "";
+      return { ok: true, action: "vscode-replace", message: `Replaced VS Code OpenPets MCP config at ${formatUserPath(configPath) ?? configPath}.${backupMsg} VS Code may need to be restarted or reloaded.`, changed: true };
+    }
+    return { ok: false, action: "vscode-replace", message: "Failed to plan VS Code MCP replace.", changed: false };
+  } catch (error) {
+    return { ok: false, action: "vscode-replace", message: error instanceof Error ? error.message : "VS Code MCP replace failed.", changed: false };
+  }
+}
+
+async function removeVsCodeGlobal(): Promise<AgentSetupActionResult> {
+  try {
+    const configPath = getVsCodeGlobalMcpPath(process.platform, app.getPath("home"), app.getPath("appData"));
+    const plan = planVsCodeMcpRemove(configPath);
+    if ("ok" in plan && !plan.ok) {
+      return { ok: false, action: "vscode-remove", message: plan.message, changed: false };
+    }
+    if ("targetPath" in plan) {
+      executeVsCodeMcpWrite(plan);
+      return { ok: true, action: "vscode-remove", message: `Removed VS Code OpenPets MCP config at ${formatUserPath(configPath) ?? configPath}. VS Code may need to be restarted or reloaded.`, changed: true };
+    }
+    return { ok: false, action: "vscode-remove", message: "Failed to plan VS Code MCP remove.", changed: false };
+  } catch (error) {
+    return { ok: false, action: "vscode-remove", message: error instanceof Error ? error.message : "VS Code MCP remove failed.", changed: false };
   }
 }
 

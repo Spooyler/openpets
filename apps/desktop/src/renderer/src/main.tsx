@@ -126,7 +126,7 @@ type ControlCenterApi = {
 };
 
 
-type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "doctor-statusline" | "install-statusline" | "uninstall-statusline" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove";
+type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "doctor-statusline" | "install-statusline" | "uninstall-statusline" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove" | "vscode-install" | "vscode-replace" | "vscode-remove";
 type AgentSetupPetOption = { id: string; displayName: string; default: boolean };
 type ClaudeCodeStatus = { state: "detected" | "not_detected" | "configured" | "needs_setup" | "error"; label: string; details: string; claudeCommand?: string; version?: string; mcpListWorks: boolean; openPetsEntry: { present: boolean; verified: boolean; matchesExpected: boolean }; canConfigure: boolean; canReplace: boolean; canRemove: boolean };
 type ClaudeHookDoctorResult = { status: "installed" | "needs_setup" | "error" | "custom" | "conflict"; settingsPath: string; exists: boolean; valid: boolean; message: string; preview: Record<string, unknown>; asyncSupported: boolean; backupPath?: string };
@@ -136,9 +136,11 @@ type OpenCodeSetupStatus = { state: "configured" | "needs_setup" | "not_detected
 type OpenCodeSetupPreview = { global: true; configDir: string; configPath: string; cleanupConfigPaths: string[]; mcpCommand: string[]; plugin: unknown[] | string; instructionPath: string; configPreview: Record<string, unknown> };
 type CursorSetupStatus = { state: "configured" | "needs_setup" | "not_detected" | "error" | "conflict" | "needs_update"; label: string; details: string; configPath: string; canInstall: boolean; canReplace: boolean; canRemove: boolean };
 type CursorSetupPreview = { global: true; configPath: string; mcpEntry: Record<string, unknown>; rulesPath: string; rulesContent: string; commandMode: "published" | "local" | "bundled" };
+type VsCodeSetupStatus = { state: "configured" | "needs_setup" | "not_detected" | "error" | "conflict" | "needs_update"; label: string; details: string; configPath: string; canInstall: boolean; canReplace: boolean; canRemove: boolean };
+type VsCodeSetupPreview = { global: true; configPath: string; mcpEntry: Record<string, unknown>; commandMode: "published" | "local" | "bundled" };
 type AgentSetupCommandPaths = { claude: string; node: string; opencode: string };
 type AgentSetupActionResult = { ok: boolean; action: AgentSetupAction; message: string; changed: boolean };
-type AgentSetupSnapshot = { selectedPetId?: string; commandMode: "published" | "local" | "bundled"; localDevAvailable: boolean; petOptions: AgentSetupPetOption[]; preview: { displayCommand: string; mcpJson: Record<string, unknown> }; status: ClaudeCodeStatus; hookStatus: ClaudeHookDoctorResult; statuslineStatus: ClaudeStatuslineDoctorResult; memoryStatus: ClaudeOpenPetsMemoryStatus; opencodeStatus: OpenCodeSetupStatus; opencodePreview: OpenCodeSetupPreview; cursorStatus: CursorSetupStatus; cursorPreview: CursorSetupPreview; commandPaths: AgentSetupCommandPaths; busy: boolean; lastAction?: AgentSetupActionResult };
+type AgentSetupSnapshot = { selectedPetId?: string; commandMode: "published" | "local" | "bundled"; localDevAvailable: boolean; petOptions: AgentSetupPetOption[]; preview: { displayCommand: string; mcpJson: Record<string, unknown> }; status: ClaudeCodeStatus; hookStatus: ClaudeHookDoctorResult; statuslineStatus: ClaudeStatuslineDoctorResult; memoryStatus: ClaudeOpenPetsMemoryStatus; opencodeStatus: OpenCodeSetupStatus; opencodePreview: OpenCodeSetupPreview; cursorStatus: CursorSetupStatus; cursorPreview: CursorSetupPreview; vscodeStatus: VsCodeSetupStatus; vscodePreview: VsCodeSetupPreview; commandPaths: AgentSetupCommandPaths; busy: boolean; lastAction?: AgentSetupActionResult };
 type StatusTone = keyof typeof statusPillToneClass;
 
 const api = (window as unknown as { openPetsControlCenter: ControlCenterApi }).openPetsControlCenter;
@@ -2298,6 +2300,14 @@ function cursorStatusTone(state: CursorSetupStatus["state"]): StatusTone {
   return "slate";
 }
 
+function vscodeStatusTone(state: VsCodeSetupStatus["state"]): StatusTone {
+  if (state === "configured") return "green";
+  if (state === "error" || state === "conflict") return "red";
+  if (state === "needs_update") return "orange";
+  if (state === "needs_setup") return "blue";
+  return "slate";
+}
+
 function IntegrationsView() {
   const { t } = useI18n();
   const [snapshot, setSnapshot] = useState<AgentSetupSnapshot | null>(null);
@@ -2377,11 +2387,11 @@ function IntegrationsView() {
     { id: "claude", name: t("integrations.claude.name"), icon: "claude", status: snapshot.status.label, tone: claudeStatusTone(snapshot.status.state), description: t("integrations.claude.description") },
     { id: "opencode", name: t("integrations.opencode.name"), icon: "opencode", status: snapshot.opencodeStatus.label, tone: opencodeStatusTone(snapshot.opencodeStatus.state), description: t("integrations.opencode.description") },
     { id: "cursor", name: t("integrations.cursor.name"), icon: "cursor", status: snapshot.cursorStatus.label, tone: cursorStatusTone(snapshot.cursorStatus.state), description: t("integrations.cursor.description") },
+    { id: "vscode", name: t("integrations.vscode.name"), icon: "vscode", status: snapshot.vscodeStatus.label, tone: vscodeStatusTone(snapshot.vscodeStatus.state), description: t("integrations.vscode.description") },
     { id: "pi", name: t("integrations.pi.name"), icon: "pi", status: t("integrations.pi.status"), tone: "blue" satisfies StatusTone, description: t("integrations.pi.description") },
   ] as const;
 
   const soon = [
-    { name: t("integrations.soon.vscode"), icon: "vscode" },
     { name: t("integrations.soon.windsurf"), icon: "windsurf" },
     { name: t("integrations.soon.zed"), icon: "zed" },
   ];
@@ -2413,6 +2423,7 @@ function IntegrationsView() {
                 {item.id === "claude" && snapshot.status.canConfigure && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "configure")}>{t("integrations.install")}</Button>}
                 {item.id === "opencode" && snapshot.opencodeStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "opencode-install")}>{t("integrations.install")}</Button>}
                 {item.id === "cursor" && snapshot.cursorStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "cursor-install")}>{t("integrations.install")}</Button>}
+                {item.id === "vscode" && snapshot.vscodeStatus.canInstall && <Button variant="primary" size="compact" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "vscode-install")}>{t("integrations.install")}</Button>}
                 <Button variant="secondary" size="compact" icon={<ConfigureIcon />} fullWidth={item.id === "pi"} onClick={() => setSelectedId(item.id)}>{item.id === "pi" ? t("integrations.viewSetup") : t("integrations.configure")}</Button>
               </div>
             </div>
@@ -2665,6 +2676,55 @@ function IntegrationsView() {
                     <p className="mt-3 text-xs text-slatecopy">{snapshot.cursorPreview.rulesPath}</p>
                     <pre className="mt-3 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
                       {snapshot.cursorPreview.rulesContent}
+                    </pre>
+                  </details>
+                </>
+              )}
+
+              {selectedId === "vscode" && (
+                <>
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>{t("integrations.connection")}</small><strong>{t("integrations.globalMcp")}</strong></div>
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-stone-50/50 border border-stone-100/50">
+                      <div className="flex flex-col">
+                        <strong className="text-sm text-navy">{snapshot.vscodeStatus.label}</strong>
+                        <small className="text-xs text-slatecopy">{snapshot.vscodeStatus.details}</small>
+                      </div>
+                      <StatusPill tone={vscodeStatusTone(snapshot.vscodeStatus.state)}>{snapshot.vscodeStatus.state}</StatusPill>
+                    </div>
+                    <div className="mt-2">
+                      <label className="text-xs font-bold text-slatecopy uppercase tracking-wider mb-1 block">{t("integrations.petRouting")}</label>
+                      <select
+                        className="settings-select w-full"
+                        value={snapshot.selectedPetId || ""}
+                        onChange={(e) => void load(e.target.value)}
+                        disabled={isBusy}
+                      >
+                        <option value="">{t("integrations.defaultPet")}</option>
+                        {snapshot.petOptions.map(p => <option key={p.id} value={p.id}>{p.displayName}</option>)}
+                      </select>
+                    </div>
+                  </section>
+
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>{t("integrations.actions")}</small><strong>{t("integrations.management")}</strong></div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {snapshot.vscodeStatus.canInstall && <Button variant="primary" icon={<InstallIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.installing"), "vscode-install")}>{t("integrations.installMcp")}</Button>}
+                      {snapshot.vscodeStatus.canReplace && <Button variant="warning" icon={<ReplaceIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.replacing"), "vscode-replace")}>{t("integrations.replaceMcp")}</Button>}
+                      {snapshot.vscodeStatus.canRemove && <Button variant="danger" icon={<RemoveIcon />} disabled={isBusy} onClick={() => run(t("integrations.busy.removing"), "vscode-remove")}>{t("integrations.removeMcp")}</Button>}
+                      <Button variant="secondary" icon={<RefreshIcon />} disabled={isBusy} onClick={() => void load()}>{t("integrations.refreshStatus")}</Button>
+                    </div>
+                  </section>
+
+
+                  <details className="plugin-section group">
+                    <summary className="cursor-pointer list-none flex items-center justify-between">
+                      <div className="plugin-section-title"><small>{t("integrations.advanced")}</small><strong>{t("integrations.mcpEntryPreview")}</strong></div>
+                      <span className="text-brand group-open:rotate-180 transition-transform"><NextIcon /></span>
+                    </summary>
+                    <p className="mt-3 text-xs text-slatecopy">{snapshot.vscodePreview.configPath}</p>
+                    <pre className="mt-3 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
+                      {JSON.stringify({ servers: snapshot.vscodePreview.mcpEntry }, null, 2)}
                     </pre>
                   </details>
                 </>
