@@ -259,14 +259,15 @@ function makeRecorder() {
   });
   const sBound = { sessionKey: "9:i", leaseId: "LI", terminalOwnerPid: 90, terminalWindowId: 9, label: "i" };
   assert.equal(reg.onSessionIdentified(sBound, "fox", false), "fox", "fox bound to w:9");
+  reg.onUserClosedPet("w:10");
   recorded.length = 0;
   assert.equal(reg.assignPetToWindow("w:10", "fox"), false, "target window has no sessions to accept the pet");
   assert.deepEqual(recorded.map((c) => c.fn), [], "no steal, no rebind — validation failed before any mutation");
   assert.equal(reg.petForWindow("w:9"), "fox", "fox's original binding is untouched");
   // If the failed assign had wrongly cleared w:10's user-closed suppression,
-  // this pool draw would instead be suppressed.
+  // this pool draw would succeed instead of staying suppressed.
   const s10 = { sessionKey: "10:j", leaseId: "LJ", terminalOwnerPid: 100, terminalWindowId: 10, label: "j" };
-  assert.equal(reg.onSessionIdentified(s10, undefined, true), "dog", "w:10's user-closed state was not touched by the failed assign");
+  assert.equal(reg.onSessionIdentified(s10, undefined, true), null, "w:10's user-closed suppression was not touched by the failed assign");
 }
 
 console.log("Window pet registry passed.");
