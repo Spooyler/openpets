@@ -5,7 +5,7 @@ import { Notification, shell, systemPreferences } from "electron";
 
 import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, hideAgentPet, isAgentPetDismissed, isAgentPetHidden, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, scheduleFarewellClose, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, setAgentPetUserClosedAccessor, setAgentSessionFocusTargetAccessor, showAgentPet, unhideAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
-import { getAppStateSnapshot, recordOpenPetsActivity } from "./app-state.js";
+import { forgetProjectPet, getAppStateSnapshot, getRememberedProjectPet, recordOpenPetsActivity, rememberProjectPet } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultSessionFocusTargetAccessor, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager, type LeaseSnapshot, type PetLease } from "./lease-manager.js";
@@ -51,6 +51,7 @@ export interface EnrichedSessionSnapshot extends LeaseSnapshot {
   readonly displayPetId?: string;
   readonly displayPetName?: string;
   readonly displayPetOrigin?: "explicit" | "pool";
+  readonly windowKey?: string;
 }
 
 const recentlyDisconnected: DisconnectedSession[] = [];
@@ -162,6 +163,22 @@ const windowPetRegistry = new WindowPetRegistry({
     for (const petId of pool) if (eligible.includes(petId)) return petId;
     return null;
   },
+  resolveRememberedPet: (cwd, occupied) => {
+    const remembered = getRememberedProjectPet(cwd);
+    if (!remembered) return null;
+    const state = getAppStateSnapshot();
+    const eligible = getEligiblePoolPetIds(state.pets.installed, builtInPet.id, getCurrentDefaultPet().id);
+    if (!eligible.includes(remembered)) {
+      // Stale entry (uninstalled / broken / became default) — prune on read.
+      if (cwd) forgetProjectPet(cwd);
+      return null;
+    }
+    if (occupied.has(remembered)) return null; // non-stealing: first window won
+    return remembered;
+  },
+  onPoolPetDrawn: (cwd, petId) => {
+    if (cwd) rememberProjectPet(cwd, petId);
+  },
   storeFactory: () => new NotificationStore({
     policy: (kind) => getAppStateSnapshot().preferences.notificationPolicy?.[kind] ?? "persistent",
   }),
@@ -201,6 +218,23 @@ setAgentPetUserClosedAccessor((petId) => {
 
 /** Tracks requestedPetIds for which we have already shown a fallback warning notification. */
 const warnedFallbackPets = new Set<string>();
+
+/** sessionKey → petIds whose project-memory write already happened. Guards
+ *  lease re-acquires (which re-send the same --pet) from overwriting a newer
+ *  assignment; a NEW pet for the same session (adopt/UI) still writes. */
+const projectMemoryWrites = new Map<string, Set<string>>();
+
+function recordProjectMemoryOnce(sessionKey: string | null, cwd: string | undefined, petId: string): void {
+  if (!sessionKey || !cwd) return;
+  let seen = projectMemoryWrites.get(sessionKey);
+  if (!seen) {
+    seen = new Set();
+    projectMemoryWrites.set(sessionKey, seen);
+  }
+  if (seen.has(petId)) return;
+  seen.add(petId);
+  rememberProjectPet(cwd, petId);
+}
 
 const safePetIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
@@ -539,6 +573,16 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       throw new IpcProtocolError("session_blocked", "Session was disconnected from the UI.");
     }
     const lease = leaseManager.acquire(requestedPetId, clientPid, sessionNonce, cwd);
+    // Project memory: an explicitly-called pet is remembered for this project;
+    // an explicit return-to-default forgets it (spec: tri-state requestedPetId).
+    if (requestedPetId === null && cwd) forgetProjectPet(cwd);
+    if (lease.targetKind === "explicit" && cwd) {
+      recordProjectMemoryOnce(
+        clientPid !== undefined && sessionNonce !== undefined ? `${clientPid}:${sessionNonce}` : null,
+        cwd,
+        lease.actualTargetPetId,
+      );
+    }
     // Spawning now happens when the session's terminal identity resolves (via
     // the registry). Identity can lag a beat, so give an explicit lease a 3s
     // grace: if no window has bound its pet by then and the lease is still live,
@@ -588,7 +632,10 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     }
     const sessionKey = rawLease ? sessionKeyForLease(rawLease) : null;
     const result = leaseManager.release(leaseId);
-    if (sessionKey) windowPetRegistry.onSessionGone(sessionKey);
+    if (sessionKey) {
+      projectMemoryWrites.delete(sessionKey);
+      windowPetRegistry.onSessionGone(sessionKey);
+    }
     return result;
   }
 
@@ -730,7 +777,10 @@ function captureSessionKeysByLeaseId(): Map<string, string> {
  */
 function notifyLeaseGone(lease: { readonly leaseId: string; readonly targetKind: string }, sessionKey: string | null): void {
   if (lease.targetKind === "explicit") unsubscribeConfinement(lease.leaseId);
-  if (sessionKey) windowPetRegistry.onSessionGone(sessionKey);
+  if (sessionKey) {
+    projectMemoryWrites.delete(sessionKey);
+    windowPetRegistry.onSessionGone(sessionKey);
+  }
 }
 
 function cleanupReleasedLeases(
@@ -747,7 +797,10 @@ function releaseExplicitLease(leaseId: string): { readonly released: boolean } {
   const sessionKey = raw ? sessionKeyForLease(raw) : null;
   unsubscribeConfinement(leaseId);
   const result = leaseManager.release(leaseId);
-  if (sessionKey) windowPetRegistry.onSessionGone(sessionKey);
+  if (sessionKey) {
+    projectMemoryWrites.delete(sessionKey);
+    windowPetRegistry.onSessionGone(sessionKey);
+  }
   return result;
 }
 
@@ -767,8 +820,9 @@ function registerIdentifiedSession(leaseId: string): string | null {
       terminalOwnerPid: raw.terminalOwnerPid,
       terminalWindowId: raw.terminalWindowId,
       label: sessionLabelFromCwd(raw.cwd, raw.terminalAppName ?? "session"),
+      cwd: raw.cwd,
     },
-    raw.targetKind === "explicit" ? raw.actualPetId : undefined,
+    raw.targetKind === "explicit" ? raw.actualPetId : raw.requestedPetId === null ? null : undefined,
     getAppStateSnapshot().preferences.petPoolEnabled === true,
   );
 }
@@ -1121,6 +1175,7 @@ export function getSessionsSnapshot(): {
   sessions: readonly EnrichedSessionSnapshot[];
   recentlyDisconnected: readonly DisconnectedSession[];
   pool: { used: number; total: number } | null;
+  assignablePets: ReadonlyArray<{ id: string; displayName: string; inUse: boolean }>;
   serverTime: number;
 } {
   const now = Date.now();
@@ -1163,19 +1218,26 @@ export function getSessionsSnapshot(): {
     const displayPetName = displayPetId ? getPetDisplayName(displayPetId) : undefined;
     const displayPetOrigin = displayPet?.origin;
 
-    return { ...snap, unresolvedNotifications, confinementState, petVisible, petDismissed, canFocus, healthPct, displayPetId, displayPetName, displayPetOrigin };
+    const windowKey = lease.terminalOwnerPid ? windowKeyForIdentity(lease.terminalWindowId, lease.terminalOwnerPid) : undefined;
+
+    return { ...snap, unresolvedNotifications, confinementState, petVisible, petDismissed, canFocus, healthPct, displayPetId, displayPetName, displayPetOrigin, windowKey };
   });
+
+  const boundPets = new Set(windowPetRegistry.boundPetIds());
 
   const poolOrder = state.preferences.petPoolOrder;
   let pool: { used: number; total: number } | null = null;
   if (poolOrder && poolOrder.length > 0) {
     const eligibleSet = new Set(getEligiblePoolPetIds(state.pets.installed, builtInPet.id, state.preferences.defaultPetId));
     const totalSlots = poolOrder.filter(id => eligibleSet.has(id)).length;
-    const usedSlots = poolOrder.filter(id => eligibleSet.has(id) && leaseManager.countExplicitLeases(id) > 0).length;
+    const usedSlots = poolOrder.filter((id) => eligibleSet.has(id) && (boundPets.has(id) || leaseManager.countExplicitLeases(id) > 0)).length;
     pool = { used: usedSlots, total: totalSlots };
   }
 
-  return { sessions, recentlyDisconnected: [...recentlyDisconnected], pool, serverTime: now };
+  const assignableEligible = getEligiblePoolPetIds(state.pets.installed, builtInPet.id, state.preferences.defaultPetId);
+  const assignablePets = assignableEligible.map((id) => ({ id, displayName: getPetDisplayName(id), inUse: boundPets.has(id) }));
+
+  return { sessions, recentlyDisconnected: [...recentlyDisconnected], pool, assignablePets, serverTime: now };
 }
 
 export function releaseSessionFromUi(leaseId: string): boolean {
@@ -1196,7 +1258,10 @@ export function releaseSessionFromUi(leaseId: string): boolean {
   } else {
     const sessionKey = sessionKeyForLease(raw);
     leaseManager.release(leaseId);
-    if (sessionKey) windowPetRegistry.onSessionGone(sessionKey);
+    if (sessionKey) {
+      projectMemoryWrites.delete(sessionKey);
+      windowPetRegistry.onSessionGone(sessionKey);
+    }
   }
   return true;
 }
@@ -1222,5 +1287,38 @@ export function toggleSessionPetVisibility(leaseId: string): boolean {
   } else {
     hideAgentPet(petId);
   }
+  return true;
+}
+
+/** Control-Center: assign petId to a window's binding (null = return to default).
+ *  Writes/clears project memory for every distinct cwd among the window's sessions. */
+export function assignWindowPet(windowKey: string, petId: string | null): boolean {
+  if (petId !== null) {
+    const state = getAppStateSnapshot();
+    const eligible = getEligiblePoolPetIds(state.pets.installed, builtInPet.id, getCurrentDefaultPet().id);
+    if (!eligible.includes(petId)) return false;
+  }
+  if (!windowPetRegistry.assignPetToWindow(windowKey, petId)) return false;
+  for (const lease of leaseManager.getAllRawLeases()) {
+    if (!lease.terminalOwnerPid) continue;
+    if (windowKeyForIdentity(lease.terminalWindowId, lease.terminalOwnerPid) !== windowKey) continue;
+    if (!lease.cwd) continue;
+    const sessionKey = sessionKeyForLease(lease);
+    if (petId === null) {
+      forgetProjectPet(lease.cwd);
+    } else {
+      rememberProjectPet(lease.cwd, petId);
+      // Mark as written so a later --pet re-acquire can't overwrite this choice.
+      if (sessionKey) {
+        let seen = projectMemoryWrites.get(sessionKey);
+        if (!seen) {
+          seen = new Set();
+          projectMemoryWrites.set(sessionKey, seen);
+        }
+        seen.add(petId);
+      }
+    }
+  }
+  info("ipc", "window pet assigned from ui", { windowKey, petId });
   return true;
 }
