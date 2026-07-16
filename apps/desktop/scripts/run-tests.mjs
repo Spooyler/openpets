@@ -68,6 +68,7 @@ const behaviorTests = [
   ".test-dist/tests/scurry-target.test.js",
   ".test-dist/tests/display.test.js",
   ".test-dist/tests/preference-patch.test.js",
+  ".test-dist/tests/project-pet-memory.test.js",
   ".test-dist/tests/plugin-agent-activity.test.js",
   ".test-dist/tests/pet-window-wayland-predicate.test.js",
   ".test-dist/tests/lease-cwd.test.js",

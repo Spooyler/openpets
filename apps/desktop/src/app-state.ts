@@ -12,6 +12,7 @@ import { allowedReactions, type OpenPetsReaction } from "./local-ipc-protocol.js
 import { assertSafePetId, getInstalledPetDir } from "./pet-paths.js";
 import { normalizePetPoolOrder } from "./pet-pool.js";
 import { publishPluginAgentActivity } from "./plugin-events-source.js";
+import { normalizeProjectPath, normalizeProjectPetAssignments, withProjectPetAssignment, withoutProjectPetAssignment } from "./project-pet-memory.js";
 import { normalizeReactionAnimationOverrides, type ReactionAnimationOverrides } from "./reaction-animation-mapping.js";
 
 export { normalizePetPoolOrder } from "./pet-pool.js";
@@ -55,9 +56,13 @@ export interface OpenPetsStateV1 {
     readonly petPoolOrder?: readonly string[];
     /** Master toggle for the ordered pet-pool assignment feature. When false,
      * the pool is ignored entirely and no-pet sessions use the legacy shared default pet,
-     * even if petPoolOrder is configured. Defaults to true. Platform-independent
+     * even if petPoolOrder is configured. Defaults to false. Platform-independent
      * (works on macOS/Windows/Linux). */
     readonly petPoolEnabled: boolean;
+    /** Persisted project→pet memory: normalized project path → petId.
+     * Written when a pet is called (--pet, adopt, Sessions-tab picker, pool draw);
+     * capped at 128 entries, least-recently-written evicted. */
+    readonly projectPetAssignments?: Record<string, string>;
     /** Global toggle for window-confinement. When true (default), session-bound pets are
      * confined to their terminal window. When false, all pets free-roam regardless of
      * whether a terminal window is tracked. Platform-independent. */
@@ -256,6 +261,52 @@ export function setPetPoolOrder(ids: readonly string[]): OpenPetsStateV1 {
   });
   commitState(nextState);
   return getAppStateSnapshot();
+}
+
+export function rememberProjectPet(cwd: string, petId: string): OpenPetsStateV1 {
+  const key = normalizeProjectPath(cwd);
+  if (key === null) return getAppStateSnapshot();
+  const state = getInitializedState();
+  const nextState = normalizeState({
+    ...state,
+    preferences: {
+      ...state.preferences,
+      projectPetAssignments: withProjectPetAssignment(state.preferences.projectPetAssignments, key, petId),
+    },
+  });
+  commitState(nextState);
+  return getAppStateSnapshot();
+}
+
+export function forgetProjectPet(cwd: string): OpenPetsStateV1 {
+  const key = normalizeProjectPath(cwd);
+  if (key === null) return getAppStateSnapshot();
+  const state = getInitializedState();
+  const nextState = normalizeState({
+    ...state,
+    preferences: {
+      ...state.preferences,
+      projectPetAssignments: withoutProjectPetAssignment(state.preferences.projectPetAssignments, key),
+    },
+  });
+  commitState(nextState);
+  return getAppStateSnapshot();
+}
+
+export function clearProjectPetAssignments(): OpenPetsStateV1 {
+  const state = getInitializedState();
+  const nextState = normalizeState({
+    ...state,
+    preferences: { ...state.preferences, projectPetAssignments: undefined },
+  });
+  commitState(nextState);
+  return getAppStateSnapshot();
+}
+
+export function getRememberedProjectPet(cwd: string | undefined): string | undefined {
+  const key = normalizeProjectPath(cwd);
+  if (key === null) return undefined;
+  return getInitializedState().preferences.projectPetAssignments?.[key];
 }
 
 export function setDefaultPetPosition(position: Point): OpenPetsStateV1 {
@@ -606,6 +657,7 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
     petPoolEnabled: typeof value.petPoolEnabled === "boolean"
       ? value.petPoolEnabled
       : defaultState.preferences.petPoolEnabled,
+    projectPetAssignments: normalizeProjectPetAssignments(value.projectPetAssignments),
     petConfinementEnabled: normalizePetConfinementEnabled(value.petConfinementEnabled, defaultState.preferences.petConfinementEnabled),
     petCrossDisplayEnabled: normalizePetCrossDisplayEnabled(value.petCrossDisplayEnabled, defaultState.preferences.petCrossDisplayEnabled),
     petGravityEnabled: normalizePetGravityEnabled(value.petGravityEnabled, defaultState.preferences.petGravityEnabled),
@@ -684,7 +736,8 @@ function createDefaultState(): OpenPetsStateV1 {
       nodeCommandPath: undefined,
       opencodeCommandPath: undefined,
       petPoolOrder: undefined,
-      petPoolEnabled: true,
+      petPoolEnabled: false,
+      projectPetAssignments: undefined,
       petConfinementEnabled: true,
       petCrossDisplayEnabled: false,
       petGravityEnabled: false,
