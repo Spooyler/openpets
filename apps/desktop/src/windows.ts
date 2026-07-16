@@ -6,7 +6,7 @@ import { app, BrowserWindow, dialog, ipcMain, protocol, shell, type IpcMainInvok
 
 import { getAgentSetupSnapshot, runAgentSetupAction, updateAgentSetupCommandPaths } from "./agent-setup.js";
 import { refreshAgentPetContent } from "./agent-pet-controller.js";
-import { getAppStateSnapshot, getDesktopAnalyticsConsentState, normalizePetPoolOrder, petScaleOptions, setDesktopAnalyticsConsent, setPetPoolOrder, updatePreferences } from "./app-state.js";
+import { clearProjectPetAssignments, getAppStateSnapshot, getDesktopAnalyticsConsentState, normalizePetPoolOrder, petScaleOptions, setDesktopAnalyticsConsent, setPetPoolOrder, updatePreferences } from "./app-state.js";
 import { minPetScale, maxPetScale } from "./app-state-core.js";
 import { applyRoamingToAllPets } from "./pet-roaming-controller.js";
 import { classifyAnalyticsError, trackDesktopAnalyticsConsentChanged, trackDesktopEvent } from "./analytics.js";
@@ -28,7 +28,7 @@ import { getPluginService, type PluginConfigSoundPickResult, type PluginServiceR
 import { defaultPetSprite, reactionAnimationMetadata, selectableAnimationMetadata } from "./reaction-animation-mapping.js";
 import { readSafePluginManifest } from "./plugin-manifest-reader.js";
 import { registerPluginAssetProtocol } from "./plugin-asset-protocol.js";
-import { focusSessionTerminal, getSessionsSnapshot, releaseSessionFromUi, toggleSessionPetVisibility } from "./local-ipc.js";
+import { assignWindowPet, focusSessionTerminal, getSessionsSnapshot, releaseSessionFromUi, toggleSessionPetVisibility } from "./local-ipc.js";
 import { checkForGitHubReleaseUpdate, getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 
 type InternalUiWindowKind = "control-center";
@@ -219,6 +219,19 @@ export function installInternalUiHandlers(): void {
     assertAllowedSender(event, ["control-center"]);
     if (typeof leaseId !== "string") throw new Error("Invalid lease ID.");
     return { toggled: toggleSessionPetVisibility(leaseId) };
+  });
+
+  ipcMain.handle("openpets:session-assign-pet", (event, windowKey: unknown, petId: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (typeof windowKey !== "string" || windowKey.length === 0) throw new Error("Invalid window key.");
+    if (petId !== null && typeof petId !== "string") throw new Error("Invalid pet id.");
+    return { assigned: assignWindowPet(windowKey, petId) };
+  });
+
+  ipcMain.handle("openpets:clear-project-pet-assignments", (event) => {
+    assertAllowedSender(event, ["control-center"]);
+    clearProjectPetAssignments();
+    return getSettingsStateSnapshot();
   });
 
   ipcMain.handle("openpets:set-desktop-analytics-consent", (event, consent: unknown) => {
