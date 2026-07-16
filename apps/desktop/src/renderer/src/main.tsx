@@ -642,7 +642,7 @@ function SessionsView() {
                             void api.assignWindowPet(groupKey, v === "" ? null : v).then(() => void load());
                           }}
                         >
-                          <option value="">{groupPetId ? t("sessions.picker.default") : `${t("sessions.picker.default")} — ${groupPetName ?? ""}`.trim()}</option>
+                          <option value="">{t("sessions.picker.default")}</option>
                           {snapshot.assignablePets.map((p) => (
                             <option key={p.id} value={p.id}>
                               {p.inUse && p.id !== groupPetId ? t("sessions.picker.inUse").replace("{name}", p.displayName) : p.displayName}
@@ -1480,6 +1480,23 @@ function SettingsView() {
                     disabled={!settings || !!busy || !(settings?.preferences.petPoolEnabled)}
                     onChangeOrder={updatePetPoolOrder}
                   />
+                </div>
+                <div className="mt-2 flex items-center gap-3">
+                  <Button
+                    variant="secondary"
+                    size="compact"
+                    disabled={!settings || !!busy}
+                    onClick={() => {
+                      void run(t("settings.busy.saving"), async () => {
+                        const next = await api.clearProjectPetAssignments();
+                        setSettings(next);
+                        setMessage(t("settings.toast.memoryCleared"));
+                      });
+                    }}
+                  >
+                    {t("settings.memory.clear")}
+                  </Button>
+                  <span className="text-xs text-slatecopy">{t("settings.memory.description")}</span>
                 </div>
               </div>
 
