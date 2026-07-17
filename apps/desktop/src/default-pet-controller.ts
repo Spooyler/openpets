@@ -22,9 +22,9 @@ let defaultPetWindow: BrowserWindow | null = null;
 // Resolves the focus target of the session the default pet should focus
 // (registered by local-ipc, which owns the lease manager — the import points
 // the other way, so registration avoids a module cycle).
-let sessionTerminalFocusResolver: (() => { terminalOwnerPid: number; terminalWindowId?: number } | null) | null = null;
+let sessionTerminalFocusResolver: (() => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null) | null = null;
 
-export function setSessionTerminalFocusResolver(resolver: () => { terminalOwnerPid: number; terminalWindowId?: number } | null): void {
+export function setSessionTerminalFocusResolver(resolver: () => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
   sessionTerminalFocusResolver = resolver;
 }
 
@@ -32,9 +32,9 @@ export function setSessionTerminalFocusResolver(resolver: () => { terminalOwnerP
 // the window-pet-registry, so clicking a notification row raises the window
 // that actually owns that session (falls back to sessionTerminalFocusResolver
 // above, the default pet's aggregate target).
-let sessionFocusTargetAccessor: ((sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null) | null = null;
+let sessionFocusTargetAccessor: ((sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null) | null = null;
 
-export function setDefaultSessionFocusTargetAccessor(accessor: (sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null): void {
+export function setDefaultSessionFocusTargetAccessor(accessor: (sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
   sessionFocusTargetAccessor = accessor;
 }
 
@@ -44,6 +44,14 @@ let defaultNotificationStoreAccessor: (() => NotificationStore) | null = null;
 
 export function setDefaultNotificationStoreAccessor(accessor: () => NotificationStore): void {
   defaultNotificationStoreAccessor = accessor;
+}
+
+// Injected by local-ipc.ts: reveals the VS Code integrated-terminal tab that
+// owns a lease's terminal, after the desktop window itself is focused.
+let revealTabForLeaseAccessor: ((leaseId: string | undefined) => void) | null = null;
+
+export function setRevealTabForLease(fn: (leaseId: string | undefined) => void): void {
+  revealTabForLeaseAccessor = fn;
 }
 
 function hasFocusableSessionTerminal(): boolean {
@@ -56,9 +64,13 @@ function focusSessionTerminalFromDefaultPet(trigger: string): void {
     debug("pet.default", "focus session window skipped", { trigger, reason: "no-focusable-session" });
     return;
   }
-  focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId).catch((err) => {
-    debug("pet.default", "focus session window failed", { trigger, terminalOwnerPid: target.terminalOwnerPid, error: String(err) });
-  });
+  focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId)
+    .then(() => {
+      revealTabForLeaseAccessor?.(target.leaseId);
+    })
+    .catch((err) => {
+      debug("pet.default", "focus session window failed", { trigger, terminalOwnerPid: target.terminalOwnerPid, error: String(err) });
+    });
 }
 let paused = false;
 let transientDisplay: PetTransientDisplay | null = null;
@@ -377,6 +389,7 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
           if (target) {
             try {
               focused = await focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId);
+              revealTabForLeaseAccessor?.(target?.leaseId);
             } catch (err) {
               debug("pet.default", "focus notification session failed", { sessionKey, terminalOwnerPid: target.terminalOwnerPid, error: String(err) });
             }

@@ -21,7 +21,7 @@ export const allowedReactions = [
 ] as const;
 
 export type OpenPetsReaction = typeof allowedReactions[number];
-export type OpenPetsIpcMethod = "hello" | "status" | "pets.list" | "pets.install" | "lease.acquire" | "lease.heartbeat" | "lease.release" | "pet.react" | "pet.say" | "pets.install-local" | "agent.activity";
+export type OpenPetsIpcMethod = "hello" | "status" | "pets.list" | "pets.install" | "lease.acquire" | "lease.heartbeat" | "lease.release" | "pet.react" | "pet.say" | "pets.install-local" | "agent.activity" | "vscode.wait-focus";
 
 export interface OpenPetsIpcRequest {
   readonly id: string;
@@ -56,7 +56,7 @@ export function parseIpcRequest(raw: string, expectedToken: string): OpenPetsIpc
   if (typeof parsed.id !== "string" || parsed.id.length < 1 || parsed.id.length > 120) throw new IpcProtocolError("invalid_request", "IPC request id is invalid.");
   if (parsed.version !== openPetsIpcVersion) throw new IpcProtocolError("invalid_version", "Unsupported IPC protocol version.");
   if (parsed.token !== expectedToken) throw new IpcProtocolError("invalid_token", "Invalid IPC token.");
-  if (parsed.method !== "hello" && parsed.method !== "status" && parsed.method !== "pets.list" && parsed.method !== "pets.install" && parsed.method !== "lease.acquire" && parsed.method !== "lease.heartbeat" && parsed.method !== "lease.release" && parsed.method !== "pet.react" && parsed.method !== "pet.say" && parsed.method !== "pets.install-local" && parsed.method !== "agent.activity") {
+  if (parsed.method !== "hello" && parsed.method !== "status" && parsed.method !== "pets.list" && parsed.method !== "pets.install" && parsed.method !== "lease.acquire" && parsed.method !== "lease.heartbeat" && parsed.method !== "lease.release" && parsed.method !== "pet.react" && parsed.method !== "pet.say" && parsed.method !== "pets.install-local" && parsed.method !== "agent.activity" && parsed.method !== "vscode.wait-focus") {
     throw new IpcProtocolError("unknown_method", "Unknown IPC method.");
   }
 

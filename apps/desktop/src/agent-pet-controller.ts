@@ -37,19 +37,27 @@ export function setAgentPetStoreAccessor(accessor: (petId: string) => Notificati
 
 // Injected by local-ipc.ts: resolves the focus target for an agent pet from the
 // window-pet-registry (oldest unresolved → freshest activity).
-let focusTargetAccessor: ((petId: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null) | null = null;
+let focusTargetAccessor: ((petId: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null) | null = null;
 
-export function setAgentPetFocusTargetAccessor(accessor: (petId: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null): void {
+export function setAgentPetFocusTargetAccessor(accessor: (petId: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
   focusTargetAccessor = accessor;
 }
 
 // Injected by local-ipc.ts: resolves a specific session's own focus target from
 // the window-pet-registry, so clicking a notification row raises the window
 // that actually owns that session (falls back to focusTargetAccessor above).
-let sessionFocusTargetAccessor: ((sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null) | null = null;
+let sessionFocusTargetAccessor: ((sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null) | null = null;
 
-export function setAgentSessionFocusTargetAccessor(accessor: (sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number } | null): void {
+export function setAgentSessionFocusTargetAccessor(accessor: (sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
   sessionFocusTargetAccessor = accessor;
+}
+
+// Injected by local-ipc.ts: reveals the VS Code integrated-terminal tab that
+// owns a lease's terminal, after the desktop window itself is focused.
+let revealTabForLeaseAccessor: ((leaseId: string | undefined) => void) | null = null;
+
+export function setRevealTabForLease(fn: (leaseId: string | undefined) => void): void {
+  revealTabForLeaseAccessor = fn;
 }
 
 // Injected by local-ipc.ts (which owns the window-pet-registry — the import
@@ -337,9 +345,13 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     const target = focusTargetAccessor?.(petId);
     const focusPid = target?.terminalOwnerPid ?? getConfinementState(petId)?.terminalOwnerPid;
     if (focusPid) {
-      focusTerminalWindow(focusPid, target?.terminalWindowId).catch((err) => {
-        debug("pet.agent", "focus session window failed", { petId, error: String(err) });
-      });
+      focusTerminalWindow(focusPid, target?.terminalWindowId)
+        .then(() => {
+          revealTabForLeaseAccessor?.(target?.leaseId);
+        })
+        .catch((err) => {
+          debug("pet.agent", "focus session window failed", { petId, error: String(err) });
+        });
     }
   };
   const window = createAgentPetWindow({
@@ -373,6 +385,7 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
           if (focusPid) {
             try {
               focused = await focusTerminalWindow(focusPid, target?.terminalWindowId);
+              revealTabForLeaseAccessor?.(target?.leaseId);
             } catch (err) {
               debug("pet.agent", "focus notification session failed", { petId, sessionKey, error: String(err) });
             }

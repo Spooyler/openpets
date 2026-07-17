@@ -57,7 +57,7 @@ assert.equal(registry.storeForPet("cat")?.unresolvedCount(), 0);
 
 // Focus target: oldest unresolved wins, else freshest activity.
 registry.storeForPet("cat")?.record({ sessionKey: "300:n3", windowKey: "w:88", kind: "error", message: "boom", label: "api-fix" });
-assert.deepEqual(registry.focusTargetForPet("cat"), { terminalOwnerPid: 900, terminalWindowId: 88 });
+assert.deepEqual(registry.focusTargetForPet("cat"), { terminalOwnerPid: 900, terminalWindowId: 88, leaseId: "L3" });
 
 // User close: binding gone, heartbeat-driven re-identify does NOT respawn without explicit request.
 calls.length = 0;
@@ -139,7 +139,7 @@ assert.equal((calls[0]!.args as string[])[2], "window-dead");
   assert.equal(registry3.onSessionIdentified(s6, undefined, false), null, "no pool, no explicit → default coverage");
   assert.deepEqual(
     registry3.sessionFocusTarget("600:n6"),
-    { terminalOwnerPid: 111, terminalWindowId: 22 },
+    { terminalOwnerPid: 111, terminalWindowId: 22, leaseId: "L6" },
     "found in default coverage",
   );
 
@@ -147,7 +147,7 @@ assert.equal((calls[0]!.args as string[])[2], "window-dead");
   assert.equal(registry3.onSessionIdentified(s7, "fox", false), "fox");
   assert.deepEqual(
     registry3.sessionFocusTarget("700:n7"),
-    { terminalOwnerPid: 222, terminalWindowId: 33 },
+    { terminalOwnerPid: 222, terminalWindowId: 33, leaseId: "L7" },
     "found in a binding's own sessions, independent of the binding's aggregate target",
   );
 

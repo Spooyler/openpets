@@ -319,14 +319,14 @@ export class WindowPetRegistry {
     return changed;
   }
 
-  focusTargetForPet(petId: string): { terminalOwnerPid: number; terminalWindowId?: number } | null {
+  focusTargetForPet(petId: string): { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null {
     const windowKey = this.windowForPet(petId);
     if (windowKey === null) return null;
     const binding = this.#bindings.get(windowKey)!;
     return this.#focusTarget(binding.store, binding.sessions);
   }
 
-  focusTargetForDefault(): { terminalOwnerPid: number; terminalWindowId?: number } | null {
+  focusTargetForDefault(): { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null {
     return this.#focusTarget(this.defaultStore, this.#defaultSessions);
   }
 
@@ -337,12 +337,16 @@ export class WindowPetRegistry {
    * actually owns that session — not just the aggregate target for the pet,
    * which can differ when a pet's coverage spans multiple terminal windows.
    */
-  sessionFocusTarget(sessionKey: string): { terminalOwnerPid: number; terminalWindowId?: number } | null {
+  sessionFocusTarget(
+    sessionKey: string,
+  ): { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null {
     const parked = this.#defaultSessions.get(sessionKey);
-    if (parked) return { terminalOwnerPid: parked.terminalOwnerPid, terminalWindowId: parked.terminalWindowId };
+    if (parked) {
+      return { terminalOwnerPid: parked.terminalOwnerPid, terminalWindowId: parked.terminalWindowId, leaseId: parked.leaseId };
+    }
     for (const binding of this.#bindings.values()) {
       const info = binding.sessions.get(sessionKey);
-      if (info) return { terminalOwnerPid: info.terminalOwnerPid, terminalWindowId: info.terminalWindowId };
+      if (info) return { terminalOwnerPid: info.terminalOwnerPid, terminalWindowId: info.terminalWindowId, leaseId: info.leaseId };
     }
     return null;
   }
@@ -354,17 +358,17 @@ export class WindowPetRegistry {
   #focusTarget(
     store: NotificationStore,
     sessions: ReadonlyMap<string, TrackedSession>,
-  ): { terminalOwnerPid: number; terminalWindowId?: number } | null {
+  ): { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null {
     const oldest = store.oldestUnresolved();
     if (oldest) {
       const info = sessions.get(oldest.sessionKey);
-      if (info) return { terminalOwnerPid: info.terminalOwnerPid, terminalWindowId: info.terminalWindowId };
+      if (info) return { terminalOwnerPid: info.terminalOwnerPid, terminalWindowId: info.terminalWindowId, leaseId: info.leaseId };
     }
     let best: TrackedSession | null = null;
     for (const info of sessions.values()) {
       if (!best || info.lastActivityAt > best.lastActivityAt) best = info;
     }
-    return best ? { terminalOwnerPid: best.terminalOwnerPid, terminalWindowId: best.terminalWindowId } : null;
+    return best ? { terminalOwnerPid: best.terminalOwnerPid, terminalWindowId: best.terminalWindowId, leaseId: best.leaseId } : null;
   }
 
   #bindExplicit(windowKey: WindowKey, petId: string, session: RegistrySessionInfo): string {

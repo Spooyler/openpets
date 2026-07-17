@@ -3,11 +3,11 @@ import net from "node:net";
 
 import { Notification, shell, systemPreferences } from "electron";
 
-import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, hideAgentPet, isAgentPetDismissed, isAgentPetHidden, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, scheduleFarewellClose, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, setAgentPetUserClosedAccessor, setAgentSessionFocusTargetAccessor, showAgentPet, unhideAgentPet } from "./agent-pet-controller.js";
+import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearAgentPetLeaseState, hideAgentPet, isAgentPetDismissed, isAgentPetHidden, refreshAgentPetBusyBadge, refreshAgentPetNotifications, repositionConfinedPet, scheduleFarewellClose, setAgentPetFocusTargetAccessor, setAgentPetStoreAccessor, setAgentPetUserClosedAccessor, setAgentSessionFocusTargetAccessor, setRevealTabForLease as setAgentRevealTabForLease, showAgentPet, unhideAgentPet } from "./agent-pet-controller.js";
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { forgetProjectPet, getAppStateSnapshot, getRememberedProjectPet, recordOpenPetsActivity, rememberProjectPet } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
-import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultSessionFocusTargetAccessor, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultSessionFocusTargetAccessor, setRevealTabForLease, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager, type LeaseSnapshot, type PetLease } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
@@ -19,6 +19,7 @@ import { isConfinementSupported } from "./capabilities.js";
 import { resolveAndSubscribe, type ConfinementPollerDeps } from "./confinement-poller.js";
 import { findTerminalWindowForPid, getAncestorPidChain, subscribeActiveWindowTracking, subscribeWindowTracking, type TerminalWindowInfo } from "./window-tracker.js";
 import { focusTerminalWindow } from "./terminal-focus.js";
+import { parkWaitFocus, pruneWaitFocus, requestTabReveal } from "./vscode-tab-focus.js";
 import { warnPetFallback } from "./pet-fallback-notify.js";
 import { getEligiblePoolPetIds } from "./pet-pool.js";
 import { t } from "./i18n/index.js";
@@ -196,7 +197,7 @@ setSessionTerminalFocusResolver(() => {
   // Legacy fallback: lease manager's focusable default lease (pre-registry path).
   const lease = leaseManager.getFocusableDefaultLease();
   if (!lease?.terminalOwnerPid) return null;
-  return { terminalOwnerPid: lease.terminalOwnerPid, terminalWindowId: lease.terminalWindowId };
+  return { terminalOwnerPid: lease.terminalOwnerPid, terminalWindowId: lease.terminalWindowId, leaseId: lease.leaseId };
 });
 setDefaultNotificationStoreAccessor(() => windowPetRegistry.defaultStore);
 setAgentPetStoreAccessor((petId) => windowPetRegistry.storeForPet(petId));
@@ -205,6 +206,8 @@ setAgentPetFocusTargetAccessor((petId) => windowPetRegistry.focusTargetForPet(pe
 // aggregate target — a pet's coverage can span multiple terminal windows.
 setAgentSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
 setDefaultSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
+setRevealTabForLease(revealTabForLease);
+setAgentRevealTabForLease(revealTabForLease);
 // Menu "Close pet": route through the registry so the window's sessions drop
 // onto the default pet's flyout, same as any other registry-driven close.
 // Returns false for pets with no registry binding (e.g. plugin-spawned pets),
@@ -360,7 +363,7 @@ function handleSocket(socket: net.Socket, token: string, endpointConfig: IpcEndp
 
     handled = true;
     const raw = buffer.slice(0, newline);
-    void handleRawRequest(raw, token).then((response) => writeResponse(socket, response));
+    void dispatchRawRequest(raw, token, socket);
   });
 
   socket.on("error", (error) => {
@@ -465,6 +468,36 @@ async function handleRawRequest(raw: string, token: string) {
     logError("ipc", "request failed", error instanceof Error ? error : { requestId, error });
     return errorResponse(requestId, error);
   }
+}
+
+async function dispatchRawRequest(raw: string, token: string, socket: net.Socket): Promise<void> {
+  // vscode.wait-focus long-poll: authenticate + park instead of answering.
+  let parsedForPark: OpenPetsIpcRequest | null = null;
+  try {
+    parsedForPark = parseIpcRequest(raw, token);
+  } catch {
+    parsedForPark = null; // fall through to normal path for uniform error responses
+  }
+
+  if (parsedForPark?.method === "vscode.wait-focus") {
+    const request = parsedForPark;
+    trackAgentConnected(request.method);
+    socket.setTimeout(0); // lift the 3s idle destroy — this socket waits by design
+    const park = parkWaitFocus({
+      requestId: request.id,
+      respond: (payload) => writeResponse(socket, okResponse(request.id, payload)),
+    });
+    if (!park.accepted) {
+      writeResponse(socket, okResponse(request.id, { command: null, retryAfterMs: park.retryAfterMs }));
+      return;
+    }
+    socket.once("close", () => pruneWaitFocus(request.id));
+    debug("ipc", "wait-focus parked", { requestId: request.id });
+    return;
+  }
+
+  const response = await handleRawRequest(raw, token);
+  writeResponse(socket, response);
 }
 
 async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
@@ -1290,13 +1323,22 @@ export function releaseSessionFromUi(leaseId: string): boolean {
   return true;
 }
 
+export function revealTabForLease(leaseId: string | undefined): void {
+  if (!leaseId) return;
+  const chain = leaseManager.getRawLease(leaseId)?.clientAncestorPids;
+  if (!chain || chain.length === 0) return;
+  requestTabReveal(chain);
+}
+
 export async function focusSessionTerminal(leaseId: string): Promise<boolean> {
   const raw = leaseManager.getRawLease(leaseId);
   if (!raw) return false;
   const sessionKey = sessionKeyForLease(raw);
   const target = sessionKey ? windowPetRegistry.sessionFocusTarget(sessionKey) : null;
   if (!target) return false;
-  return focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId);
+  const focused = await focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId);
+  revealTabForLease(target.leaseId ?? leaseId);
+  return focused;
 }
 
 export function toggleSessionPetVisibility(leaseId: string): boolean {
