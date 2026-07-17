@@ -136,7 +136,7 @@ type OpenCodeSetupStatus = { state: "configured" | "needs_setup" | "not_detected
 type OpenCodeSetupPreview = { global: true; configDir: string; configPath: string; cleanupConfigPaths: string[]; mcpCommand: string[]; plugin: unknown[] | string; instructionPath: string; configPreview: Record<string, unknown> };
 type CursorSetupStatus = { state: "configured" | "needs_setup" | "not_detected" | "error" | "conflict" | "needs_update"; label: string; details: string; configPath: string; canInstall: boolean; canReplace: boolean; canRemove: boolean };
 type CursorSetupPreview = { global: true; configPath: string; mcpEntry: Record<string, unknown>; rulesPath: string; rulesContent: string; commandMode: "published" | "local" | "bundled" };
-type VsCodeSetupStatus = { state: "configured" | "needs_setup" | "not_detected" | "error" | "conflict" | "needs_update"; label: string; details: string; configPath: string; canInstall: boolean; canReplace: boolean; canRemove: boolean };
+type VsCodeSetupStatus = { state: "configured" | "needs_setup" | "not_detected" | "error" | "conflict" | "needs_update"; label: string; details: string; configPath: string; canInstall: boolean; canReplace: boolean; canRemove: boolean; extensionWindows: number };
 type VsCodeSetupPreview = { global: true; configPath: string; mcpEntry: Record<string, unknown>; commandMode: "published" | "local" | "bundled" };
 type AgentSetupCommandPaths = { claude: string; node: string; opencode: string };
 type AgentSetupActionResult = { ok: boolean; action: AgentSetupAction; message: string; changed: boolean };
@@ -2716,6 +2716,26 @@ function IntegrationsView() {
                     </div>
                   </section>
 
+                  <section className="plugin-section">
+                    <div className="plugin-section-title"><small>{t("integrations.vscode.ext.kicker")}</small><strong>{t("integrations.vscode.ext.title")}</strong></div>
+                    <div className="flex items-center justify-between p-3 rounded-2xl bg-stone-50/50 border border-stone-100/50">
+                      <div className="flex flex-col">
+                        <strong className="text-sm text-navy">
+                          {snapshot.vscodeStatus.extensionWindows > 0
+                            ? t("integrations.vscode.ext.connected", { count: snapshot.vscodeStatus.extensionWindows })
+                            : t("integrations.vscode.ext.notDetected")}
+                        </strong>
+                        <small className="text-xs text-slatecopy">{t("integrations.vscode.ext.description")}</small>
+                      </div>
+                      <StatusPill tone={snapshot.vscodeStatus.extensionWindows > 0 ? "green" : "slate"}>
+                        {snapshot.vscodeStatus.extensionWindows > 0 ? t("integrations.vscode.ext.pill.on") : t("integrations.vscode.ext.pill.off")}
+                      </StatusPill>
+                    </div>
+                    <p className="mt-2 text-xs text-slatecopy">{t("integrations.vscode.ext.sideloadHint")}</p>
+                    <pre className="mt-2 p-3 rounded-xl bg-navy/5 text-[10px] font-mono overflow-x-auto border border-navy/5">
+                      code --install-extension openpets-vscode-0.1.0.vsix
+                    </pre>
+                  </section>
 
                   <details className="plugin-section group">
                     <summary className="cursor-pointer list-none flex items-center justify-between">

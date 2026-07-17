@@ -12,6 +12,7 @@ import { doctorOpenCodeGlobalSetup, getGlobalOpenCodeConfigDir, parseOpenCodeCon
 
 import { getAppStateSnapshot, updatePreferences, type InstalledPetState, type OpenPetsStateV1 } from "./app-state.js";
 import { doctorClaudeOpenPetsMemory, installClaudeOpenPetsMemory, uninstallClaudeOpenPetsMemory, type ClaudeOpenPetsMemoryStatus } from "./claude-memory.js";
+import { parkedWaitFocusCount } from "./vscode-tab-focus.js";
 
 export type AgentSetupAction = "configure" | "replace" | "remove" | "install-memory" | "doctor-hooks" | "install-hooks" | "uninstall-hooks" | "doctor-statusline" | "install-statusline" | "uninstall-statusline" | "opencode-install" | "opencode-remove" | "cursor-install" | "cursor-replace" | "cursor-remove" | "vscode-install" | "vscode-replace" | "vscode-remove";
 export type JournalAction = "configure" | "update" | "replace" | "remove";
@@ -109,6 +110,7 @@ export interface VsCodeSetupStatus {
   readonly canInstall: boolean;
   readonly canReplace: boolean;
   readonly canRemove: boolean;
+  readonly extensionWindows: number;
 }
 
 export interface VsCodeSetupPreview {
@@ -528,6 +530,7 @@ async function getVsCodeSetup(commandMode: OpenPetsCommandMode, selectedPetId: s
       canInstall: statusResult.canInstall,
       canReplace: statusResult.canReplace,
       canRemove: statusResult.canRemove,
+      extensionWindows: parkedWaitFocusCount(),
     },
     preview: {
       global: true,
