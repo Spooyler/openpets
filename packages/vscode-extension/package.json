@@ -1,0 +1,34 @@
+{
+  "name": "openpets-vscode",
+  "displayName": "OpenPets",
+  "description": "Reveal the terminal tab hosting the OpenPets session your pet points at.",
+  "version": "0.1.0",
+  "publisher": "openpets",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alvinunreal/openpets.git",
+    "directory": "packages/vscode-extension"
+  },
+  "type": "module",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.cjs",
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.cjs && esbuild src/check-match.ts --bundle --platform=node --format=esm --external:vscode --outfile=dist/check-match.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node dist/check-match.mjs",
+    "check": "pnpm build && pnpm test",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@open-pets/client": "workspace:*",
+    "@types/node": "^25.6.2",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.3.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^6.0.3"
+  }
+}
