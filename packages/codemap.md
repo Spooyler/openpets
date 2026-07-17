@@ -14,6 +14,7 @@ Provides modular, reusable components for the OpenPets ecosystem:
 - **claude**: Claude Code integration (hook execution, config management)
 - **cursor**: Cursor editor integration (MCP configuration, project rules)
 - **vscode**: VS Code editor integration (user-level MCP configuration)
+- **vscode-extension**: VS Code extension for integrated-terminal tab focus (wait-focus long-poll, PID chain matching)
 - **pi**: Pi coding-agent extension integration (event handling, slash commands)
 - **install-pet**: Standalone pet installer from gallery catalog
 - **sdk**: Public SDK v3 type definitions and deterministic testing harness for plugin authors (SuperPlugins)
@@ -72,6 +73,7 @@ SDK Type definitions & Test Harness (packages/sdk/)
 - `opencode` depends on: `client`, `agent-events`
 - `cursor` depends on: `client`
 - `vscode` has no workspace dependencies (pure config-file management; consumed by `desktop`)
+- `vscode-extension` depends on: `client` (discovery + `sendRequest` for the `vscode.wait-focus` long-poll)
 - `pi` depends on: `client`, `agent-events`
 - `install-pet` depends on: `client`
 - `sdk` (type-only and test harness) is consumed by template code scaffolded by `cli`
@@ -102,3 +104,4 @@ All packages ultimately communicate with the OpenPets desktop app via the IPC pr
 | `pi/` | Pi coding-agent extension integration package. | [View Map](pi/codemap.md) |
 | `sdk/` | Public plugin SDK v3 type surface and test harness. | [View Map](sdk/codemap.md) |
 | `vscode/` | VS Code user-level MCP config integration package. | [View Map](vscode/codemap.md) |
+| `vscode-extension/` | VS Code extension: integrated-terminal tab focus via wait-focus long-poll. | [View Map](vscode-extension/codemap.md) |

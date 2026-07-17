@@ -206,6 +206,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `local-ipc-protocol.ts`: Protocol constants, request/response types, validation functions
 - `local-ipc-paths.ts`: Platform-specific socket paths and discovery file locations
 - `lease-manager.ts`: Lease lifecycle (acquire, heartbeat, release, cleanup), target resolution
+- `vscode-tab-focus.ts`: Parked-request registry for the `vscode.wait-focus` long-poll (`parkWaitFocus`/`pruneWaitFocus`/`requestTabReveal`/`parkedWaitFocusCount`, max 32 parked, 60s keepalive); `local-ipc.ts` parks each connected VS Code extension's request (lifting the idle timeout, pruning on socket close) and `revealTabForLease()` calls `requestTabReveal()` with a lease's `clientAncestorPids` at every focus call-site (`local-ipc.ts`, `default-pet-controller.ts`, `agent-pet-controller.ts`) so all parked windows re-check and the owning one reveals its terminal tab
 
 **Installation**:
 - `pet-installation.ts`: ZIP download, yauzl extraction with safety limits, pet validation
