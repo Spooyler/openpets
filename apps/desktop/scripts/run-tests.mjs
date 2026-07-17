@@ -76,6 +76,7 @@ const behaviorTests = [
   ".test-dist/tests/notification-store.test.js",
   ".test-dist/tests/window-pet-registry.test.js",
   ".test-dist/tests/notification-view.test.js",
+  ".test-dist/tests/vscode-tab-focus.test.js",
 ];
 const contractTests = [
   ".test-dist/contracts/local-ipc-protocol.contract.js",
