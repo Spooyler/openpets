@@ -19,7 +19,19 @@ export const allowedReactions = [
 ] as const;
 
 export type OpenPetsReaction = typeof allowedReactions[number];
-export type OpenPetsIpcMethod = "hello" | "status" | "pets.list" | "pets.install" | "lease.acquire" | "lease.heartbeat" | "lease.release" | "pet.react" | "pet.say" | "pets.install-local" | "agent.activity";
+export type OpenPetsIpcMethod = "hello" | "status" | "pets.list" | "pets.install" | "lease.acquire" | "lease.heartbeat" | "lease.release" | "pet.react" | "pet.say" | "pets.install-local" | "agent.activity" | "vscode.wait-focus";
+
+export interface VsCodeFocusCommandReveal {
+  readonly command: "reveal-terminal";
+  readonly sessionAncestorPids: readonly number[];
+}
+
+export interface VsCodeFocusCommandNone {
+  readonly command: null;
+  readonly retryAfterMs?: number;
+}
+
+export type VsCodeFocusCommand = VsCodeFocusCommandReveal | VsCodeFocusCommandNone;
 
 export interface OpenPetsIpcRequest {
   readonly id: string;

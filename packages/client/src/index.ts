@@ -6,7 +6,7 @@ import { parseIpcEndpoint, readDiscoveryFile, type OpenPetsDiscoveryFile } from 
 import { connectTimeoutMs, maxIpcMessageBytes, openPetsIpcVersion, parseIpcResponse, responseTimeoutMs, validateReaction, OpenPetsClientError, type OpenPetsIpcMethod, type OpenPetsIpcRequest, type OpenPetsReaction } from "./protocol.js";
 
 export { getDiscoveryFilePath, parseIpcEndpoint, readDiscoveryFile, validateDiscovery, validateEndpoint, type OpenPetsDiscoveryFile, type ParsedIpcEndpoint } from "./discovery.js";
-export { allowedReactions, OpenPetsClientError, type OpenPetsReaction } from "./protocol.js";
+export { allowedReactions, OpenPetsClientError, type OpenPetsReaction, type VsCodeFocusCommand, type VsCodeFocusCommandNone, type VsCodeFocusCommandReveal } from "./protocol.js";
 
 /**
  * Stable per-process session nonce, generated once at module load.

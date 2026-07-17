@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { parseIpcEndpoint, validateDiscovery } from "../src/discovery.js";
 import { createOpenPetsClient, parsePetInstallResult, parsePetListResult } from "../src/index.js";
-import { OpenPetsClientError, parseIpcResponse, validateReaction } from "../src/protocol.js";
+import { OpenPetsClientError, parseIpcResponse, validateReaction, type OpenPetsIpcMethod, type VsCodeFocusCommand } from "../src/protocol.js";
 
 const baseDiscovery = {
   protocolVersion: 1,
@@ -110,6 +110,15 @@ assertRejects(() => parsePetInstallResult({ ok: true, petId: "fixer" }));
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// vscode.wait-focus method is part of the protocol union (compile-time) and
+// its result payloads have the documented runtime shape.
+const revealPayload: VsCodeFocusCommand = { command: "reveal-terminal", sessionAncestorPids: [123, 456] };
+const nonePayload: VsCodeFocusCommand = { command: null, retryAfterMs: 5000 };
+assert.equal(revealPayload.command, "reveal-terminal");
+assert.equal(nonePayload.command, null);
+const waitFocusMethod: OpenPetsIpcMethod = "vscode.wait-focus";
+assert.equal(waitFocusMethod, "vscode.wait-focus");
 
 console.log("Client protocol validation passed.");
 
