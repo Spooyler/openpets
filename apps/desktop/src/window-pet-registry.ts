@@ -21,6 +21,7 @@ export interface RegistrySessionInfo {
   readonly terminalWindowId?: number;
   readonly label: string;
   readonly cwd?: string;
+  readonly terminalAppName?: string;
 }
 
 export type PetCloseReason = "window-dead" | "session-ended" | "user-closed" | "rebind" | "pool-disabled";
@@ -273,6 +274,26 @@ export class WindowPetRegistry {
       if (binding.petId === petId) return windowKey;
     }
     return null;
+  }
+
+  /** Windows currently under default coverage (no bound pet), grouped with
+   *  their terminal app name and how many sessions share the window. */
+  defaultCoverageWindows(): ReadonlyArray<{ windowKey: WindowKey; terminalAppName: string; sessionCount: number }> {
+    const groups = new Map<WindowKey, { terminalAppName: string; count: number }>();
+    for (const session of this.#defaultSessions.values()) {
+      const wk = windowKeyForIdentity(session.terminalWindowId, session.terminalOwnerPid);
+      const existing = groups.get(wk);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        groups.set(wk, { terminalAppName: session.terminalAppName ?? session.label, count: 1 });
+      }
+    }
+    return [...groups.entries()].map(([windowKey, g]) => ({
+      windowKey,
+      terminalAppName: g.terminalAppName,
+      sessionCount: g.count,
+    }));
   }
 
   displayPetForSession(sessionKey: string): { petId: string; origin: "explicit" | "pool" } | null {

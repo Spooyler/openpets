@@ -327,4 +327,35 @@ function makeRecorder() {
   assert.equal(reg.onSessionIdentified(sAuto2, undefined, true), "poolpet", "auto-spawn is the default when omitted");
 }
 
+// defaultCoverageWindows: groups default-parked sessions by window, with
+// terminal app name and session count; bound windows are excluded.
+{
+  const { cb } = makeRecorder();
+  const reg = new WindowPetRegistry({ callbacks: cb, isPidAlive: () => true });
+
+  const sA1 = { sessionKey: "40:a1", leaseId: "LA1", terminalOwnerPid: 400, terminalWindowId: 40, label: "proj-a", terminalAppName: "iTerm2" };
+  const sA2 = { sessionKey: "41:a2", leaseId: "LA2", terminalOwnerPid: 400, terminalWindowId: 40, label: "proj-a", terminalAppName: "iTerm2" };
+  const sB1 = { sessionKey: "42:b1", leaseId: "LB1", terminalOwnerPid: 420, terminalWindowId: 42, label: "proj-b", terminalAppName: "Terminal" };
+
+  assert.equal(reg.onSessionIdentified(sA1, undefined, false), null, "parked on default");
+  assert.equal(reg.onSessionIdentified(sA2, undefined, false), null, "parked on default");
+  assert.equal(reg.onSessionIdentified(sB1, undefined, false), null, "parked on default");
+
+  const coverage = reg.defaultCoverageWindows();
+  assert.equal(coverage.length, 2, "2 windows under default coverage");
+  const byKey = new Map(coverage.map((c) => [c.windowKey, c]));
+  assert.deepEqual(byKey.get("w:40"), { windowKey: "w:40", terminalAppName: "iTerm2", sessionCount: 2 });
+  assert.deepEqual(byKey.get("w:42"), { windowKey: "w:42", terminalAppName: "Terminal", sessionCount: 1 });
+
+  // Binding one window to a pet removes it from default coverage.
+  assert.equal(reg.assignPetToWindow("w:40", "fox"), true);
+  const afterBind = reg.defaultCoverageWindows();
+  assert.equal(afterBind.length, 1, "bound window disappears from default coverage");
+  assert.equal(afterBind[0]!.windowKey, "w:42");
+
+  // Binding the remaining window empties default coverage entirely.
+  assert.equal(reg.assignPetToWindow("w:42", "owl"), true);
+  assert.deepEqual(reg.defaultCoverageWindows(), [], "empty default coverage returns empty array");
+}
+
 console.log("Window pet registry passed.");

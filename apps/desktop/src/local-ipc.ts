@@ -981,6 +981,7 @@ function registerIdentifiedSession(leaseId: string): string | null {
       terminalWindowId: raw.terminalWindowId,
       label: sessionLabelFromCwd(raw.cwd, raw.terminalAppName ?? "session"),
       cwd: raw.cwd,
+      terminalAppName: raw.terminalAppName,
     },
     raw.targetKind === "explicit" ? raw.actualPetId : raw.requestedPetId === null ? null : undefined,
     petPoolEnabled === true,
