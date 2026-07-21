@@ -7,7 +7,7 @@ import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearA
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { forgetProjectPet, getAppStateSnapshot, getRememberedProjectPet, recordOpenPetsActivity, rememberProjectPet } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
-import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultSessionFocusTargetAccessor, setRevealTabForLease, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultPetBubbleDismissedHandler, setDefaultSessionFocusTargetAccessor, setRevealTabForLease, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager, type LeaseSnapshot, type PetLease } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
@@ -26,12 +26,15 @@ import { t } from "./i18n/index.js";
 import { WindowPetRegistry, windowKeyForIdentity } from "./window-pet-registry.js";
 import { NotificationStore, sessionLabelFromCwd } from "./notification-store.js";
 import { SessionLiveStatusTracker, type LiveStatus } from "./session-live-status.js";
+import { SpeechBubbleQueue } from "./speech-bubble-queue.js";
 
 let ipcServer: net.Server | null = null;
 let ipcDiscovery: OpenPetsDiscoveryFile | null = null;
 let leaseCleanupTimer: NodeJS.Timeout | null = null;
 let agentConnectedTracked = false;
 const sessionLiveStatus = new SessionLiveStatusTracker();
+/** Queues speech bubbles from concurrent hub-mode sessions targeting the default pet, one visible at a time. */
+const speechBubbleQueue = new SpeechBubbleQueue({ maxDepth: 5 });
 
 /** Snapshot of per-session activity status for the notification flyout, derived from hook reactions. */
 export function getSessionLiveStatuses(): ReadonlyMap<string, LiveStatus> {
@@ -249,6 +252,11 @@ setAgentPetFocusTargetAccessor((petId) => windowPetRegistry.focusTargetForPet(pe
 // aggregate target — a pet's coverage can span multiple terminal windows.
 setAgentSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
 setDefaultSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
+// Advance the speech bubble queue once the currently displayed bubble auto-dismisses.
+setDefaultPetBubbleDismissedHandler((sessionKey) => {
+  const next = speechBubbleQueue.dismiss(sessionKey);
+  if (next) applyExternalPetSay(`${next.label}: ${next.message}`, undefined, next.sessionKey);
+});
 setRevealTabForLease(revealTabForLease);
 setAgentRevealTabForLease(revealTabForLease);
 // Menu "Close pet": route through the registry so the window's sessions drop
@@ -742,6 +750,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       recordSessionNotification(rawLease, kind, message);
       const displayPet = displayPetForLease(rawLease);
       const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
+      if (!displayPet) enqueueUrgentDefaultBubble(rawLease, kind, reaction);
       safeRecordOpenPetsActivity({ kind: "react", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
       trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason });
       return { ok: true, reaction, shown: applied.shown, reason: applied.reason, leaseId: lease.leaseId };
@@ -756,6 +765,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       const displayPet = displayPetForLease(sessionPet);
       debug("ipc", "react routed to session pet", { requestId: request.id, petId: sessionPet.actualPetId, sessionLeaseId: sessionPet.leaseId });
       const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
+      if (!displayPet) enqueueUrgentDefaultBubble(sessionPet, sessionKind, reaction);
       safeRecordOpenPetsActivity({ kind: "react", reaction, petId: displayPet ?? sessionPet.actualPetId, surface: displayPet ? "agent" : "default" });
       trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: "session-routed", shown: applied.shown, reason: applied.reason });
       return { ok: true, reaction, shown: applied.shown, reason: applied.reason };
@@ -766,6 +776,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     recordSessionNotification(rawLease, defaultKind, defaultMessage);
     const displayPet = displayPetForLease(rawLease);
     const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
+    if (!displayPet) enqueueUrgentDefaultBubble(rawLease, defaultKind, reaction);
     safeRecordOpenPetsActivity({ kind: "react", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
     trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason });
     return { ok: true, reaction, shown: applied.shown, reason: applied.reason };
@@ -782,7 +793,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
   if (lease?.targetKind === "explicit") {
     recordSessionNotification(rawLease, reaction ?? "message", message);
     const displayPet = displayPetForLease(rawLease);
-    const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : applyExternalPetSay(message, reaction);
+    const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : sayToDefaultPet(rawLease, message, reaction);
     safeRecordOpenPetsActivity({ kind: "say", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
     trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: lease.targetKind, shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
     return { ok: true, shown: applied.shown, reason: applied.reason, reaction, leaseId: lease.leaseId };
@@ -793,14 +804,14 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     recordSessionNotification(sessionPet, reaction ?? "message", message);
     const displayPet = displayPetForLease(sessionPet);
     debug("ipc", "say routed to session pet", { requestId: request.id, petId: sessionPet.actualPetId, sessionLeaseId: sessionPet.leaseId });
-    const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : applyExternalPetSay(message, reaction);
+    const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : sayToDefaultPet(sessionPet, message, reaction);
     safeRecordOpenPetsActivity({ kind: "say", reaction, petId: displayPet ?? sessionPet.actualPetId, surface: displayPet ? "agent" : "default" });
     trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: "session-routed", shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
     return { ok: true, shown: applied.shown, reason: applied.reason, reaction };
   }
   recordSessionNotification(rawLease, reaction ?? "message", message);
   const displayPet = displayPetForLease(rawLease);
-  const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : applyExternalPetSay(message, reaction);
+  const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : sayToDefaultPet(rawLease, message, reaction);
   safeRecordOpenPetsActivity({ kind: "say", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
   trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: lease?.targetKind ?? "default", shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
   return { ok: true, shown: applied.shown, reason: applied.reason, reaction };
@@ -837,6 +848,35 @@ function getLeaseTarget(value: unknown) {
 /** `${clientPid}:${sessionNonce}` for a lease, or null when either is missing. */
 export function sessionKeyForLease(lease: PetLease): string | null {
   return lease.clientPid && lease.sessionNonce ? `${lease.clientPid}:${lease.sessionNonce}` : null;
+}
+
+/**
+ * Routes a say targeting the default pet through the speech bubble queue, so
+ * concurrent hub-mode sessions get session-labeled, queued bubbles instead of
+ * clobbering each other's message. Anonymous callers (no session key) bypass
+ * the queue entirely, same as before.
+ */
+function sayToDefaultPet(lease: PetLease | null | undefined, message: string, reaction: import("./local-ipc-protocol.js").OpenPetsReaction | undefined): { readonly shown: boolean; readonly reason?: string } {
+  const sessionKey = lease ? sessionKeyForLease(lease) : null;
+  if (!sessionKey) return applyExternalPetSay(message, reaction);
+  const label = sessionLabelFromCwd(lease?.cwd, lease?.terminalAppName ?? "session");
+  const shown = speechBubbleQueue.enqueue(sessionKey, label, message);
+  if (!shown) return { shown: false, reason: "queued" };
+  return applyExternalPetSay(`${shown.label}: ${shown.message}`, reaction, shown.sessionKey);
+}
+
+/**
+ * For hook-mapped urgent reactions (needs-approval / task-failed) targeting
+ * the default pet, enqueues a session-labeled speech bubble alongside the
+ * reaction badge that applyExternalPetReaction already set.
+ */
+function enqueueUrgentDefaultBubble(lease: PetLease | null | undefined, kind: string, reaction: import("./local-ipc-protocol.js").OpenPetsReaction): void {
+  if (kind !== "permission" && kind !== "error") return;
+  const sessionKey = lease ? sessionKeyForLease(lease) : null;
+  if (!sessionKey) return;
+  const label = sessionLabelFromCwd(lease?.cwd, lease?.terminalAppName ?? "session");
+  const shown = speechBubbleQueue.enqueue(sessionKey, label, hookNotificationMessage(kind));
+  if (shown) applyExternalPetSay(`${shown.label}: ${shown.message}`, reaction, shown.sessionKey);
 }
 
 /**

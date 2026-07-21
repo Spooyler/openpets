@@ -54,6 +54,15 @@ export function setRevealTabForLease(fn: (leaseId: string | undefined) => void):
   revealTabForLeaseAccessor = fn;
 }
 
+// Injected by local-ipc.ts: notified when the currently displayed message
+// bubble (tagged with a session key via applyExternalPetSay) auto-dismisses,
+// so the speech bubble queue can advance to the next queued session.
+let bubbleDismissedHandler: ((sessionKey: string) => void) | null = null;
+
+export function setDefaultPetBubbleDismissedHandler(handler: (sessionKey: string) => void): void {
+  bubbleDismissedHandler = handler;
+}
+
 function hasFocusableSessionTerminal(): boolean {
   return sessionTerminalFocusResolver?.() !== null;
 }
@@ -79,6 +88,8 @@ let transientDisplayTimeout: NodeJS.Timeout | null = null;
 let transientAnimationTimeout: NodeJS.Timeout | null = null;
 let statusBadgeTimeout: NodeJS.Timeout | null = null;
 let displayGeneration = 0;
+/** Session key tagging the currently-shown message bubble, if any (see setDefaultPetBubbleDismissedHandler). */
+let currentBubbleSessionKey: string | null = null;
 /** Session keys with an active focus-failure error flash (auto-cleared after 2s). */
 const focusErrorSessions = new Set<string>();
 const busyStatusBadgeMs = 120_000;
@@ -238,13 +249,13 @@ export function applyExternalPetReaction(reaction: OpenPetsReaction, options: Pe
   return { shown: isDefaultPetVisible() };
 }
 
-export function applyExternalPetSay(message: string, reaction?: OpenPetsReaction): { readonly shown: boolean; readonly reason?: string } {
+export function applyExternalPetSay(message: string, reaction?: OpenPetsReaction, sessionKey?: string): { readonly shown: boolean; readonly reason?: string } {
   if (paused) {
     return { shown: false, reason: "paused" };
   }
 
   if (!reaction) clearStatusBadge();
-  setTransientDisplay({ message, reaction });
+  setTransientDisplay({ message, reaction }, sessionKey ?? null);
   showDefaultPetForExternalEvent();
   return { shown: isDefaultPetVisible() };
 }
@@ -434,9 +445,10 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
   return defaultPetWindow;
 }
 
-function setTransientDisplay(display: PetTransientDisplay): void {
+function setTransientDisplay(display: PetTransientDisplay, sessionKey: string | null = null): void {
   debug("pet.default", "transient display set", { reaction: display.reaction, hasMessage: Boolean(display.message), hasReactionMessage: Boolean(display.reactionMessage) });
   displayGeneration++;
+  currentBubbleSessionKey = sessionKey;
   transientDisplay = mergePetTransientDisplay(transientDisplay, { ...display, dismissToken: String(displayGeneration) });
   if (display.reaction) setStatusBadge(display.reaction);
 
@@ -466,7 +478,10 @@ function setTransientDisplay(display: PetTransientDisplay): void {
       clearTimeout(transientAnimationTimeout);
       transientAnimationTimeout = null;
     }
+    const dismissedSessionKey = currentBubbleSessionKey;
+    currentBubbleSessionKey = null;
     refreshDefaultPetContent();
+    if (dismissedSessionKey) bubbleDismissedHandler?.(dismissedSessionKey);
   }, displayDurationMs);
 
   refreshDefaultPetContent();
