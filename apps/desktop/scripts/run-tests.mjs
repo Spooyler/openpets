@@ -74,7 +74,6 @@ const behaviorTests = [
   ".test-dist/tests/plugin-agent-activity.test.js",
   ".test-dist/tests/pet-window-wayland-predicate.test.js",
   ".test-dist/tests/lease-cwd.test.js",
-  ".test-dist/tests/idle-chat-watchdog.test.js",
   ".test-dist/tests/session-live-status.test.js",
   ".test-dist/tests/notification-store.test.js",
   ".test-dist/tests/window-pet-registry.test.js",

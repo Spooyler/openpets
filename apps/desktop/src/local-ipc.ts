@@ -789,13 +789,17 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
   const params = isRecord(request.params) ? request.params : {};
   const message = validateSayMessage(params.message);
   const reaction = params.reaction === undefined ? undefined : validateReaction(params.reaction);
+  const hookEventName = validateHookEventName(params.hookEventName);
   const lease = getLeaseTarget(params.leaseId);
   if (lease) leaseManager.touchActivity(lease.leaseId);
   const rawLease = lease ? leaseManager.getRawLease(lease.leaseId) : null;
   const petId = lease?.actualTargetPetId ?? getCurrentDefaultPet().id;
-  debug("ipc", "pet say requested", { requestId: request.id, reaction, messageLength: message.length, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
+  debug("ipc", "pet say requested", { requestId: request.id, reaction, hookEventName, messageLength: message.length, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
   if (lease?.targetKind === "explicit") {
-    recordSessionNotification(rawLease, reaction ?? "message", message);
+    const rawSessionKey = rawLease ? sessionKeyForLease(rawLease) : null;
+    if (rawSessionKey && reaction) sessionLiveStatus.update(rawSessionKey, reaction);
+    const { kind, message: kindMessage } = reaction ? reactionNotification(reaction, hookEventName) : { kind: "message", message };
+    recordSessionNotification(rawLease, kind, hookEventName ? kindMessage : message);
     const displayPet = displayPetForLease(rawLease);
     const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : sayToDefaultPet(rawLease, message, reaction);
     safeRecordOpenPetsActivity({ kind: "say", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
@@ -805,7 +809,10 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
   const sessionPet = await resolveSessionPetTarget(lease, params);
   if (sessionPet) {
     leaseManager.touchActivity(sessionPet.leaseId);
-    recordSessionNotification(sessionPet, reaction ?? "message", message);
+    const sessionPetKey = sessionKeyForLease(sessionPet);
+    if (sessionPetKey && reaction) sessionLiveStatus.update(sessionPetKey, reaction);
+    const { kind: sessionKind, message: sessionKindMessage } = reaction ? reactionNotification(reaction, hookEventName) : { kind: "message", message };
+    recordSessionNotification(sessionPet, sessionKind, hookEventName ? sessionKindMessage : message);
     const displayPet = displayPetForLease(sessionPet);
     debug("ipc", "say routed to session pet", { requestId: request.id, petId: sessionPet.actualPetId, sessionLeaseId: sessionPet.leaseId });
     const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : sayToDefaultPet(sessionPet, message, reaction);
@@ -813,7 +820,10 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     trackDesktopIntegrationActivity("say", { integration_type: "ipc", target_kind: "session-routed", shown: applied.shown, reason: applied.reason, has_reaction: Boolean(reaction) });
     return { ok: true, shown: applied.shown, reason: applied.reason, reaction };
   }
-  recordSessionNotification(rawLease, reaction ?? "message", message);
+  const defaultSessionKey = rawLease ? sessionKeyForLease(rawLease) : null;
+  if (defaultSessionKey && reaction) sessionLiveStatus.update(defaultSessionKey, reaction);
+  const { kind: defaultKind, message: defaultKindMessage } = reaction ? reactionNotification(reaction, hookEventName) : { kind: "message", message };
+  recordSessionNotification(rawLease, defaultKind, hookEventName ? defaultKindMessage : message);
   const displayPet = displayPetForLease(rawLease);
   const applied = displayPet ? applyAgentPetSay(displayPet, message, reaction) : sayToDefaultPet(rawLease, message, reaction);
   safeRecordOpenPetsActivity({ kind: "say", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
