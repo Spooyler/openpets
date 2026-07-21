@@ -271,7 +271,7 @@ setSummonablePetsAccessor(() => {
     }));
 });
 setSummonPetHandler((windowKey, petId) => {
-  windowPetRegistry.assignPetToWindow(windowKey, petId);
+  assignWindowPet(windowKey, petId);
 });
 // Advance the speech bubble queue once the currently displayed bubble auto-dismisses.
 setDefaultPetBubbleDismissedHandler((sessionKey) => {
