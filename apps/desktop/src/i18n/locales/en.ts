@@ -74,6 +74,8 @@ export const en = {
   "pet.notify.taskComplete": "Task complete",
   "pet.notify.taskFailed": "Task failed",
   "pet.menu.notifications": "Notifications",
+  "pet.menu.summon": "Summon pet",
+  "pet.menu.summon.inUse": "in use",
 
   // --- Confinement / Screen Recording permission (main process) ---
   "confinement.screenPermission.title": "Screen Recording permission needed",

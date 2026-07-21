@@ -50,6 +50,12 @@ export interface DefaultPetWindowOptions extends PetWindowInteractionHooks {
   readonly hasFocusableSessionTerminal?: () => boolean;
   /** Toggles the notifications flyout (menu mirrors the badge-click behavior). */
   readonly onToggleNotifications?: () => void;
+  /** Windows currently under default coverage, for the "Summon pet" submenu. */
+  readonly getSummonTargets?: () => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number }>;
+  /** Installed pets eligible to be summoned into a window. */
+  readonly getSummonablePets?: () => ReadonlyArray<{ id: string; displayName: string; inUse: boolean }>;
+  /** Binds the selected pet to the selected window (Summon pet submenu). */
+  readonly onSummonPet?: (windowKey: string, petId: string) => void;
 }
 
 export interface AgentPetWindowOptions extends PetWindowInteractionHooks {
@@ -179,7 +185,7 @@ export function createDefaultPetWindow(options: DefaultPetWindowOptions, dismiss
   info("pet.window", "default window create", { windowId: window.id, position: options.position, paused: options.paused, hasDisplay: Boolean(options.display), badge: options.badge });
   installMousePassthroughAndDrag(window, options);
   installMotionStatePublisher(window);
-  installPetContextMenu(window, { label: t("pet.menu.hidePet"), click: options.onHideRequested, defaultPet: true, focusSessionWindow: options.onFocusSessionWindow, hasFocusableSessionTerminal: options.hasFocusableSessionTerminal, onToggleNotifications: options.onToggleNotifications });
+  installPetContextMenu(window, { label: t("pet.menu.hidePet"), click: options.onHideRequested, defaultPet: true, focusSessionWindow: options.onFocusSessionWindow, hasFocusableSessionTerminal: options.hasFocusableSessionTerminal, onToggleNotifications: options.onToggleNotifications, getSummonTargets: options.getSummonTargets, getSummonablePets: options.getSummonablePets, onSummonPet: options.onSummonPet });
 
   const savePosition = debounce(() => {
     if (window.isDestroyed()) {
@@ -231,6 +237,12 @@ interface PetContextMenuAction {
   readonly onToggleNotifications?: () => void;
   /** Agent pets only: hides the window while keeping its binding/store alive. */
   readonly onHideRequested?: () => void;
+  /** Default pet only: windows under default coverage, for the "Summon pet" submenu. */
+  readonly getSummonTargets?: () => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number }>;
+  /** Default pet only: installed pets eligible to be summoned into a window. */
+  readonly getSummonablePets?: () => ReadonlyArray<{ id: string; displayName: string; inUse: boolean }>;
+  /** Default pet only: binds the selected pet to the selected window. */
+  readonly onSummonPet?: (windowKey: string, petId: string) => void;
 }
 
 function installPetContextMenu(window: BrowserWindow, action: PetContextMenuAction): void {
@@ -305,8 +317,29 @@ async function buildPetContextMenuTemplate(action: PetContextMenuAction): Promis
     { label: t("pet.menu.openControlCenter"), click: () => openControlCenter("dashboard") },
   );
   if (action.onToggleNotifications) template.push({ label: t("pet.menu.notifications"), click: action.onToggleNotifications });
-  template.push({ label: t("pet.menu.scurry"), click: () => scurryAllPetsToEdge() }, { label: action.label, click: action.click });
+  template.push({ label: t("pet.menu.scurry"), click: () => scurryAllPetsToEdge() });
+  if (action.getSummonTargets) template.push(buildSummonPetMenuItem(action.getSummonTargets(), action.getSummonablePets?.() ?? [], action.onSummonPet));
+  template.push({ label: action.label, click: action.click });
   return template;
+}
+
+function buildSummonPetMenuItem(
+  targets: ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number }>,
+  pets: ReadonlyArray<{ id: string; displayName: string; inUse: boolean }>,
+  onSummonPet: ((windowKey: string, petId: string) => void) | undefined,
+): Electron.MenuItemConstructorOptions {
+  const label = t("pet.menu.summon");
+  if (targets.length === 0 || pets.length === 0) return { label, enabled: false };
+  return {
+    label,
+    submenu: targets.map((target) => ({
+      label: `${target.terminalAppName} (${target.sessionCount} sessions)`,
+      submenu: pets.map((pet) => ({
+        label: pet.inUse ? `${pet.displayName} (${t("pet.menu.summon.inUse")})` : pet.displayName,
+        click: () => onSummonPet?.(target.windowKey, pet.id),
+      })),
+    })),
+  };
 }
 
 async function openPluginCommandForm(command: { readonly pluginId: string; readonly commandId: string; readonly commandTitle: string; readonly form?: PluginCommandForm }): Promise<void> {

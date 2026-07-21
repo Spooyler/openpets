@@ -7,7 +7,7 @@ import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearA
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { forgetProjectPet, getAppStateSnapshot, getRememberedProjectPet, recordOpenPetsActivity, rememberProjectPet } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
-import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultPetBubbleDismissedHandler, setDefaultSessionFocusTargetAccessor, setDefaultWindowFocusTargetAccessor, setRevealTabForLease, setSessionLiveStatusesAccessor, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultPetBubbleDismissedHandler, setDefaultSessionFocusTargetAccessor, setDefaultWindowFocusTargetAccessor, setRevealTabForLease, setSessionLiveStatusesAccessor, setSessionTerminalFocusResolver, setSummonablePetsAccessor, setSummonPetHandler, setSummonTargetsAccessor } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager, type LeaseSnapshot, type PetLease } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
@@ -257,6 +257,22 @@ setDefaultSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFo
 setDefaultWindowFocusTargetAccessor((windowKey) => windowPetRegistry.windowFocusTarget(windowKey));
 // Per-session activity status (thinking/editing/running/...) for the grouped flyout's status dots.
 setSessionLiveStatusesAccessor(() => sessionLiveStatus.all());
+// Windows under default coverage + installed pets, for the default pet's "Summon pet" submenu.
+setSummonTargetsAccessor(() => windowPetRegistry.defaultCoverageWindows());
+setSummonablePetsAccessor(() => {
+  const state = getAppStateSnapshot();
+  const defaultPetId = state.preferences.defaultPetId;
+  return state.pets.installed
+    .filter((pet) => !pet.broken && pet.id !== builtInPet.id && pet.id !== defaultPetId)
+    .map((pet) => ({
+      id: pet.id,
+      displayName: pet.displayName,
+      inUse: windowPetRegistry.windowForPet(pet.id) !== null,
+    }));
+});
+setSummonPetHandler((windowKey, petId) => {
+  windowPetRegistry.assignPetToWindow(windowKey, petId);
+});
 // Advance the speech bubble queue once the currently displayed bubble auto-dismisses.
 setDefaultPetBubbleDismissedHandler((sessionKey) => {
   const next = speechBubbleQueue.dismiss(sessionKey);

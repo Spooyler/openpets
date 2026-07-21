@@ -82,6 +82,29 @@ export function setDefaultPetBubbleDismissedHandler(handler: (sessionKey: string
   bubbleDismissedHandler = handler;
 }
 
+// Injected by local-ipc.ts: windows under default coverage, for the default
+// pet's right-click "Summon pet" submenu.
+let summonTargetsAccessor: (() => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number }>) | null = null;
+
+export function setSummonTargetsAccessor(accessor: () => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number }>): void {
+  summonTargetsAccessor = accessor;
+}
+
+// Injected by local-ipc.ts: installed pets eligible to be summoned into a window.
+let summonablePetsAccessor: (() => ReadonlyArray<{ id: string; displayName: string; inUse: boolean }>) | null = null;
+
+export function setSummonablePetsAccessor(accessor: () => ReadonlyArray<{ id: string; displayName: string; inUse: boolean }>): void {
+  summonablePetsAccessor = accessor;
+}
+
+// Injected by local-ipc.ts: binds the selected pet to the selected window
+// (Summon pet submenu selection).
+let summonPetHandler: ((windowKey: string, petId: string) => void) | null = null;
+
+export function setSummonPetHandler(handler: (windowKey: string, petId: string) => void): void {
+  summonPetHandler = handler;
+}
+
 function hasFocusableSessionTerminal(): boolean {
   return sessionTerminalFocusResolver?.() !== null;
 }
@@ -467,6 +490,9 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
     onFocusSessionWindow: () => focusSessionTerminalFromDefaultPet("context-menu"),
     hasFocusableSessionTerminal,
     onToggleNotifications: toggleDefaultPetNotifications,
+    getSummonTargets: () => summonTargetsAccessor?.() ?? [],
+    getSummonablePets: () => summonablePetsAccessor?.() ?? [],
+    onSummonPet: (windowKey, petId) => summonPetHandler?.(windowKey, petId),
   }, getCurrentDismissToken());
   const windowId = defaultPetWindow.id;
   info("pet.default", "created", { windowId, position, paused, petId: getAppStateSnapshot().preferences.defaultPetId });
