@@ -23,6 +23,7 @@ const behaviorTests = [
   ".test-dist/tests/default-pet-external-show.test.js",
   ".test-dist/tests/onboarding-state.test.js",
   ".test-dist/tests/app-state-notification-policy.test.js",
+  ".test-dist/tests/app-state-assignment.test.js",
   ".test-dist/tests/update-version.test.js",
   ".test-dist/tests/reaction-animation-mapping.test.js",
   ".test-dist/tests/zip-safety.test.js",
@@ -73,10 +74,13 @@ const behaviorTests = [
   ".test-dist/tests/plugin-agent-activity.test.js",
   ".test-dist/tests/pet-window-wayland-predicate.test.js",
   ".test-dist/tests/lease-cwd.test.js",
+  ".test-dist/tests/idle-chat-watchdog.test.js",
+  ".test-dist/tests/session-live-status.test.js",
   ".test-dist/tests/notification-store.test.js",
   ".test-dist/tests/window-pet-registry.test.js",
   ".test-dist/tests/notification-view.test.js",
   ".test-dist/tests/vscode-tab-focus.test.js",
+  ".test-dist/tests/speech-bubble-queue.test.js",
 ];
 const contractTests = [
   ".test-dist/contracts/local-ipc-protocol.contract.js",
