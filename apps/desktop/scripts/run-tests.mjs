@@ -26,6 +26,7 @@ const behaviorTests = [
   ".test-dist/tests/app-state-assignment.test.js",
   ".test-dist/tests/update-version.test.js",
   ".test-dist/tests/reaction-animation-mapping.test.js",
+  ".test-dist/tests/hook-notification-kind.test.js",
   ".test-dist/tests/zip-safety.test.js",
   ".test-dist/tests/codex-pets.test.js",
   ".test-dist/tests/petdex-catalog.test.js",

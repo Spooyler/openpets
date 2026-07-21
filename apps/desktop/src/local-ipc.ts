@@ -19,6 +19,7 @@ import { isConfinementSupported } from "./capabilities.js";
 import { resolveAndSubscribe, type ConfinementPollerDeps } from "./confinement-poller.js";
 import { findTerminalWindowForPid, getAncestorPidChain, subscribeActiveWindowTracking, subscribeWindowTracking, type TerminalWindowInfo } from "./window-tracker.js";
 import { focusTerminalWindow } from "./terminal-focus.js";
+import { hookNotificationMessage, notificationKindForHookEvent } from "./hook-notification-kind.js";
 import { parkWaitFocus, pruneWaitFocus, requestTabReveal } from "./vscode-tab-focus.js";
 import { warnPetFallback } from "./pet-fallback-notify.js";
 import { getEligiblePoolPetIds, resolvePoolAssignment, resolveRandomPoolAssignment } from "./pet-pool.js";
@@ -39,30 +40,6 @@ const speechBubbleQueue = new SpeechBubbleQueue({ maxDepth: 5 });
 /** Snapshot of per-session activity status for the notification flyout, derived from hook reactions. */
 export function getSessionLiveStatuses(): ReadonlyMap<string, LiveStatus> {
   return sessionLiveStatus.all();
-}
-
-/**
- * High-value Claude hook events mapped to a distinct notification kind. The
- * hook event name (not the reaction) drives this: a manual `openpets_react`
- * MCP call carries no hookEventName, so it can never masquerade as one of
- * these — only a real Claude hook firing PermissionRequest/Stop/StopFailure
- * produces the "Needs approval" / "Task complete" / "Task failed" wording.
- */
-const hookEventToNotificationKind: Record<string, string> = {
-  PermissionRequest: "permission",
-  Stop: "complete",
-  StopFailure: "error",
-};
-
-function notificationKindForHookEvent(hookEventName: string | undefined): string | undefined {
-  return hookEventName ? hookEventToNotificationKind[hookEventName] : undefined;
-}
-
-function hookNotificationMessage(kind: string): string {
-  if (kind === "permission") return t("pet.notify.needsApproval");
-  if (kind === "complete") return t("pet.notify.taskComplete");
-  if (kind === "error") return t("pet.notify.taskFailed");
-  return kind;
 }
 
 /** Kind + message for a pet.react notification row: hook-mapped events get the
