@@ -13,9 +13,10 @@ import { publishPluginPetEvent } from "./plugin-events-source.js";
 import { reclampAgentPetWindows } from "./agent-pet-controller.js";
 import { reclampPluginPetWindows } from "./plugin-pet-registry.js";
 import { focusTerminalWindow } from "./terminal-focus.js";
-import { buildNotificationsView, type PetNotificationsView } from "./notification-view.js";
+import { buildGroupedNotificationsView, type GroupedNotificationsView } from "./notification-view.js";
 import { t } from "./i18n/index.js";
 import type { NotificationStore } from "./notification-store.js";
+import type { LiveStatus } from "./session-live-status.js";
 
 let defaultPetWindow: BrowserWindow | null = null;
 
@@ -36,6 +37,24 @@ let sessionFocusTargetAccessor: ((sessionKey: string) => { terminalOwnerPid: num
 
 export function setDefaultSessionFocusTargetAccessor(accessor: (sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
   sessionFocusTargetAccessor = accessor;
+}
+
+// Injected by local-ipc.ts: resolves a focus target for any live session under
+// a windowKey, so clicking a group header in the grouped flyout raises that
+// whole terminal window (falls back to nothing when the window has gone away).
+let windowFocusTargetAccessor: ((windowKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null) | null = null;
+
+export function setDefaultWindowFocusTargetAccessor(accessor: (windowKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
+  windowFocusTargetAccessor = accessor;
+}
+
+// Injected by local-ipc.ts to avoid a module cycle (same pattern as
+// defaultNotificationStoreAccessor below): per-session activity status for
+// the grouped flyout's status dots.
+let sessionLiveStatusesAccessor: (() => ReadonlyMap<string, LiveStatus>) | null = null;
+
+export function setSessionLiveStatusesAccessor(accessor: () => ReadonlyMap<string, LiveStatus>): void {
+  sessionLiveStatusesAccessor = accessor;
 }
 
 // Injected by local-ipc.ts to avoid a module cycle (same pattern as
@@ -199,12 +218,13 @@ export function getDefaultPetWindowForPlugins(): BrowserWindow | null {
   return defaultPetWindow && !defaultPetWindow.isDestroyed() ? defaultPetWindow : null;
 }
 
-function getDefaultNotificationsView(): PetNotificationsView | null {
+function getDefaultNotificationsView(): GroupedNotificationsView | null {
   const store = defaultNotificationStoreAccessor?.();
   if (!store) return null;
   const entries = store.rows();
   if (entries.length === 0 && !defaultNotificationsOpen) return null;
-  return buildNotificationsView(entries, defaultNotificationsOpen, Date.now(), t as (key: string, vars?: Record<string, string | number>) => string, focusErrorSessions.size > 0 ? focusErrorSessions : undefined);
+  const liveStatuses = sessionLiveStatusesAccessor?.() ?? new Map<string, LiveStatus>();
+  return buildGroupedNotificationsView(entries, defaultNotificationsOpen, Date.now(), t as (key: string, vars?: Record<string, string | number>) => string, liveStatuses, focusErrorSessions.size > 0 ? focusErrorSessions : undefined);
 }
 
 /** Toggle the notifications flyout (shared by the badge click and the right-click menu item). */
@@ -418,6 +438,20 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
             }, 2_000);
           }
           refreshDefaultPetNotifications();
+        }
+      }
+      if (name === "pet:groupHeaderFocus") {
+        const windowKey = String((payload as Record<string, unknown>).windowKey ?? "");
+        if (windowKey) {
+          const target = windowFocusTargetAccessor?.(windowKey) ?? null;
+          if (target) {
+            try {
+              const focused = await focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId);
+              if (focused) revealTabForLeaseAccessor?.(target.leaseId);
+            } catch (err) {
+              debug("pet.default", "focus group header failed", { windowKey, terminalOwnerPid: target.terminalOwnerPid, error: String(err) });
+            }
+          }
         }
       }
       if (name === "pet:notificationDismiss") {

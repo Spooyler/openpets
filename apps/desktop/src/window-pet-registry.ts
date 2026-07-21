@@ -369,6 +369,25 @@ export class WindowPetRegistry {
     return null;
   }
 
+  /**
+   * Resolve a focus target for any live session under windowKey — used by the
+   * default pet's grouped notification flyout to focus a whole terminal window
+   * from its group header, regardless of whether that window is currently
+   * bound to an agent pet or still under default coverage.
+   */
+  windowFocusTarget(windowKey: WindowKey): { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null {
+    const binding = this.#bindings.get(windowKey);
+    if (binding) return this.#focusTarget(binding.store, binding.sessions);
+    const defaultMatches = new Map<string, TrackedSession>();
+    for (const [sessionKey, session] of this.#defaultSessions) {
+      if (windowKeyForIdentity(session.terminalWindowId, session.terminalOwnerPid) === windowKey) {
+        defaultMatches.set(sessionKey, session);
+      }
+    }
+    if (defaultMatches.size === 0) return null;
+    return this.#focusTarget(this.defaultStore, defaultMatches);
+  }
+
   boundPetIds(): readonly string[] {
     const ids = [...this.#bindings.values()].map((binding) => binding.petId);
     for (const dormant of this.#dormantBindings.values()) ids.push(dormant.petId);

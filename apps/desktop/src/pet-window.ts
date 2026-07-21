@@ -18,8 +18,8 @@ import type { PluginBubbleIndicator, PluginCommandForm, PluginBubbleHud, PluginB
 import { defaultPetSprite, motionToSpriteState, resolveReactionSpriteState, type PetMotionState, type UniversalSpriteState } from "./reaction-animation-mapping.js";
 import { isFocusActionAvailable } from "./capabilities.js";
 import { computeEffectiveWaylandBackend, shouldPetWindowBeFocusable } from "./wayland-backend.js";
-import type { PetNotificationsView } from "./notification-view.js";
-import { createNotificationsMarkup, notificationsCacheKey } from "./notification-view.js";
+import type { GroupedNotificationsView, PetNotificationsView } from "./notification-view.js";
+import { createGroupedNotificationsMarkup, createNotificationsMarkup, groupedNotificationsCacheKey, notificationsCacheKey } from "./notification-view.js";
 import { scurryAllPetsToEdge } from "./pet-roaming-controller.js";
 
 export interface PetWindowInteractionHooks {
@@ -100,6 +100,22 @@ interface PetContentRender {
   readonly bodyHtml: string;
   readonly reactionState: UniversalSpriteState;
   readonly cacheKey: string;
+}
+
+/** The default pet renders a window-grouped flyout; agent pets keep the flat one (single-window coverage). */
+export type AnyNotificationsView = PetNotificationsView | GroupedNotificationsView;
+
+function isGroupedNotificationsView(view: AnyNotificationsView): view is GroupedNotificationsView {
+  return "groups" in view;
+}
+
+function anyNotificationsCacheKey(view: AnyNotificationsView | null | undefined): string {
+  if (!view) return "n:none";
+  return isGroupedNotificationsView(view) ? groupedNotificationsCacheKey(view) : notificationsCacheKey(view);
+}
+
+function createAnyNotificationsMarkup(view: AnyNotificationsView, t: (key: string, vars?: Record<string, string | number>) => string): { badge: string; flyout: string } {
+  return isGroupedNotificationsView(view) ? createGroupedNotificationsMarkup(view, t) : createNotificationsMarkup(view, t);
 }
 
 const petWindowRenderCache = new WeakMap<BrowserWindow, string>();
@@ -594,7 +610,7 @@ function installMousePassthroughAndDrag(window: BrowserWindow, hooks: PetWindowI
     onBubbleSubmit?.(dismissToken, out);
   };
 
-  const allowedPetEventNames = new Set(["pet:clicked", "pet:doubleClicked", "pet:hover", "pet:drop", "pet:notificationsToggle", "pet:notificationFocus", "pet:notificationDismiss"]);
+  const allowedPetEventNames = new Set(["pet:clicked", "pet:doubleClicked", "pet:hover", "pet:drop", "pet:notificationsToggle", "pet:notificationFocus", "pet:notificationDismiss", "pet:groupHeaderFocus"]);
   const handlePetEvent = (event: IpcMainEvent, name: unknown, payload: unknown): void => {
     if (!isFromWindow(event)) return;
     if (typeof name !== "string" || !allowedPetEventNames.has(name)) return;
@@ -759,7 +775,7 @@ function applyPetAlwaysOnTop(window: BrowserWindow): void {
   }
 }
 
-export async function loadDefaultPetContent(window: BrowserWindow, paused: boolean, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null, notifications: PetNotificationsView | null = null): Promise<void> {
+export async function loadDefaultPetContent(window: BrowserWindow, paused: boolean, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null, notifications: AnyNotificationsView | null = null): Promise<void> {
   const sequence = allocateWindowLoadSequence(window);
   debug("pet.window", "default content render begin", { windowId: window.id, sequence, paused, hasDisplay: Boolean(display), reaction: display?.reaction, hasMessage: Boolean(display?.message), badge, hasPluginBubble: Boolean(pluginBubbles?.transient), hasPinned: Boolean(pluginBubbles?.pinned), defaultPetId: getAppStateSnapshot().preferences.defaultPetId });
   applyPetWindowFocusPolicy(window, petPluginBubblesHaveInteractiveInput(pluginBubbles) || Boolean(notifications?.open));
@@ -774,7 +790,7 @@ export async function loadDefaultPetContent(window: BrowserWindow, paused: boole
   });
 }
 
-export async function loadExplicitPetContent(window: BrowserWindow, petId: string, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null, dismissToken?: string, scaleOverride?: PetScaleValue, pluginBubbles: PetPluginBubbles | null = null, notifications: PetNotificationsView | null = null): Promise<void> {
+export async function loadExplicitPetContent(window: BrowserWindow, petId: string, display: PetTransientDisplay | null = null, badge: PetStatusBadgeReaction | null = null, dismissToken?: string, scaleOverride?: PetScaleValue, pluginBubbles: PetPluginBubbles | null = null, notifications: AnyNotificationsView | null = null): Promise<void> {
   const sequence = allocateWindowLoadSequence(window);
   try {
     applyPetWindowFocusPolicy(window, petPluginBubblesHaveInteractiveInput(pluginBubbles) || Boolean(notifications?.open));
@@ -944,7 +960,7 @@ function applyLinuxPetWindowShape(window: BrowserWindow, scale: PetScaleValue, h
   }
 }
 
-async function createDefaultPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null, notifications: PetNotificationsView | null = null): Promise<PetContentRender> {
+async function createDefaultPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null, notifications: AnyNotificationsView | null = null): Promise<PetContentRender> {
   const installedPetRender = await tryCreateInstalledPetRender(paused, display, badge, dismissToken, pluginBubbles, notifications);
   if (installedPetRender) {
     return installedPetRender;
@@ -952,7 +968,7 @@ async function createDefaultPetRender(paused: boolean, display: PetTransientDisp
 
   const spriteUrl = pathToFileURL(join(app.getAppPath(), "assets", defaultPetSprite.fileName)).toString();
   const hasPinned = Boolean(pluginBubbles?.pinned);
-  const notify = notifications ? createNotificationsMarkup(notifications, t as (key: string, vars?: Record<string, string | number>) => string) : { badge: "", flyout: "" };
+  const notify = notifications ? createAnyNotificationsMarkup(notifications, t as (key: string, vars?: Record<string, string | number>) => string) : { badge: "", flyout: "" };
   const bubbleMarkup = notifications?.open ? "" : createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles);
   const bodyHtml = createPetBodyMarkup("OpenPets default pet", bubbleMarkup, `<div class="sprite" role="img" aria-label="Claude animated default pet"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, notify.badge, notify.flyout);
   const reactionState = getReactionSpriteState(display?.reaction);
@@ -960,7 +976,7 @@ async function createDefaultPetRender(paused: boolean, display: PetTransientDisp
   const scale = getAppStateSnapshot().preferences.petScale as PetScaleValue;
 
   return {
-    cacheKey: `default:builtin:${paused}:${scale}:${getActiveLocale()}:${notificationsCacheKey(notifications)}`,
+    cacheKey: `default:builtin:${paused}:${scale}:${getActiveLocale()}:${anyNotificationsCacheKey(notifications)}`,
     bodyHtml,
     reactionState,
     html: `<!doctype html>
@@ -1002,7 +1018,7 @@ async function createDefaultPetRender(paused: boolean, display: PetTransientDisp
   };
 }
 
-async function tryCreateInstalledPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null, notifications: PetNotificationsView | null = null): Promise<PetContentRender | null> {
+async function tryCreateInstalledPetRender(paused: boolean, display: PetTransientDisplay | null, badge: PetStatusBadgeReaction | null, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null, notifications: AnyNotificationsView | null = null): Promise<PetContentRender | null> {
   const state = getAppStateSnapshot();
   const selected = state.pets.installed.find((pet) => pet.id === state.preferences.defaultPetId);
 
@@ -1023,7 +1039,7 @@ async function tryCreateInstalledPetRender(paused: boolean, display: PetTransien
   }
 }
 
-async function createInstalledPetRender(petId: string, displayName: string, paused: boolean, display: PetTransientDisplay | null, scale: PetScaleValue, badge: PetStatusBadgeReaction | null, cachePrefix: string, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null, notifications: PetNotificationsView | null = null): Promise<PetContentRender> {
+async function createInstalledPetRender(petId: string, displayName: string, paused: boolean, display: PetTransientDisplay | null, scale: PetScaleValue, badge: PetStatusBadgeReaction | null, cachePrefix: string, dismissToken?: string, pluginBubbles: PetPluginBubbles | null = null, notifications: AnyNotificationsView | null = null): Promise<PetContentRender> {
   const spritesheetPath = join(getInstalledPetDir(petId), "spritesheet.webp");
   const spritesheet = await stat(spritesheetPath);
   if (!spritesheet.isFile() || spritesheet.size <= 0 || spritesheet.size > 100 * 1024 * 1024) {
@@ -1032,14 +1048,14 @@ async function createInstalledPetRender(petId: string, displayName: string, paus
 
   const imageUrl = pathToFileURL(spritesheetPath).toString();
   const hasPinned = Boolean(pluginBubbles?.pinned);
-  const notify = notifications ? createNotificationsMarkup(notifications, t as (key: string, vars?: Record<string, string | number>) => string) : { badge: "", flyout: "" };
+  const notify = notifications ? createAnyNotificationsMarkup(notifications, t as (key: string, vars?: Record<string, string | number>) => string) : { badge: "", flyout: "" };
   const bubbleMarkup = notifications?.open ? "" : createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles);
   const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), bubbleMarkup, `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, notify.badge, notify.flyout);
   const reactionState = getReactionSpriteState(display?.reaction);
   const stateRows = defaultPetSprite.states;
 
   return {
-    cacheKey: `${cachePrefix}:${paused}:${scale}:${spritesheet.mtimeMs}:${spritesheet.size}:${getActiveLocale()}:${notificationsCacheKey(notifications)}`,
+    cacheKey: `${cachePrefix}:${paused}:${scale}:${spritesheet.mtimeMs}:${spritesheet.size}:${getActiveLocale()}:${anyNotificationsCacheKey(notifications)}`,
     bodyHtml,
     reactionState,
     html: `<!doctype html>
@@ -1305,11 +1321,11 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .notify-badge { position: absolute; top: -4px; right: -4px; z-index: 10; min-width: 20px; height: 20px; padding: 0 5px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-radius: 999px; background: #176df2; color: #fff; font: 900 11px/20px Inter, ui-sans-serif, system-ui, sans-serif; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; box-shadow: 0 2px 6px rgba(23, 109, 242, 0.4); animation: badge-in 180ms cubic-bezier(0.2, 0, 0, 1); }
     @keyframes badge-in { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
     .notify-flyout { position: absolute; left: 50%; bottom: ${bubbleBottom}px; z-index: 5; width: 300px; max-height: 240px; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; padding: 6px 0; background: linear-gradient(135deg, rgba(255, 255, 255, 0.97), rgba(248, 250, 252, 0.95)); border: 1px solid rgba(255, 255, 255, 0.78); border-radius: 14px; box-shadow: 0 12px 24px rgba(15, 23, 42, 0.16), 0 2px 5px rgba(15, 23, 42, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.82); transform: translateX(-50%); pointer-events: auto; -webkit-app-region: no-drag; animation: bubble-in 180ms cubic-bezier(0.2, 0, 0, 1); }
-    .notify-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; cursor: default; opacity: 0.6; font: 700 10.5px/13px Inter, ui-sans-serif, system-ui, sans-serif; color: #475569; transition: opacity 120ms ease, background 120ms ease; }
+    .notify-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; cursor: pointer; opacity: 0.6; font: 700 10.5px/13px Inter, ui-sans-serif, system-ui, sans-serif; color: #475569; transition: opacity 120ms ease, background 120ms ease; }
     .notify-row.is-unresolved { opacity: 1; color: #172033; }
     .notify-row.is-error { background: rgba(220,38,38,0.12); animation: error-flash 2s ease-out forwards; }
     @keyframes error-flash { from { background: rgba(220,38,38,0.12); } to { background: transparent; } }
-    .notify-row:hover { background: rgba(30, 58, 138, 0.06); }
+    .notify-row:hover { background: rgba(30, 58, 138, 0.10); }
     .notify-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 999px; background: transparent; }
     .notify-row.is-unresolved .notify-dot { background: #176df2; animation: notify-pulse 1.6s ease-in-out infinite; }
     @keyframes notify-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }

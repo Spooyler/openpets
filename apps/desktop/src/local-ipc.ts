@@ -7,7 +7,7 @@ import { applyAgentPetReaction, applyAgentPetSay, clearAgentPetDismissal, clearA
 import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActivity } from "./analytics.js";
 import { forgetProjectPet, getAppStateSnapshot, getRememberedProjectPet, recordOpenPetsActivity, rememberProjectPet } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
-import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultPetBubbleDismissedHandler, setDefaultSessionFocusTargetAccessor, setRevealTabForLease, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
+import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultPetBubbleDismissedHandler, setDefaultSessionFocusTargetAccessor, setDefaultWindowFocusTargetAccessor, setRevealTabForLease, setSessionLiveStatusesAccessor, setSessionTerminalFocusResolver } from "./default-pet-controller.js";
 import { createStaleLeaseStatus, LeaseManager, type LeaseSnapshot, type PetLease } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
@@ -252,6 +252,10 @@ setAgentPetFocusTargetAccessor((petId) => windowPetRegistry.focusTargetForPet(pe
 // aggregate target — a pet's coverage can span multiple terminal windows.
 setAgentSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
 setDefaultSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
+// Group header focus: raise the whole terminal window for a grouped-flyout header click.
+setDefaultWindowFocusTargetAccessor((windowKey) => windowPetRegistry.windowFocusTarget(windowKey));
+// Per-session activity status (thinking/editing/running/...) for the grouped flyout's status dots.
+setSessionLiveStatusesAccessor(() => sessionLiveStatus.all());
 // Advance the speech bubble queue once the currently displayed bubble auto-dismisses.
 setDefaultPetBubbleDismissedHandler((sessionKey) => {
   const next = speechBubbleQueue.dismiss(sessionKey);

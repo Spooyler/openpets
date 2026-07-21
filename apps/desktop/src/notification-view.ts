@@ -105,6 +105,12 @@ export function notificationsCacheKey(view: PetNotificationsView | null | undefi
   return `n:${view.open}:${view.unresolvedCount}:${rowKeys}`;
 }
 
+export function groupedNotificationsCacheKey(view: GroupedNotificationsView | null | undefined): string {
+  if (!view) return "n:none";
+  const groupKeys = view.groups.map((g) => `${g.windowKey}:${g.rows.map((r) => `${r.sessionKey}:${r.state}:${r.ageText}:${r.liveStatus}${r.error ? ":err" : ""}`).join(",")}`).join("|");
+  return `n:${view.open}:${view.unresolvedCount}:${groupKeys}`;
+}
+
 /** Max rows rendered across all groups in the window-grouped flyout. */
 const MAX_GROUPED_ROWS = 50;
 

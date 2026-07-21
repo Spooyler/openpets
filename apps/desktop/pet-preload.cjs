@@ -161,14 +161,15 @@ const installPetSenses = () => {
       sendPetEvent("pet:notificationsToggle", {});
       return;
     }
-    if (!target.closest(".pet-hitbox, .pet-shell")) return;
-    if (Date.now() < suppressClickUntil) return;
-    sendPetEvent("pet:clicked", {});
-  });
-  document.addEventListener("dblclick", (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    // Row double-click sends notificationFocus INSTEAD of pet:doubleClicked.
+    // Group header click focuses the whole terminal window (grouped flyout).
+    const groupHeader = target.closest(".notify-group-header");
+    if (groupHeader) {
+      event.preventDefault();
+      event.stopPropagation();
+      sendPetEvent("pet:groupHeaderFocus", { windowKey: groupHeader.dataset.windowKey });
+      return;
+    }
+    // Row click focuses the session's terminal.
     const row = target.closest("[data-notify-row]");
     if (row) {
       event.preventDefault();
@@ -176,6 +177,13 @@ const installPetSenses = () => {
       sendPetEvent("pet:notificationFocus", { sessionKey: row.dataset.sessionKey });
       return;
     }
+    if (!target.closest(".pet-hitbox, .pet-shell")) return;
+    if (Date.now() < suppressClickUntil) return;
+    sendPetEvent("pet:clicked", {});
+  });
+  document.addEventListener("dblclick", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
     if (!target.closest(".pet-hitbox, .pet-shell")) return;
     sendPetEvent("pet:doubleClicked", {});
   });
