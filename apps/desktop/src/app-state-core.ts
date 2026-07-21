@@ -73,6 +73,37 @@ export function normalizePetGravityEnabled(value: unknown, defaultValue = false)
 }
 
 /**
+ * Normalize the sessionAssignment preference value.
+ * Default is "hub". Invalid values fall back to the default.
+ */
+export function normalizeSessionAssignment(value: unknown): "hub" | "auto-spawn" {
+  return value === "hub" || value === "auto-spawn" ? value : "hub";
+}
+
+/**
+ * Normalize the petSelectionStrategy preference value.
+ * Default is "random". Invalid values fall back to the default.
+ */
+export function normalizePetSelectionStrategy(value: unknown): "random" | "ordered" {
+  return value === "random" || value === "ordered" ? value : "random";
+}
+
+export const defaultIdleChatWarnMinutes = 50;
+export const minIdleChatWarnMinutes = 5;
+/** Must stay below the fixed 59-minute auto-compact threshold (idle-chat-watchdog.ts). */
+export const maxIdleChatWarnMinutes = 58;
+
+/**
+ * Normalize the idleChatWarnMinutes preference value.
+ * Non-numeric input falls back to the default; numeric input is clamped to
+ * [minIdleChatWarnMinutes, maxIdleChatWarnMinutes] and rounded to an integer.
+ */
+export function normalizeIdleChatWarnMinutes(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return defaultIdleChatWarnMinutes;
+  return Math.min(maxIdleChatWarnMinutes, Math.max(minIdleChatWarnMinutes, Math.round(value)));
+}
+
+/**
  * Normalize the notificationPolicy preference value.
  * Filters to keep only valid mode strings ("persistent", "fade", "off") and string keys.
  * Drops numeric keys (e.g. { 123: "fade" }). Returns {} for garbage input (non-object, null, number, array, etc).

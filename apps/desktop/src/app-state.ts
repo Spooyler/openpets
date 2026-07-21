@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from "node:path";
 
 import { app } from "electron";
 
-import { defaultPetScale, markOnboardingCompleted, normalizeNotificationPolicy, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetGravityEnabled, normalizePetScale, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
+import { defaultIdleChatWarnMinutes, defaultPetScale, markOnboardingCompleted, normalizeIdleChatWarnMinutes, normalizeNotificationPolicy, normalizeOnboardingCompleted, normalizePetConfinementEnabled, normalizePetCrossDisplayEnabled, normalizePetGravityEnabled, normalizePetScale, normalizePetSelectionStrategy, normalizeSessionAssignment, petScaleOptions, type PetScaleValue } from "./app-state-core.js";
 import { builtInPet } from "./built-in-pet.js";
 import type { Point } from "./display.js";
 import { isSupportedLocale, type LocalePreference } from "./i18n/catalog.js";
@@ -59,6 +59,14 @@ export interface OpenPetsStateV1 {
      * even if petPoolOrder is configured. Defaults to false. Platform-independent
      * (works on macOS/Windows/Linux). */
     readonly petPoolEnabled: boolean;
+    /** How no-pet sessions are assigned a pet on launch. "hub" keeps all sessions
+     * routed to a single default pet; "auto-spawn" draws from the pet pool per
+     * session. Defaults to "hub". */
+    readonly sessionAssignment: "hub" | "auto-spawn";
+    /** Draw order used when assigning pets from the pool in "auto-spawn" mode.
+     * "random" picks any available pet; "ordered" walks petPoolOrder in sequence.
+     * Defaults to "random". */
+    readonly petSelectionStrategy: "random" | "ordered";
     /** Persisted project→pet memory: normalized project path → petId.
      * Written when a pet is called (--pet, adopt, Sessions-tab picker, pool draw);
      * capped at 128 entries, least-recently-written evicted. */
@@ -80,6 +88,16 @@ export interface OpenPetsStateV1 {
      * Values are modes: "persistent" (always show), "fade" (auto-resolve after delay), "off" (ignore).
      * Defaults to {} (everything persistent). Future settings UI will allow per-kind configuration. */
     readonly notificationPolicy: Record<string, "persistent" | "fade" | "off">;
+    /** When true (default), the session's pet warns once when an agent chat has
+     * been idle for idleChatWarnMinutes. Platform-independent. */
+    readonly idleChatWarnEnabled: boolean;
+    /** Idle minutes before the warning fires. Clamped to 5–58 (the auto-compact
+     * threshold is fixed at 59 minutes and the warning must precede it). */
+    readonly idleChatWarnMinutes: number;
+    /** When true, injects the /compact command into a Claude Code chat idle for
+     * 59 minutes (console-input injection; Windows only). Defaults to false —
+     * it types into the user's terminal, so it must be explicit opt-in. */
+    readonly idleChatAutoCompactEnabled: boolean;
   };
   readonly pets: {
     readonly installed: readonly InstalledPetState[];
@@ -640,6 +658,13 @@ function normalizeTimestamp(value: unknown): number | undefined {
 function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): OpenPetsStateV1["preferences"] {
   const defaultState = createDefaultState();
 
+  // Migration: installs that had petPoolEnabled on before sessionAssignment existed
+  // are treated as having opted into auto-spawn, unless they already set it explicitly.
+  const rawSessionAssignment = value.sessionAssignment;
+  const migratedSessionAssignment = rawSessionAssignment === undefined && value.petPoolEnabled === true
+    ? "auto-spawn" as const
+    : normalizeSessionAssignment(rawSessionAssignment);
+
   return {
     defaultPetId: typeof value.defaultPetId === "string" ? value.defaultPetId : builtInPet.id,
     openDefaultPetOnLaunch: typeof value.openDefaultPetOnLaunch === "boolean"
@@ -657,11 +682,20 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
     petPoolEnabled: typeof value.petPoolEnabled === "boolean"
       ? value.petPoolEnabled
       : defaultState.preferences.petPoolEnabled,
+    sessionAssignment: migratedSessionAssignment,
+    petSelectionStrategy: normalizePetSelectionStrategy(value.petSelectionStrategy),
     projectPetAssignments: normalizeProjectPetAssignments(value.projectPetAssignments),
     petConfinementEnabled: normalizePetConfinementEnabled(value.petConfinementEnabled, defaultState.preferences.petConfinementEnabled),
     petCrossDisplayEnabled: normalizePetCrossDisplayEnabled(value.petCrossDisplayEnabled, defaultState.preferences.petCrossDisplayEnabled),
     petGravityEnabled: normalizePetGravityEnabled(value.petGravityEnabled, defaultState.preferences.petGravityEnabled),
     notificationPolicy: normalizeNotificationPolicy(value.notificationPolicy),
+    idleChatWarnEnabled: typeof value.idleChatWarnEnabled === "boolean"
+      ? value.idleChatWarnEnabled
+      : defaultState.preferences.idleChatWarnEnabled,
+    idleChatWarnMinutes: normalizeIdleChatWarnMinutes(value.idleChatWarnMinutes),
+    idleChatAutoCompactEnabled: typeof value.idleChatAutoCompactEnabled === "boolean"
+      ? value.idleChatAutoCompactEnabled
+      : defaultState.preferences.idleChatAutoCompactEnabled,
   };
 }
 
@@ -737,11 +771,16 @@ function createDefaultState(): OpenPetsStateV1 {
       opencodeCommandPath: undefined,
       petPoolOrder: undefined,
       petPoolEnabled: false,
+      sessionAssignment: "hub",
+      petSelectionStrategy: "random",
       projectPetAssignments: undefined,
       petConfinementEnabled: true,
       petCrossDisplayEnabled: false,
       petGravityEnabled: false,
       notificationPolicy: {},
+      idleChatWarnEnabled: true,
+      idleChatWarnMinutes: defaultIdleChatWarnMinutes,
+      idleChatAutoCompactEnabled: false,
     },
     pets: {
       installed: [builtInPet],
