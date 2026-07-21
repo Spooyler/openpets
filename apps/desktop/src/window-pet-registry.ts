@@ -87,7 +87,12 @@ export class WindowPetRegistry {
     this.defaultStore = this.#storeFactory();
   }
 
-  onSessionIdentified(session: RegistrySessionInfo, requestedPetId: string | null | undefined, poolEnabled: boolean): string | null {
+  onSessionIdentified(
+    session: RegistrySessionInfo,
+    requestedPetId: string | null | undefined,
+    poolEnabled: boolean,
+    sessionAssignment: "hub" | "auto-spawn" = "auto-spawn",
+  ): string | null {
     const windowKey = windowKeyForIdentity(session.terminalWindowId, session.terminalOwnerPid);
     this.#detachFromStaleWindow(session.sessionKey, windowKey);
 
@@ -120,7 +125,7 @@ export class WindowPetRegistry {
       return dormant.petId;
     }
 
-    if (!this.#userClosedWindows.has(windowKey)) {
+    if (!this.#userClosedWindows.has(windowKey) && sessionAssignment !== "hub") {
       // Project memory: a previously-called pet for this session's project.
       const remembered = this.#resolveRememberedPet(session.cwd, new Set(this.boundPetIds()));
       if (remembered !== null) {

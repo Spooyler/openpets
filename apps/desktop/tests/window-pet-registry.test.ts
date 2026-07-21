@@ -293,4 +293,38 @@ function makeRecorder() {
   );
 }
 
+// Hub mode: skips pool and project memory, still honors explicit and existing bindings.
+{
+  const { recorded, cb } = makeRecorder();
+  const reg = new WindowPetRegistry({
+    callbacks: cb,
+    isPidAlive: () => true,
+    drawPoolPet: () => "poolpet",
+    resolveRememberedPet: (cwd) => (cwd !== undefined ? "membot" : null),
+  });
+
+  // Pool + memory both configured to hit, but hub mode must skip both → default coverage.
+  const sHub = { sessionKey: "30:m", leaseId: "LM", terminalOwnerPid: 300, terminalWindowId: 30, label: "m", cwd: "/proj/m" };
+  assert.equal(reg.onSessionIdentified(sHub, undefined, true, "hub"), null, "hub mode skips memory and pool");
+  assert.deepEqual(recorded.map((c) => c.fn), [], "no spawn in hub mode");
+  assert.equal(reg.storeForSession("30:m"), reg.defaultStore, "parked on default in hub mode");
+
+  // Explicit request still works in hub mode.
+  recorded.length = 0;
+  assert.equal(reg.onSessionIdentified(sHub, "fox", false, "hub"), "fox", "explicit --pet still honored in hub mode");
+  assert.deepEqual(recorded.map((c) => c.fn), ["spawn"]);
+
+  // Existing binding still joined in hub mode.
+  const sHub2 = { sessionKey: "31:n", leaseId: "LN", terminalOwnerPid: 300, terminalWindowId: 30, label: "n" };
+  recorded.length = 0;
+  assert.equal(reg.onSessionIdentified(sHub2, undefined, false, "hub"), "fox", "joins existing binding in hub mode");
+  assert.deepEqual(recorded.map((c) => c.fn), [], "no spawn — session merely joined");
+
+  // Auto-spawn mode (default / explicit) still runs the full chain for a fresh window.
+  const sAuto = { sessionKey: "32:o", leaseId: "LO", terminalOwnerPid: 320, terminalWindowId: 32, label: "o", cwd: "/proj/o" };
+  assert.equal(reg.onSessionIdentified(sAuto, undefined, true, "auto-spawn"), "membot", "auto-spawn mode still resolves memory");
+  const sAuto2 = { sessionKey: "33:p", leaseId: "LP", terminalOwnerPid: 330, terminalWindowId: 33, label: "p" };
+  assert.equal(reg.onSessionIdentified(sAuto2, undefined, true), "poolpet", "auto-spawn is the default when omitted");
+}
+
 console.log("Window pet registry passed.");
