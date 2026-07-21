@@ -416,6 +416,20 @@
   .sessions-health-green { background: #22c55e; }
   .sessions-health-yellow { background: #eab308; }
   .sessions-health-red { background: #ef4444; }
+  .sessions-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: inline-block;
+  }
+  .sessions-status-dot.status-idle { background: #94a3b8; }
+  .sessions-status-dot.status-thinking { background: #3b82f6; }
+  .sessions-status-dot.status-editing { background: #f59e0b; }
+  .sessions-status-dot.status-running { background: #10b981; }
+  .sessions-status-dot.status-testing { background: #8b5cf6; }
+  .sessions-status-dot.status-waiting { background: #ef4444; animation: pulse-dot 1.5s ease-in-out infinite; }
+  @keyframes pulse-dot { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
   .sessions-confinement {
     @apply text-[10px] text-slatecopy/60;
   }

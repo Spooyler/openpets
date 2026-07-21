@@ -26,8 +26,8 @@ type ReactionAnimationOverrides = Record<string, UserSelectableAnimationState>;
 type AnalyticsConsent = "unset" | "granted" | "denied";
 type PetPoolCandidate = { id: string; displayName: string };
 type PetScaleRange = { min: number; max: number; step: number };
-type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean }; petScaleOptions: PetScaleOption[]; petScaleRange: PetScaleRange; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
-type SessionLeaseSnapshot = { leaseId: string; targetKind: "default" | "explicit"; actualTargetPetId: string; actualTargetPetName: string; usingDefaultPet: boolean; requestedPetId?: string; fallbackReason?: string; clientPid?: number; terminalOwnerPid?: number; terminalAppName?: string; cwd?: string; acquiredAt: number; lastHeartbeatAt: number; lastActivityAt?: number; expiresAt: number; unresolvedNotifications: number; confinementState?: "confined" | "minimized" | "occluded" | "free-roam"; petVisible: boolean; petDismissed: boolean; canFocus: boolean; healthPct: number; displayPetId?: string; displayPetName?: string; displayPetOrigin?: "explicit" | "pool"; windowKey?: string };
+type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean; idleChatWarnEnabled: boolean; idleChatWarnMinutes: number; idleChatAutoCompactEnabled: boolean }; idleChatAutoCompactSupported: boolean; petScaleOptions: PetScaleOption[]; petScaleRange: PetScaleRange; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
+type SessionLeaseSnapshot = { leaseId: string; targetKind: "default" | "explicit"; actualTargetPetId: string; actualTargetPetName: string; usingDefaultPet: boolean; requestedPetId?: string; fallbackReason?: string; clientPid?: number; terminalOwnerPid?: number; terminalAppName?: string; cwd?: string; acquiredAt: number; lastHeartbeatAt: number; lastActivityAt?: number; expiresAt: number; unresolvedNotifications: number; confinementState?: "confined" | "minimized" | "occluded" | "free-roam"; petVisible: boolean; petDismissed: boolean; canFocus: boolean; healthPct: number; displayPetId?: string; displayPetName?: string; displayPetOrigin?: "explicit" | "pool"; windowKey?: string; liveStatus?: string };
 type DisconnectedSession = { actualPetName: string; targetKind: "default" | "explicit"; terminalAppName?: string; cwd?: string; clientPid?: number; disconnectedAt: number; reason: "released" | "expired" | "pid_dead" };
 type SessionsSnapshot = { sessions: SessionLeaseSnapshot[]; recentlyDisconnected: DisconnectedSession[]; pool: { used: number; total: number } | null; serverTime: number; assignablePets: { id: string; displayName: string; inUse: boolean }[] };
 type LaunchAtLoginState = { supported: boolean; enabled: boolean };
@@ -658,6 +658,7 @@ function SessionsView() {
                     <div key={s.leaseId} className="sessions-table-row">
                       <span className="sessions-cell-pet">
                         <span className={`sessions-health-dot ${healthColor(s.healthPct)}`} title={`Health: ${Math.round(s.healthPct * 100)}%`} />
+                        <span className={`sessions-status-dot status-${s.liveStatus ?? "idle"}`} title={s.liveStatus ?? "idle"} />
                         <span className="sessions-pet-name">{s.displayPetName ?? s.actualTargetPetName}</span>
                         <span className={`pill text-[9px] px-1.5 py-0 ${s.displayPetOrigin === "pool" ? "pill-orange" : s.usingDefaultPet ? "pill-blue" : "pill-purple"}`}>
                           {s.displayPetOrigin === "pool" ? t("sessions.badge.pool") : s.usingDefaultPet ? t("sessions.badge.default") : t("sessions.badge.explicit")}
@@ -1534,6 +1535,45 @@ function SettingsView() {
                   disabled={!settings || !!busy}
                   testId="setting-pet-gravity-toggle"
                   onChange={(checked) => patchPreferences({ petGravityEnabled: checked }, t("settings.toast.gravitySaved"))}
+                />
+              </div>
+            </div>
+
+            <div className="settings-section">
+              <h2 className="settings-section-title">{t("settings.idleChat.title")}</h2>
+
+              <div className="settings-group">
+                <ToggleRow
+                  title={t("settings.idleChat.warn.label")}
+                  description={t("settings.idleChat.warn.description")}
+                  checked={settings?.preferences.idleChatWarnEnabled ?? true}
+                  disabled={!settings || !!busy}
+                  testId="setting-idle-chat-warn-toggle"
+                  onChange={(checked) => patchPreferences({ idleChatWarnEnabled: checked }, t("settings.toast.idleChatSaved"))}
+                />
+                <div className="settings-row">
+                  <div className="settings-row-info">
+                    <strong>{t("settings.idleChat.minutes.title")}</strong>
+                    <small>{t("settings.idleChat.minutes.description")}</small>
+                  </div>
+                  <input
+                    type="number"
+                    className="settings-scale-input"
+                    value={settings?.preferences.idleChatWarnMinutes ?? 50}
+                    min={5}
+                    max={58}
+                    step={1}
+                    disabled={!settings || !!busy || !(settings?.preferences.idleChatWarnEnabled)}
+                    onChange={(event) => { const v = Number(event.target.value); if (Number.isFinite(v)) patchPreferences({ idleChatWarnMinutes: v }, t("settings.toast.idleChatSaved")); }}
+                  />
+                </div>
+                <ToggleRow
+                  title={t("settings.idleChat.autoCompact.label")}
+                  description={settings?.idleChatAutoCompactSupported ? t("settings.idleChat.autoCompact.description") : t("settings.idleChat.autoCompact.unsupported")}
+                  checked={settings?.preferences.idleChatAutoCompactEnabled ?? false}
+                  disabled={!settings || !!busy || !(settings?.idleChatAutoCompactSupported)}
+                  testId="setting-idle-chat-auto-compact-toggle"
+                  onChange={(checked) => patchPreferences({ idleChatAutoCompactEnabled: checked }, t("settings.toast.idleChatSaved"))}
                 />
               </div>
             </div>

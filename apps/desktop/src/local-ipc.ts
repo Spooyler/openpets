@@ -95,6 +95,7 @@ export interface EnrichedSessionSnapshot extends LeaseSnapshot {
   readonly displayPetName?: string;
   readonly displayPetOrigin?: "explicit" | "pool";
   readonly windowKey?: string;
+  readonly liveStatus?: string;
 }
 
 const recentlyDisconnected: DisconnectedSession[] = [];
@@ -1389,8 +1390,9 @@ export function getSessionsSnapshot(): {
     const displayPetOrigin = displayPet?.origin;
 
     const windowKey = lease.terminalOwnerPid ? windowKeyForIdentity(lease.terminalWindowId, lease.terminalOwnerPid) : undefined;
+    const liveStatus = sessionKey ? sessionLiveStatus.get(sessionKey) : undefined;
 
-    return { ...snap, unresolvedNotifications, confinementState, petVisible, petDismissed, canFocus, healthPct, displayPetId, displayPetName, displayPetOrigin, windowKey };
+    return { ...snap, unresolvedNotifications, confinementState, petVisible, petDismissed, canFocus, healthPct, displayPetId, displayPetName, displayPetOrigin, windowKey, liveStatus };
   });
 
   const boundPets = new Set(windowPetRegistry.boundPetIds());
