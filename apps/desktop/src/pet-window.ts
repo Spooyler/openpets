@@ -1317,6 +1317,17 @@ function createPetWindowCss(paused: boolean, scale: PetScaleValue): string {
     .notify-message { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .notify-age { flex: 0 0 auto; font-size: 9.5px; color: #94a3b8; }
     .notify-empty { padding: 14px 10px; text-align: center; font: 700 10.5px/14px Inter, ui-sans-serif, system-ui, sans-serif; color: #94a3b8; }
+    .notify-group-header { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(23, 32, 56, 0.6); cursor: pointer; border-bottom: 1px solid rgba(148, 163, 184, 0.25); }
+    .notify-group-header:hover { background: rgba(23, 109, 242, 0.06); }
+    .notify-group-count { font-size: 10px; background: rgba(23, 109, 242, 0.12); color: #176df2; border-radius: 8px; padding: 1px 5px; font-weight: 700; }
+    .notify-status-dot { flex: 0 0 6px; width: 6px; height: 6px; border-radius: 999px; background: #94a3b8; }
+    .notify-status-dot.status-thinking { background: #3b82f6; }
+    .notify-status-dot.status-editing { background: #f59e0b; }
+    .notify-status-dot.status-running { background: #10b981; }
+    .notify-status-dot.status-testing { background: #8b5cf6; }
+    .notify-status-dot.status-waiting { background: #ef4444; animation: status-pulse 1.2s ease-in-out infinite; }
+    .notify-flyout-grouped { max-height: 320px; }
+    .notify-flyout-grouped .notify-row { padding-left: 16px; }
   `;
 }
 
