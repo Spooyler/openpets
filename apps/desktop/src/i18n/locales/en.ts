@@ -311,6 +311,19 @@ export const en = {
   "settings.idleChat.autoCompact.description": "At 59 minutes idle, types the compact command into the idle session's terminal. Off by default.",
   "settings.idleChat.autoCompact.unsupported": "Available on Windows only.",
   "settings.toast.idleChatSaved": "Idle chat setting saved.",
+
+  // --- Settings: notification preferences (renderer) ---
+  "settings.notifications.eyebrow": "NOTIFICATIONS",
+  "settings.notifications.title": "Notification Preferences",
+  "settings.notifications.needsApproval": "Needs approval",
+  "settings.notifications.taskComplete": "Task complete",
+  "settings.notifications.taskFailed": "Task failed",
+  "settings.notifications.reactions": "Reactions",
+  "settings.notifications.mode.persistent": "Always show",
+  "settings.notifications.mode.fade": "Auto-dismiss",
+  "settings.notifications.mode.off": "Hidden",
+  "settings.notifications.toast.saved": "Notification preferences saved",
+
   "settings.petPool.label": "Auto-assign pool pets to new terminal windows",
   "settings.petPool.description": "When on, a new terminal window with no remembered pet draws the next free pet from the pool.",
   "settings.memory.clear": "Clear remembered assignments",

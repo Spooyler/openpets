@@ -26,7 +26,7 @@ type ReactionAnimationOverrides = Record<string, UserSelectableAnimationState>;
 type AnalyticsConsent = "unset" | "granted" | "denied";
 type PetPoolCandidate = { id: string; displayName: string };
 type PetScaleRange = { min: number; max: number; step: number };
-type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean; idleChatWarnEnabled: boolean; idleChatWarnMinutes: number; idleChatAutoCompactEnabled: boolean }; idleChatAutoCompactSupported: boolean; petScaleOptions: PetScaleOption[]; petScaleRange: PetScaleRange; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
+type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean; idleChatWarnEnabled: boolean; idleChatWarnMinutes: number; idleChatAutoCompactEnabled: boolean; notificationPolicy?: Record<string, string> }; idleChatAutoCompactSupported: boolean; petScaleOptions: PetScaleOption[]; petScaleRange: PetScaleRange; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
 type SessionLeaseSnapshot = { leaseId: string; targetKind: "default" | "explicit"; actualTargetPetId: string; actualTargetPetName: string; usingDefaultPet: boolean; requestedPetId?: string; fallbackReason?: string; clientPid?: number; terminalOwnerPid?: number; terminalAppName?: string; cwd?: string; acquiredAt: number; lastHeartbeatAt: number; lastActivityAt?: number; expiresAt: number; unresolvedNotifications: number; confinementState?: "confined" | "minimized" | "occluded" | "free-roam"; petVisible: boolean; petDismissed: boolean; canFocus: boolean; healthPct: number; displayPetId?: string; displayPetName?: string; displayPetOrigin?: "explicit" | "pool"; windowKey?: string; liveStatus?: string };
 type DisconnectedSession = { actualPetName: string; targetKind: "default" | "explicit"; terminalAppName?: string; cwd?: string; clientPid?: number; disconnectedAt: number; reason: "released" | "expired" | "pid_dead" };
 type SessionsSnapshot = { sessions: SessionLeaseSnapshot[]; recentlyDisconnected: DisconnectedSession[]; pool: { used: number; total: number } | null; serverTime: number; assignablePets: { id: string; displayName: string; inUse: boolean }[] };
@@ -1274,6 +1274,19 @@ function ReactionPreviewSprite({ settings, state }: { settings: ReactionAnimatio
   );
 }
 
+const notificationKindRows = [
+  { label: "settings.notifications.needsApproval", keys: ["permission"] },
+  { label: "settings.notifications.taskComplete", keys: ["complete"] },
+  { label: "settings.notifications.taskFailed", keys: ["error"] },
+  { label: "settings.notifications.reactions", keys: ["thinking", "editing", "running", "testing", "waiting", "waving", "success", "idle", "working"] },
+] as const;
+
+const notificationModeOptions = [
+  { value: "persistent", label: "settings.notifications.mode.persistent" },
+  { value: "fade", label: "settings.notifications.mode.fade" },
+  { value: "off", label: "settings.notifications.mode.off" },
+] as const;
+
 function SettingsView() {
   const { t, localePreference, availableLocales, reload: reloadI18n } = useI18n();
   const [settings, setSettings] = useState<SettingsState | null>(null);
@@ -1575,6 +1588,41 @@ function SettingsView() {
                   testId="setting-idle-chat-auto-compact-toggle"
                   onChange={(checked) => patchPreferences({ idleChatAutoCompactEnabled: checked }, t("settings.toast.idleChatSaved"))}
                 />
+              </div>
+            </div>
+
+            <div className="settings-section">
+              <p className="eyebrow">{t("settings.notifications.eyebrow")}</p>
+              <h2 className="settings-section-title">{t("settings.notifications.title")}</h2>
+              <div className="settings-group">
+                {notificationKindRows.map((row) => {
+                  const currentMode = settings?.preferences.notificationPolicy?.[row.keys[0]] ?? "persistent";
+                  return (
+                    <div key={row.keys[0]} className="settings-row">
+                      <div className="settings-row-info">
+                        <strong>{t(row.label)}</strong>
+                      </div>
+                      <select
+                        className="settings-select"
+                        value={currentMode}
+                        disabled={!settings || !!busy}
+                        onChange={(e) => {
+                          const mode = e.target.value;
+                          const policyPatch: Record<string, string> = {};
+                          for (const key of row.keys) policyPatch[key] = mode;
+                          patchPreferences(
+                            { notificationPolicy: { ...(settings?.preferences.notificationPolicy ?? {}), ...policyPatch } },
+                            t("settings.notifications.toast.saved"),
+                          );
+                        }}
+                      >
+                        {notificationModeOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{t(opt.label)}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </>
