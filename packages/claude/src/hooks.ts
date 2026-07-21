@@ -69,9 +69,9 @@ export async function handleClaudeHookPayload(raw: string, options: ClaudeHookOp
   try {
     if (decision.speechCategory && shouldSpeak) {
       const message = validateHookSpeech(pickHookSpeech(decision.speechCategory, options.random));
-      await client.say(message, { reaction: decision.reaction, leaseId: lease?.leaseId, clientAncestorPids });
+      await client.say(message, { reaction: decision.reaction, leaseId: lease?.leaseId, clientAncestorPids, hookEventName: decision.eventName });
     } else {
-      await client.react(decision.reaction, { leaseId: lease?.leaseId, clientAncestorPids });
+      await client.react(decision.reaction, { leaseId: lease?.leaseId, clientAncestorPids, hookEventName: decision.eventName });
     }
   } catch (error) {
     if (!(error instanceof OpenPetsClientError) && options.debug) {
@@ -126,7 +126,7 @@ export function mapClaudeHookEvent(payload: Record<string, unknown>): ClaudeHook
   const eventName = typeof payload.hook_event_name === "string" ? payload.hook_event_name : undefined;
   if (eventName === "UserPromptSubmit") return { eventName, reaction: "thinking" };
   if (eventName === "PermissionRequest") return { eventName, reaction: "waiting", speechCategory: "permission" };
-  if (eventName === "Notification") return { eventName };
+  if (eventName === "Notification") return { eventName, reaction: "waving" };
   if (eventName === "Stop") return { eventName, reaction: "success" };
   if (eventName === "StopFailure") return { eventName, reaction: "error", speechCategory: "error" };
   if (eventName === "PreToolUse") return { eventName, reaction: classifyToolReaction(payload) };

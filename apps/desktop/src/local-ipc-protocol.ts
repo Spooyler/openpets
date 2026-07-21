@@ -129,6 +129,19 @@ export function validateSessionNonce(value: unknown): string | undefined {
   return trimmed;
 }
 
+/**
+ * Validate the optional hookEventName on pet.react/pet.say requests — the raw
+ * Claude hook event name (e.g. "PermissionRequest"). Tolerant: returns
+ * undefined for anything malformed instead of throwing, since it's only used
+ * to enrich a notification row, never required for the reaction/say itself.
+ */
+export function validateHookEventName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (trimmed.length < 1 || trimmed.length > 64 || /[\x00-\x1F\x7F]/.test(trimmed)) return undefined;
+  return trimmed;
+}
+
 /** Optional working-directory string on lease.acquire. Tolerant: returns
  * undefined for anything malformed instead of throwing. */
 export function validateCwd(value: unknown): string | undefined {

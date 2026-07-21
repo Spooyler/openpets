@@ -48,6 +48,11 @@ export const en = {
 
   // --- Pet notifications (main process) ---
   "pet.notify.sessionEnded": "Session ended in {label}",
+  "pet.idleChat.warnSpeech": "This chat has been idle for {minutes} minutes — time to compact it.",
+  "pet.idleChat.compactedSpeech": "Compacted an idle chat for you.",
+  "pet.notify.idleChatWarn": "Idle for {minutes} min — consider compacting",
+  "pet.notify.idleChatCompacted": "Compact sent to this session",
+  "pet.notify.idleChatCompactFailed": "Couldn't send compact to this session",
   "pet.notify.farewell": "All done here — bye!",
   "pet.notify.badgeLabel": "{count} sessions need attention",
   "pet.notify.empty": "All quiet",
@@ -65,6 +70,9 @@ export const en = {
   "pet.notify.reaction.error": "error",
   "pet.notify.reaction.celebrating": "celebrating",
   "pet.notify.reaction.idle": "idle",
+  "pet.notify.needsApproval": "Needs approval",
+  "pet.notify.taskComplete": "Task complete",
+  "pet.notify.taskFailed": "Task failed",
   "pet.menu.notifications": "Notifications",
 
   // --- Confinement / Screen Recording permission (main process) ---
@@ -292,6 +300,15 @@ export const en = {
   "settings.petGravity.label": "Apply gravity to pets",
   "settings.petGravity.description": "When on, pets fall with gravity. Applies to every pet. Off by default.",
   "settings.movement.title": "Movement",
+  "settings.idleChat.title": "Idle chats",
+  "settings.idleChat.warn.label": "Warn about idle chats",
+  "settings.idleChat.warn.description": "The session's pet speaks up once when an agent chat has sat idle this long.",
+  "settings.idleChat.minutes.title": "Warn after (minutes)",
+  "settings.idleChat.minutes.description": "Idle minutes before the warning fires (5–58).",
+  "settings.idleChat.autoCompact.label": "Auto-compact idle Claude Code chats",
+  "settings.idleChat.autoCompact.description": "At 59 minutes idle, types the compact command into the idle session's terminal. Off by default.",
+  "settings.idleChat.autoCompact.unsupported": "Available on Windows only.",
+  "settings.toast.idleChatSaved": "Idle chat setting saved.",
   "settings.petPool.label": "Auto-assign pool pets to new terminal windows",
   "settings.petPool.description": "When on, a new terminal window with no remembered pet draws the next free pet from the pool.",
   "settings.memory.clear": "Clear remembered assignments",

@@ -12,7 +12,7 @@ import { createStaleLeaseStatus, LeaseManager, type LeaseSnapshot, type PetLease
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
 import { stat } from "node:fs/promises";
-import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, okResponse, parseIpcRequest, validateCwd, validateInstallLocalKind, validateInstallLocalPath, validateInstallPetId, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
+import { errorResponse, IpcProtocolError, isRecord, maxIpcMessageBytes, okResponse, parseIpcRequest, validateCwd, validateHookEventName, validateInstallLocalKind, validateInstallLocalPath, validateInstallPetId, validateOptionalLeaseId, validateReaction, validateRequestedPetId, validateSayMessage, validateSessionNonce, type OpenPetsIpcRequest } from "./local-ipc-protocol.js";
 import { installPet, installPetFromFolderWithResult, installPetFromZipFileWithResult } from "./pet-installation.js";
 import { clearConfinementState, getConfinementState, setConfinementState } from "./confinement-manager.js";
 import { isConfinementSupported } from "./capabilities.js";
@@ -25,11 +25,50 @@ import { getEligiblePoolPetIds, resolvePoolAssignment, resolveRandomPoolAssignme
 import { t } from "./i18n/index.js";
 import { WindowPetRegistry, windowKeyForIdentity } from "./window-pet-registry.js";
 import { NotificationStore, sessionLabelFromCwd } from "./notification-store.js";
+import { SessionLiveStatusTracker, type LiveStatus } from "./session-live-status.js";
 
 let ipcServer: net.Server | null = null;
 let ipcDiscovery: OpenPetsDiscoveryFile | null = null;
 let leaseCleanupTimer: NodeJS.Timeout | null = null;
 let agentConnectedTracked = false;
+const sessionLiveStatus = new SessionLiveStatusTracker();
+
+/** Snapshot of per-session activity status for the notification flyout, derived from hook reactions. */
+export function getSessionLiveStatuses(): ReadonlyMap<string, LiveStatus> {
+  return sessionLiveStatus.all();
+}
+
+/**
+ * High-value Claude hook events mapped to a distinct notification kind. The
+ * hook event name (not the reaction) drives this: a manual `openpets_react`
+ * MCP call carries no hookEventName, so it can never masquerade as one of
+ * these — only a real Claude hook firing PermissionRequest/Stop/StopFailure
+ * produces the "Needs approval" / "Task complete" / "Task failed" wording.
+ */
+const hookEventToNotificationKind: Record<string, string> = {
+  PermissionRequest: "permission",
+  Stop: "complete",
+  StopFailure: "error",
+};
+
+function notificationKindForHookEvent(hookEventName: string | undefined): string | undefined {
+  return hookEventName ? hookEventToNotificationKind[hookEventName] : undefined;
+}
+
+function hookNotificationMessage(kind: string): string {
+  if (kind === "permission") return t("pet.notify.needsApproval");
+  if (kind === "complete") return t("pet.notify.taskComplete");
+  if (kind === "error") return t("pet.notify.taskFailed");
+  return kind;
+}
+
+/** Kind + message for a pet.react notification row: hook-mapped events get the
+ * high-value wording; everything else keeps the generic per-reaction message. */
+function reactionNotification(reaction: import("./local-ipc-protocol.js").OpenPetsReaction, hookEventName: string | undefined): { kind: string; message: string } {
+  const mappedKind = notificationKindForHookEvent(hookEventName);
+  if (mappedKind) return { kind: mappedKind, message: hookNotificationMessage(mappedKind) };
+  return { kind: reaction, message: t(("pet.notify.reaction." + reaction) as import("./i18n/index.js").MessageKey) };
+}
 
 interface DisconnectedSession {
   readonly actualPetName: string;
@@ -672,6 +711,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     if (sessionKey) {
       if (!sessionHasOtherLiveLease(sessionKey, leaseId)) projectMemoryWrites.delete(sessionKey);
       windowPetRegistry.onSessionGone(sessionKey);
+      sessionLiveStatus.remove(sessionKey);
     }
     return result;
   }
@@ -689,13 +729,17 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
   if (request.method === "pet.react") {
     const params = isRecord(request.params) ? request.params : {};
     const reaction = validateReaction(params.reaction);
+    const hookEventName = validateHookEventName(params.hookEventName);
     const lease = getLeaseTarget(params.leaseId);
     if (lease) leaseManager.touchActivity(lease.leaseId);
     const rawLease = lease ? leaseManager.getRawLease(lease.leaseId) : null;
     const petId = lease?.actualTargetPetId ?? getCurrentDefaultPet().id;
-    debug("ipc", "pet react requested", { requestId: request.id, reaction, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
+    debug("ipc", "pet react requested", { requestId: request.id, reaction, hookEventName, leaseId: lease?.leaseId, targetKind: lease?.targetKind, actualPetId: lease?.actualTargetPetId });
     if (lease?.targetKind === "explicit") {
-      recordSessionNotification(rawLease, reaction, t(("pet.notify.reaction." + reaction) as import("./i18n/index.js").MessageKey));
+      const rawSessionKey = rawLease ? sessionKeyForLease(rawLease) : null;
+      if (rawSessionKey) sessionLiveStatus.update(rawSessionKey, reaction);
+      const { kind, message } = reactionNotification(reaction, hookEventName);
+      recordSessionNotification(rawLease, kind, message);
       const displayPet = displayPetForLease(rawLease);
       const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
       safeRecordOpenPetsActivity({ kind: "react", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
@@ -705,7 +749,10 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const sessionPet = await resolveSessionPetTarget(lease, params);
     if (sessionPet) {
       leaseManager.touchActivity(sessionPet.leaseId);
-      recordSessionNotification(sessionPet, reaction, t(("pet.notify.reaction." + reaction) as import("./i18n/index.js").MessageKey));
+      const sessionPetKey = sessionKeyForLease(sessionPet);
+      if (sessionPetKey) sessionLiveStatus.update(sessionPetKey, reaction);
+      const { kind: sessionKind, message: sessionMessage } = reactionNotification(reaction, hookEventName);
+      recordSessionNotification(sessionPet, sessionKind, sessionMessage);
       const displayPet = displayPetForLease(sessionPet);
       debug("ipc", "react routed to session pet", { requestId: request.id, petId: sessionPet.actualPetId, sessionLeaseId: sessionPet.leaseId });
       const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
@@ -713,7 +760,10 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       trackDesktopIntegrationActivity("react", { integration_type: "ipc", target_kind: "session-routed", shown: applied.shown, reason: applied.reason });
       return { ok: true, reaction, shown: applied.shown, reason: applied.reason };
     }
-    recordSessionNotification(rawLease, reaction, t(("pet.notify.reaction." + reaction) as import("./i18n/index.js").MessageKey));
+    const defaultSessionKey = rawLease ? sessionKeyForLease(rawLease) : null;
+    if (defaultSessionKey) sessionLiveStatus.update(defaultSessionKey, reaction);
+    const { kind: defaultKind, message: defaultMessage } = reactionNotification(reaction, hookEventName);
+    recordSessionNotification(rawLease, defaultKind, defaultMessage);
     const displayPet = displayPetForLease(rawLease);
     const applied = displayPet ? applyAgentPetReaction(displayPet, reaction) : applyExternalPetReaction(reaction);
     safeRecordOpenPetsActivity({ kind: "react", reaction, petId: displayPet ?? petId, surface: displayPet ? "agent" : "default" });
@@ -833,6 +883,7 @@ function notifyLeaseGone(lease: { readonly leaseId: string; readonly targetKind:
   if (sessionKey) {
     if (!sessionHasOtherLiveLease(sessionKey, lease.leaseId)) projectMemoryWrites.delete(sessionKey);
     windowPetRegistry.onSessionGone(sessionKey);
+    sessionLiveStatus.remove(sessionKey);
   }
 }
 
@@ -853,6 +904,7 @@ function releaseExplicitLease(leaseId: string): { readonly released: boolean } {
   if (sessionKey) {
     if (!sessionHasOtherLiveLease(sessionKey, leaseId)) projectMemoryWrites.delete(sessionKey);
     windowPetRegistry.onSessionGone(sessionKey);
+    sessionLiveStatus.remove(sessionKey);
   }
   return result;
 }
@@ -1324,6 +1376,7 @@ export function releaseSessionFromUi(leaseId: string): boolean {
     if (sessionKey) {
       if (!sessionHasOtherLiveLease(sessionKey, leaseId)) projectMemoryWrites.delete(sessionKey);
       windowPetRegistry.onSessionGone(sessionKey);
+      sessionLiveStatus.remove(sessionKey);
     }
   }
   return true;
