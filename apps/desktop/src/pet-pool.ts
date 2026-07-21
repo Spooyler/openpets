@@ -64,6 +64,29 @@ export function resolvePoolAssignment(input: PoolAssignmentInput): PoolAssignmen
 }
 
 /**
+ * Resolve which pet from the pool to assign, picking uniformly at random among
+ * eligible unoccupied pool slots instead of walking `orderedPool` in order.
+ * Same disabled/exhausted-pool semantics as `resolvePoolAssignment`: returns
+ * `null` when the pool is empty/undefined, has no eligible pets, or every
+ * eligible pool slot is occupied.
+ */
+export function resolveRandomPoolAssignment(
+  input: PoolAssignmentInput,
+  random: () => number = Math.random,
+): PoolAssignmentResult | null {
+  const { orderedPool, eligiblePetIds, countActiveExplicit } = input;
+
+  if (!orderedPool || orderedPool.length === 0) return null;
+  if (eligiblePetIds.length === 0) return null;
+
+  const eligibleSet = new Set(eligiblePetIds);
+  const free = orderedPool.filter((petId) => eligibleSet.has(petId) && countActiveExplicit(petId) === 0);
+  if (free.length === 0) return null;
+
+  return { petId: free[Math.floor(random() * free.length)]! };
+}
+
+/**
  * Build the list of eligible pet IDs from the app state snapshot.
  * Excludes the built-in pet, the current default pet, and any broken pets.
  * The default pet is excluded so it stays as the always-on singleton and is

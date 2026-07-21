@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
 import { LeaseManager } from "../src/lease-manager.js";
-import { getEligiblePoolPetIds, resolvePoolAssignment } from "../src/pet-pool.js";
+import { getEligiblePoolPetIds, resolvePoolAssignment, resolveRandomPoolAssignment } from "../src/pet-pool.js";
 
 // Helpers
 function makeCount(counts: Record<string, number> = {}) {
@@ -207,6 +207,66 @@ assert.deepEqual(eligible2, [], "empty when only built-in");
   assert.equal(lc5.targetKind, "explicit", "C5: pool assignment maps to targetKind 'explicit'");
   assert.equal(lc5.actualTargetPetId, "fox", "C5: actualTargetPetId is the resolved pool pet");
   assert.equal(lc5.usingDefaultPet, false, "C5: usingDefaultPet is false for pool assignment");
+}
+
+// --- resolveRandomPoolAssignment ---
+
+// Pool disabled (undefined / empty) -> null
+assert.equal(resolveRandomPoolAssignment({ orderedPool: undefined, eligiblePetIds: ["fox", "azure"], countActiveExplicit: makeCount() }), null, "random: no pool -> null");
+assert.equal(resolveRandomPoolAssignment({ orderedPool: [], eligiblePetIds: ["fox", "azure"], countActiveExplicit: makeCount() }), null, "random: empty pool -> null");
+
+// No eligible pets -> null
+assert.equal(resolveRandomPoolAssignment({ orderedPool: ["fox"], eligiblePetIds: [], countActiveExplicit: makeCount() }), null, "random: no eligible pets -> null");
+
+// Picks from eligible pets not in use
+{
+  const result = resolveRandomPoolAssignment({
+    orderedPool: ["a", "b", "c"],
+    eligiblePetIds: ["a", "b", "c"],
+    countActiveExplicit: (id) => (id === "a" ? 1 : 0),
+  }, () => 0);
+  assert.ok(result, "random: picks a free pet");
+  assert.notEqual(result!.petId, "a", "random: never picks the occupied slot");
+}
+
+// Returns null when no eligible pets are free
+{
+  const result = resolveRandomPoolAssignment({
+    orderedPool: ["a"],
+    eligiblePetIds: ["a"],
+    countActiveExplicit: () => 1,
+  });
+  assert.equal(result, null, "random: all slots occupied -> null");
+}
+
+// Returns null for empty pool
+{
+  const result = resolveRandomPoolAssignment({
+    orderedPool: [],
+    eligiblePetIds: ["a"],
+    countActiveExplicit: () => 0,
+  });
+  assert.equal(result, null, "random: empty orderedPool -> null");
+}
+
+// Uses provided random function
+{
+  const result = resolveRandomPoolAssignment({
+    orderedPool: ["a", "b", "c"],
+    eligiblePetIds: ["a", "b", "c"],
+    countActiveExplicit: () => 0,
+  }, () => 0.999);
+  assert.equal(result!.petId, "c", "random: deterministic random() maps to last free slot");
+}
+
+// Pool entry not in eligible (e.g. not installed) -> excluded from the draw
+{
+  const result = resolveRandomPoolAssignment({
+    orderedPool: ["not-installed", "azure"],
+    eligiblePetIds: ["fox", "azure"],
+    countActiveExplicit: makeCount(),
+  }, () => 0);
+  assert.equal(result!.petId, "azure", "random: ineligible slot excluded, azure is the only free option");
 }
 
 console.error("pet-pool validation passed.");

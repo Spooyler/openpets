@@ -21,7 +21,7 @@ import { findTerminalWindowForPid, getAncestorPidChain, subscribeActiveWindowTra
 import { focusTerminalWindow } from "./terminal-focus.js";
 import { parkWaitFocus, pruneWaitFocus, requestTabReveal } from "./vscode-tab-focus.js";
 import { warnPetFallback } from "./pet-fallback-notify.js";
-import { getEligiblePoolPetIds } from "./pet-pool.js";
+import { getEligiblePoolPetIds, resolvePoolAssignment, resolveRandomPoolAssignment } from "./pet-pool.js";
 import { t } from "./i18n/index.js";
 import { WindowPetRegistry, windowKeyForIdentity } from "./window-pet-registry.js";
 import { NotificationStore, sessionLabelFromCwd } from "./notification-store.js";
@@ -159,10 +159,14 @@ const windowPetRegistry = new WindowPetRegistry({
   },
   drawPoolPet: (occupied) => {
     const state = getAppStateSnapshot();
-    const eligible = getEligiblePoolPetIds(state.pets.installed, builtInPet.id, getCurrentDefaultPet().id).filter((id) => !occupied.has(id));
-    const pool = state.preferences.petPoolOrder ?? [];
-    for (const petId of pool) if (eligible.includes(petId)) return petId;
-    return null;
+    const eligible = getEligiblePoolPetIds(state.pets.installed, builtInPet.id, getCurrentDefaultPet().id);
+    const orderedPool = state.preferences.petPoolOrder ?? [];
+    const countActiveExplicit = (petId: string) => (occupied.has(petId) ? 1 : 0);
+    const input = { orderedPool, eligiblePetIds: eligible, countActiveExplicit };
+    const result = state.preferences.petSelectionStrategy === "random"
+      ? resolveRandomPoolAssignment(input)
+      : resolvePoolAssignment(input);
+    return result?.petId ?? null;
   },
   resolveRememberedPet: (cwd, occupied) => {
     const remembered = getRememberedProjectPet(cwd);
