@@ -962,7 +962,7 @@ function recordSessionNotification(lease: PetLease | null, kind: string, message
   if (!sessionKey) return;
   const windowKey = lease?.terminalOwnerPid ? windowKeyForIdentity(lease.terminalWindowId, lease.terminalOwnerPid) : undefined;
   const label = sessionLabelFromCwd(lease?.cwd, lease?.terminalAppName ?? "session");
-  windowPetRegistry.storeForSession(sessionKey).record({ sessionKey, windowKey, kind, message, label });
+  windowPetRegistry.storeForSession(sessionKey).record({ sessionKey, windowKey, terminalAppName: lease?.terminalAppName, kind, message, label });
   windowPetRegistry.touchSessionActivity(sessionKey);
   const displayPet = displayPetForLease(lease);
   if (displayPet) refreshAgentPetNotifications(displayPet);

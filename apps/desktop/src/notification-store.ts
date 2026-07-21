@@ -13,6 +13,7 @@ export type NotificationPolicyMode = "persistent" | "fade" | "off";
 export interface NotificationEntry {
   readonly sessionKey: string;
   readonly windowKey?: string;
+  readonly terminalAppName?: string;
   readonly kind: string;
   readonly message: string;
   readonly label: string;
@@ -39,7 +40,7 @@ export class NotificationStore {
     this.#fadeMs = options.fadeMs ?? 60_000;
   }
 
-  record(input: { sessionKey: string; windowKey?: string; kind: string; message: string; label: string }): void {
+  record(input: { sessionKey: string; windowKey?: string; terminalAppName?: string; kind: string; message: string; label: string }): void {
     if (this.#policy(input.kind) === "off") return;
     const now = this.#now();
     const existing = this.#entries.get(input.sessionKey);
@@ -47,6 +48,7 @@ export class NotificationStore {
     this.#entries.set(input.sessionKey, {
       sessionKey: input.sessionKey,
       windowKey: input.windowKey ?? existing?.windowKey,
+      terminalAppName: input.terminalAppName ?? existing?.terminalAppName,
       kind: input.kind,
       message: input.message,
       label: input.label,

@@ -151,7 +151,7 @@ export function buildGroupedNotificationsView(
     const wk = entry.windowKey ?? "default";
     let group = groupMap.get(wk);
     if (!group) {
-      group = { windowLabel: wk, rows: [] };
+      group = { windowLabel: entry.terminalAppName ?? wk, rows: [] };
       groupMap.set(wk, group);
     }
     group.rows.push({
