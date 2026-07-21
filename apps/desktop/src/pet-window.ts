@@ -333,7 +333,7 @@ function buildSummonPetMenuItem(
   return {
     label,
     submenu: targets.map((target) => ({
-      label: `${target.terminalAppName} (${target.sessionCount} sessions)`,
+      label: `${target.terminalAppName} (${target.sessionCount} ${target.sessionCount === 1 ? "session" : "sessions"})`,
       submenu: pets.map((pet) => ({
         label: pet.inUse ? `${pet.displayName} (${t("pet.menu.summon.inUse")})` : pet.displayName,
         click: () => onSummonPet?.(target.windowKey, pet.id),
