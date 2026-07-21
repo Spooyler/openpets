@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
-import { buildNotificationsView, createNotificationsMarkup, notificationsCacheKey } from "../src/notification-view.js";
+import {
+  buildNotificationsView,
+  createNotificationsMarkup,
+  notificationsCacheKey,
+  buildGroupedNotificationsView,
+  createGroupedNotificationsMarkup,
+} from "../src/notification-view.js";
 import type { NotificationEntry } from "../src/notification-store.js";
+import type { LiveStatus } from "../src/session-live-status.js";
 
 // Minimal t() stub matching the EN catalog shape.
 const enMessages: Record<string, string> = {
@@ -131,5 +138,89 @@ assert.ok(key1.startsWith("n:true:2:"), "open view cacheKey starts with open:cou
 const key2 = notificationsCacheKey(view2);
 assert.ok(key2.startsWith("n:false:2:"), "closed view cacheKey starts with closed:count");
 assert.notEqual(key1, key2, "different open states produce different keys");
+
+// --- buildGroupedNotificationsView: groups by windowKey ---
+
+{
+  const groupedEntries: readonly NotificationEntry[] = [
+    { sessionKey: "s1", windowKey: "w:1", kind: "waiting", message: "needs permission", label: "fraud_project", updatedAt: baseTime - 30_000, firstUnresolvedAt: baseTime - 30_000, state: "unresolved" },
+    { sessionKey: "s2", windowKey: "w:2", kind: "success", message: "turn done", label: "api-fix", updatedAt: baseTime - 300_000, firstUnresolvedAt: baseTime - 300_000, state: "unresolved" },
+    { sessionKey: "s3", windowKey: "w:1", kind: "message", message: "refactoring", label: "webapp", updatedAt: baseTime - 10_800_000, firstUnresolvedAt: baseTime - 10_800_000, state: "resolved" },
+  ];
+  const liveStatuses = new Map<string, LiveStatus>([["s1", "thinking"]]);
+  const groupedView = buildGroupedNotificationsView(groupedEntries, true, baseTime, t, liveStatuses);
+
+  assert.equal(groupedView.groups.length, 2, "two window groups");
+  const w1 = groupedView.groups.find((g) => g.windowKey === "w:1")!;
+  const w2 = groupedView.groups.find((g) => g.windowKey === "w:2")!;
+  assert.equal(w1.rows.length, 2, "w:1 has two sessions");
+  assert.equal(w2.rows.length, 1, "w:2 has one session");
+  assert.equal(w1.sessionCount, 2);
+  assert.equal(w2.sessionCount, 1);
+
+  // Live status: present for s1, defaults to idle for s2/s3.
+  const s1Row = w1.rows.find((r) => r.sessionKey === "s1")!;
+  const s3Row = w1.rows.find((r) => r.sessionKey === "s3")!;
+  const s2Row = w2.rows.find((r) => r.sessionKey === "s2")!;
+  assert.equal(s1Row.liveStatus, "thinking", "live status used when present");
+  assert.equal(s3Row.liveStatus, "idle", "defaults to idle when no live status");
+  assert.equal(s2Row.liveStatus, "idle", "defaults to idle when no live status");
+
+  // Unresolved count across all groups.
+  assert.equal(groupedView.unresolvedCount, 2, "unresolved count spans groups");
+
+  // Entries with no windowKey fall into "default" group.
+  const noWindowEntries: readonly NotificationEntry[] = [
+    { sessionKey: "s5", kind: "message", message: "x", label: "l", updatedAt: baseTime, firstUnresolvedAt: baseTime, state: "unresolved" },
+  ];
+  const noWindowView = buildGroupedNotificationsView(noWindowEntries, true, baseTime, t, new Map());
+  assert.equal(noWindowView.groups.length, 1);
+  assert.equal(noWindowView.groups[0]!.windowKey, "default");
+}
+
+// --- buildGroupedNotificationsView: MAX_GROUPED_ROWS cap ---
+
+{
+  const manyGroupedEntries: NotificationEntry[] = [];
+  for (let i = 0; i < 60; i++) {
+    manyGroupedEntries.push({ sessionKey: `g${i}`, windowKey: `w:${i % 3}`, kind: "message", message: `msg ${i}`, label: `label ${i}`, updatedAt: baseTime - i * 1_000, firstUnresolvedAt: baseTime - i * 1_000, state: "unresolved" });
+  }
+  const manyGroupedView = buildGroupedNotificationsView(manyGroupedEntries, true, baseTime, t, new Map());
+  const totalRows = manyGroupedView.groups.reduce((sum, g) => sum + g.rows.length, 0);
+  assert.equal(totalRows, 50, "capped at MAX_GROUPED_ROWS total rows across groups");
+  assert.equal(manyGroupedView.unresolvedCount, 60, "unresolvedCount counts all, not just displayed rows");
+}
+
+// --- createGroupedNotificationsMarkup: HTML structure ---
+
+{
+  const markupEntries: readonly NotificationEntry[] = [
+    { sessionKey: "m1", windowKey: "w:1", kind: "waiting", message: "needs input", label: "proj-a", updatedAt: baseTime, firstUnresolvedAt: baseTime, state: "unresolved" },
+    { sessionKey: "m2", windowKey: "w:1", kind: "message", message: "done", label: "proj-b", updatedAt: baseTime, firstUnresolvedAt: baseTime, state: "resolved" },
+  ];
+  const liveStatuses = new Map<string, LiveStatus>([["m1", "running"]]);
+  const markupView = buildGroupedNotificationsView(markupEntries, true, baseTime, t, liveStatuses);
+  const markup = createGroupedNotificationsMarkup(markupView, t);
+
+  assert.ok(markup.flyout.includes("notify-flyout-grouped"), "grouped flyout class present");
+  assert.ok(markup.flyout.includes('data-window-key="w:1"'), "group header has window key");
+  assert.ok(markup.flyout.includes("notify-group-label"), "group label rendered");
+  assert.ok(markup.flyout.includes(">2<"), "session count rendered in group header");
+  assert.ok(markup.flyout.includes("status-running"), "live status class rendered on status dot");
+  assert.ok(markup.flyout.includes("status-idle"), "idle status class rendered for session with no live status");
+  assert.ok(markup.flyout.includes("proj-a"), "session label rendered");
+  assert.ok(markup.flyout.includes("is-unresolved"), "unresolved row class rendered");
+  assert.ok(markup.badge.includes("notify-badge"), "badge rendered");
+
+  // Empty groups.
+  const emptyGroupedView = buildGroupedNotificationsView([], true, baseTime, t, new Map());
+  const emptyGroupedMarkup = createGroupedNotificationsMarkup(emptyGroupedView, t);
+  assert.ok(emptyGroupedMarkup.flyout.includes("All quiet"), "empty message shown for grouped view");
+
+  // Closed view renders no flyout.
+  const closedGroupedView = buildGroupedNotificationsView(markupEntries, false, baseTime, t, liveStatuses);
+  const closedGroupedMarkup = createGroupedNotificationsMarkup(closedGroupedView, t);
+  assert.equal(closedGroupedMarkup.flyout, "", "no flyout when closed");
+}
 
 console.log("notification-view: all assertions passed.");

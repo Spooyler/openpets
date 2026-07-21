@@ -862,6 +862,7 @@ function releaseExplicitLease(leaseId: string): { readonly released: boolean } {
 function registerIdentifiedSession(leaseId: string): string | null {
   const raw = leaseManager.getRawLease(leaseId);
   if (!raw?.clientPid || !raw.sessionNonce || !raw.terminalOwnerPid) return null;
+  const { petPoolEnabled, sessionAssignment } = getAppStateSnapshot().preferences;
   return windowPetRegistry.onSessionIdentified(
     {
       sessionKey: `${raw.clientPid}:${raw.sessionNonce}`,
@@ -872,7 +873,8 @@ function registerIdentifiedSession(leaseId: string): string | null {
       cwd: raw.cwd,
     },
     raw.targetKind === "explicit" ? raw.actualPetId : raw.requestedPetId === null ? null : undefined,
-    getAppStateSnapshot().preferences.petPoolEnabled === true,
+    petPoolEnabled === true,
+    sessionAssignment,
   );
 }
 
