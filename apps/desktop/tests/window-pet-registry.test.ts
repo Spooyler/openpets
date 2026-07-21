@@ -55,7 +55,7 @@ assert.equal(registry.storeForPet("cat")?.unresolvedCount(), 1);
 assert.deepEqual(registry.resolveWindowFocus("w:88"), ["cat"]);
 assert.equal(registry.storeForPet("cat")?.unresolvedCount(), 0);
 
-// Focus target: oldest unresolved wins, else freshest activity.
+// Focus target: most recently active session.
 registry.storeForPet("cat")?.record({ sessionKey: "300:n3", windowKey: "w:88", kind: "error", message: "boom", label: "api-fix" });
 assert.deepEqual(registry.focusTargetForPet("cat"), { terminalOwnerPid: 900, terminalWindowId: 88, leaseId: "L3" });
 
@@ -67,11 +67,11 @@ assert.equal((calls[0]!.args as string[])[2], "user-closed");
 assert.equal(registry.onSessionIdentified(s3, undefined, true), null, "pool skips user-closed window");
 assert.equal(registry.onSessionIdentified(s3, "cat", false), "cat", "explicit adopt re-binds");
 
-// Teardown: last session out, window alive → notice + close(session-ended).
+// Teardown: last session out, window alive → binding goes dormant (notice only,
+// no immediate close; a returning session on the same window reactivates it).
 calls.length = 0;
 registry.onSessionGone("300:n3");
-assert.deepEqual(calls.map((c) => c.fn), ["notice", "close"]);
-assert.equal((calls[1]!.args as string[])[2], "session-ended");
+assert.deepEqual(calls.map((c) => c.fn), ["notice"]);
 
 // Window dead → instant close, no notice.
 calls.length = 0;
@@ -268,6 +268,29 @@ function makeRecorder() {
   // this pool draw would succeed instead of staying suppressed.
   const s10 = { sessionKey: "10:j", leaseId: "LJ", terminalOwnerPid: 100, terminalWindowId: 10, label: "j" };
   assert.equal(reg.onSessionIdentified(s10, undefined, true), null, "w:10's user-closed suppression was not touched by the failed assign");
+}
+
+// Focus target must be the most recently active session unconditionally,
+// even when an older session in the same binding has an unresolved
+// notification (hub mode: oldest-unresolved-first priority removed).
+{
+  const { cb } = makeRecorder();
+  let localNow = 1_000;
+  const reg = new WindowPetRegistry({ callbacks: cb, now: () => localNow, isPidAlive: () => true });
+  const sOld = { sessionKey: "20:k", leaseId: "LK", terminalOwnerPid: 200, terminalWindowId: 20, label: "old" };
+  const sNew = { sessionKey: "21:l", leaseId: "LL", terminalOwnerPid: 210, terminalWindowId: 20, label: "new" };
+  assert.equal(reg.onSessionIdentified(sOld, "owl", false), "owl");
+  localNow = 2_000;
+  assert.equal(reg.onSessionIdentified(sNew, undefined, false), "owl", "joins existing binding");
+  reg.storeForPet("owl")?.record({ sessionKey: "20:k", windowKey: "w:20", kind: "waiting", message: "needs permission", label: "old" });
+  localNow = 3_000;
+  reg.touchSessionActivity("21:l");
+  assert.equal(reg.storeForPet("owl")?.oldestUnresolved()?.sessionKey, "20:k", "sanity: old session is the one with the unresolved notification");
+  assert.deepEqual(
+    reg.focusTargetForPet("owl"),
+    { terminalOwnerPid: 210, terminalWindowId: 20, leaseId: "LL" },
+    "focuses most recently active session even when an older session has an unresolved notification",
+  );
 }
 
 console.log("Window pet registry passed.");

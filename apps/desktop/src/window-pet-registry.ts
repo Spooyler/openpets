@@ -66,6 +66,7 @@ export class WindowPetRegistry {
   readonly #userClosedWindows = new Set<WindowKey>();
   readonly #suspendedPoolWindows = new Set<WindowKey>();
   readonly #defaultSessions = new Map<string, TrackedSession>();
+  readonly #dormantBindings = new Map<WindowKey, { petId: string; origin: "explicit" | "pool"; store: NotificationStore; dormantSince: number }>();
 
   constructor(options: {
     callbacks: RegistryCallbacks;
@@ -108,6 +109,15 @@ export class WindowPetRegistry {
     if (existing) {
       this.#attachSession(windowKey, existing, session);
       return existing.petId;
+    }
+
+    // Reactivate a dormant binding for this window — same pet, no pool draw.
+    const dormant = this.#dormantBindings.get(windowKey);
+    if (dormant) {
+      this.#dormantBindings.delete(windowKey);
+      const binding = this.#createBinding(windowKey, dormant.petId, dormant.origin);
+      this.#attachSession(windowKey, binding, session);
+      return dormant.petId;
     }
 
     if (!this.#userClosedWindows.has(windowKey)) {
@@ -156,11 +166,14 @@ export class WindowPetRegistry {
     binding.sessions.delete(sessionKey);
     binding.store.removeSession(sessionKey);
     if (binding.sessions.size > 0 || !info) return;
-    this.#bindings.delete(windowKey);
+    // Move to dormant instead of closing immediately — a returning session
+    // on the same window reactivates with the same pet.
     if (this.#isPidAlive(info.terminalOwnerPid)) {
+      this.#bindings.delete(windowKey);
+      this.#dormantBindings.set(windowKey, { petId: binding.petId, origin: binding.origin, store: binding.store, dormantSince: this.#now() });
       this.#callbacks.sessionEndedNotice(info.label, binding.petId, windowKey);
-      this.#callbacks.closePet(windowKey, binding.petId, "session-ended");
     } else {
+      this.#bindings.delete(windowKey);
       this.#callbacks.closePet(windowKey, binding.petId, "window-dead");
     }
   }
@@ -352,18 +365,25 @@ export class WindowPetRegistry {
   }
 
   boundPetIds(): readonly string[] {
-    return [...this.#bindings.values()].map((binding) => binding.petId);
+    const ids = [...this.#bindings.values()].map((binding) => binding.petId);
+    for (const dormant of this.#dormantBindings.values()) ids.push(dormant.petId);
+    return ids;
+  }
+
+  cleanupDormantBindings(maxAgeMs: number): void {
+    const cutoff = this.#now() - maxAgeMs;
+    for (const [windowKey, dormant] of [...this.#dormantBindings]) {
+      if (dormant.dormantSince <= cutoff) {
+        this.#dormantBindings.delete(windowKey);
+        this.#callbacks.closePet(windowKey, dormant.petId, "session-ended");
+      }
+    }
   }
 
   #focusTarget(
-    store: NotificationStore,
+    _store: NotificationStore,
     sessions: ReadonlyMap<string, TrackedSession>,
   ): { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null {
-    const oldest = store.oldestUnresolved();
-    if (oldest) {
-      const info = sessions.get(oldest.sessionKey);
-      if (info) return { terminalOwnerPid: info.terminalOwnerPid, terminalWindowId: info.terminalWindowId, leaseId: info.leaseId };
-    }
     let best: TrackedSession | null = null;
     for (const info of sessions.values()) {
       if (!best || info.lastActivityAt > best.lastActivityAt) best = info;
