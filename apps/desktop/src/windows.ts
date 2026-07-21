@@ -77,7 +77,9 @@ function getPetsStateSnapshot(): { preferences: { defaultPetId: string }; pets: 
 }
 
 function getSettingsStateSnapshot(): {
-  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "petScale" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "petConfinementEnabled" | "petCrossDisplayEnabled" | "petGravityEnabled">;
+  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "petScale" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "petConfinementEnabled" | "petCrossDisplayEnabled" | "petGravityEnabled" | "idleChatWarnEnabled" | "idleChatWarnMinutes" | "idleChatAutoCompactEnabled" | "notificationPolicy">;
+  /** Whether console-input injection for idle auto-compact works on this platform (win32 only). */
+  idleChatAutoCompactSupported: boolean;
   petScaleOptions: typeof petScaleOptions;
   petScaleRange: { min: number; max: number; step: number };
   analytics: ReturnType<typeof getDesktopAnalyticsConsentState>;
@@ -95,7 +97,12 @@ function getSettingsStateSnapshot(): {
       petConfinementEnabled: state.preferences.petConfinementEnabled,
       petCrossDisplayEnabled: state.preferences.petCrossDisplayEnabled,
       petGravityEnabled: state.preferences.petGravityEnabled,
+      idleChatWarnEnabled: state.preferences.idleChatWarnEnabled,
+      idleChatWarnMinutes: state.preferences.idleChatWarnMinutes,
+      idleChatAutoCompactEnabled: state.preferences.idleChatAutoCompactEnabled,
+      notificationPolicy: state.preferences.notificationPolicy,
     },
+    idleChatAutoCompactSupported: process.platform === "win32",
     petScaleOptions,
     petScaleRange: { min: minPetScale, max: maxPetScale, step: 0.01 },
     analytics: getDesktopAnalyticsConsentState(),

@@ -5,7 +5,7 @@
  * without an Electron process context.
  */
 
-import { normalizePetScale } from "./app-state-core.js";
+import { normalizeIdleChatWarnMinutes, normalizePetScale } from "./app-state-core.js";
 import { isSupportedLocale, type LocalePreference } from "./i18n/index.js";
 import { validateReactionAnimationOverrides } from "./reaction-animation-mapping.js";
 
@@ -18,6 +18,10 @@ export type PreferencePatch = {
   petConfinementEnabled?: boolean;
   petCrossDisplayEnabled?: boolean;
   petGravityEnabled?: boolean;
+  idleChatWarnEnabled?: boolean;
+  idleChatWarnMinutes?: number;
+  idleChatAutoCompactEnabled?: boolean;
+  notificationPolicy?: Record<string, "persistent" | "fade" | "off">;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -56,6 +60,21 @@ export function validatePreferencePatch(value: unknown): PreferencePatch {
     patch.petGravityEnabled = value.petGravityEnabled;
   }
 
+  if ("idleChatWarnEnabled" in value) {
+    if (typeof value.idleChatWarnEnabled !== "boolean") throw new Error("Invalid idle-chat-warn-enabled value.");
+    patch.idleChatWarnEnabled = value.idleChatWarnEnabled;
+  }
+
+  if ("idleChatWarnMinutes" in value) {
+    if (typeof value.idleChatWarnMinutes !== "number" || !Number.isFinite(value.idleChatWarnMinutes)) throw new Error("Invalid idle-chat-warn-minutes value.");
+    patch.idleChatWarnMinutes = normalizeIdleChatWarnMinutes(value.idleChatWarnMinutes);
+  }
+
+  if ("idleChatAutoCompactEnabled" in value) {
+    if (typeof value.idleChatAutoCompactEnabled !== "boolean") throw new Error("Invalid idle-chat-auto-compact-enabled value.");
+    patch.idleChatAutoCompactEnabled = value.idleChatAutoCompactEnabled;
+  }
+
   if ("petCrossDisplayEnabled" in value) {
     if (typeof value.petCrossDisplayEnabled !== "boolean") throw new Error("Invalid pet-cross-display-enabled value.");
     patch.petCrossDisplayEnabled = value.petCrossDisplayEnabled;
@@ -73,6 +92,19 @@ export function validatePreferencePatch(value: unknown): PreferencePatch {
 
   if ("reactionAnimationOverrides" in value) {
     patch.reactionAnimationOverrides = validateReactionAnimationOverrides(value.reactionAnimationOverrides);
+  }
+
+  if ("notificationPolicy" in value) {
+    if (isRecord(value.notificationPolicy)) {
+      const validModes = new Set(["persistent", "fade", "off"]);
+      const policy: Record<string, "persistent" | "fade" | "off"> = {};
+      for (const [key, mode] of Object.entries(value.notificationPolicy)) {
+        if (typeof key === "string" && typeof mode === "string" && validModes.has(mode)) {
+          policy[key] = mode as "persistent" | "fade" | "off";
+        }
+      }
+      patch.notificationPolicy = policy;
+    }
   }
 
   return patch;

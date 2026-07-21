@@ -117,4 +117,25 @@ for (const { key, errMsg } of booleanKeys) {
   console.log("validatePreferencePatch: multi-key patch — PASS");
 }
 
+// ---------------------------------------------------------------------------
+// notificationPolicy validation
+// ---------------------------------------------------------------------------
+{
+  const result = validatePreferencePatch({ notificationPolicy: { permission: "persistent", complete: "fade", error: "off" } });
+  assert.deepStrictEqual(result.notificationPolicy, { permission: "persistent", complete: "fade", error: "off" });
+}
+{
+  const result = validatePreferencePatch({ notificationPolicy: { permission: "invalid" } });
+  assert.deepStrictEqual(result.notificationPolicy, {}, "invalid modes are stripped");
+}
+{
+  const result = validatePreferencePatch({ notificationPolicy: "not-an-object" });
+  assert.strictEqual(result.notificationPolicy, undefined, "non-object ignored");
+}
+{
+  const result = validatePreferencePatch({});
+  assert.strictEqual(result.notificationPolicy, undefined, "absent key not added");
+}
+console.log("validatePreferencePatch: notificationPolicy — PASS");
+
 console.log("\nAll preference-patch tests passed.");
