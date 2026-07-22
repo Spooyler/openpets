@@ -3,7 +3,7 @@
   "id": "openpets.water-reminder",
   "name": "$t:plugin.name",
   "description": "$t:plugin.description",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "runtime": "javascript",
   "icon": "droplet",
   "sdkVersion": "3.0.0",
@@ -16,22 +16,28 @@
   "permissions": [
     "pet:speak",
     "pet:interact",
+    "pet:move",
+    "pet:pin",
     "audio",
     "schedule",
     "storage",
-    "commands"
+    "commands",
+    "events"
   ],
   "configSchema": {
-    "pace": {
-      "type": "select",
-      "default": "normal",
-      "label": "$t:config.pace.label",
-      "description": "$t:config.pace.description",
-      "options": [
-        { "value": "gentle", "label": "$t:config.pace.gentle" },
-        { "value": "normal", "label": "$t:config.pace.normal" },
-        { "value": "often", "label": "$t:config.pace.often" }
-      ]
+    "intervalMinutes": {
+      "type": "number",
+      "default": 30,
+      "min": 5,
+      "max": 120,
+      "label": "$t:config.intervalMinutes.label",
+      "description": "$t:config.intervalMinutes.description"
+    },
+    "extraAggressive": {
+      "type": "boolean",
+      "default": false,
+      "label": "$t:config.extraAggressive.label",
+      "description": "$t:config.extraAggressive.description"
     },
     "customSound": {
       "type": "sound",
