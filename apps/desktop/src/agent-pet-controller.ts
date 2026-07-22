@@ -6,7 +6,7 @@ import { clampToTerminalBounds, getConfinementState, getEffectiveConfinementBoun
 import { defaultPetWindowSize, clampToVisibleWorkArea, getDefaultPetInitialPosition } from "./display.js";
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
-import { clearTransientReaction, createAgentPetWindow, getTransientDisplayDurationMs, getTransientReactionAnimationMs, loadExplicitPetContent, markNotifyDismiss, mergePetTransientDisplay, readWindowPosition, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
+import { clearTransientReaction, createAgentPetWindow, getTransientDisplayDurationMs, getTransientReactionAnimationMs, isPetWindowDragging, loadExplicitPetContent, markNotifyDismiss, mergePetTransientDisplay, readWindowPosition, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
 import { focusTerminalWindow } from "./terminal-focus.js";
 import { buildNotificationsView, type PetNotificationsView } from "./notification-view.js";
 import { t } from "./i18n/index.js";
@@ -19,6 +19,11 @@ const transientTimers = new Map<string, NodeJS.Timeout>();
 const transientAnimationTimers = new Map<string, NodeJS.Timeout>();
 const statusBadgeTimers = new Map<string, NodeJS.Timeout>();
 const dismissedAgentPets = new Set<string>();
+// When the user drags a pet, we snapshot the terminal bounds at drag-end.
+// Subsequent confinement polls skip repositioning as long as the terminal
+// hasn't moved. Once the terminal moves/resizes the snapshot becomes stale
+// and confinement re-engages automatically.
+const userPositionedBounds = new Map<string, { x: number; y: number; width: number; height: number }>();
 const farewellTimers = new Map<string, NodeJS.Timeout>();
 // Hidden = window hidden but binding/store still active (menu: Hide pet /
 // tray: Show hidden pets). Distinct from dismissedAgentPets, which tears the
@@ -150,18 +155,36 @@ export function showHiddenAgentPets(): void {
  * Reposition a pet so it sits inside its terminal window bounds (if confined).
  * This is called on show and whenever confinement state changes.
  * If the pet is in free-roam mode this is a no-op.
+ *
+ * When the user has manually dragged the pet, repositioning is suspended
+ * until the terminal window moves or resizes (the snapshot becomes stale).
  */
 export function repositionConfinedPet(petId: string, win?: BrowserWindow): void {
   const confinementBounds = getEffectiveConfinementBounds(petId);
   if (!confinementBounds) return;
   const window = win ?? agentPetWindows.get(petId);
   if (!window || window.isDestroyed()) return;
+  if (isPetWindowDragging(window)) return;
+
+  const savedBounds = userPositionedBounds.get(petId);
+  if (savedBounds) {
+    const same = savedBounds.x === confinementBounds.x && savedBounds.y === confinementBounds.y
+      && savedBounds.width === confinementBounds.width && savedBounds.height === confinementBounds.height;
+    if (same) return;
+    userPositionedBounds.delete(petId);
+  }
+
   const [cx, cy] = window.getPosition();
   const clamped = clampToTerminalBounds({ x: cx, y: cy }, defaultPetWindowSize, confinementBounds);
   if (clamped.x !== cx || clamped.y !== cy) {
     debug("pet.agent", "reposition confined", { petId, from: { x: cx, y: cy }, to: clamped });
     window.setPosition(clamped.x, clamped.y, false);
   }
+}
+
+export function markPetUserPositioned(petId: string): void {
+  const bounds = getEffectiveConfinementBounds(petId);
+  if (bounds) userPositionedBounds.set(petId, { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
 }
 
 export function closeAgentPetIfOpen(petId: string): void {
@@ -172,6 +195,7 @@ export function closeAgentPetIfOpen(petId: string): void {
   }
   info("pet.agent", "close requested", { petId, windowId: window.id, activeWindows: agentPetWindows.size });
   agentPetWindows.delete(petId);
+  userPositionedBounds.delete(petId);
   clearAgentDisplay(petId);
   unregisterRoamingPet(petId);
   const wasHidden = hiddenAgentPets.delete(petId);
@@ -370,6 +394,7 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
     onBubbleDismissed: (token) => handleBubbleDismissed(petId, token),
     onFocusSessionWindow: focusSessionTerminal,
     onPetEvent: async (name, payload) => {
+      if (name === "pet:dragEnd") markPetUserPositioned(petId);
       if (name === "pet:doubleClicked") focusSessionTerminal();
       if (name === "pet:notificationsToggle") {
         toggleAgentPetNotifications(petId);
