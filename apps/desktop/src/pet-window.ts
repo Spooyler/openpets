@@ -1011,7 +1011,9 @@ async function createDefaultPetRender(paused: boolean, display: PetTransientDisp
   const spriteUrl = pathToFileURL(join(app.getAppPath(), "assets", defaultPetSprite.fileName)).toString();
   const hasPinned = Boolean(pluginBubbles?.pinned);
   const notify = notifications ? createAnyNotificationsMarkup(notifications, t as (key: string, vars?: Record<string, string | number>) => string) : { badge: "", flyout: "" };
-  const bubbleMarkup = notifications?.open ? "" : createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles);
+  const bubbleMarkup = notifications?.open
+    ? (pluginBubbles?.transient ? createPluginBubbleMarkup(pluginBubbles.transient, false) : "")
+    : createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles);
   const bodyHtml = createPetBodyMarkup("OpenPets default pet", bubbleMarkup, `<div class="sprite" role="img" aria-label="Claude animated default pet"></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, notify.badge, notify.flyout);
   const reactionState = getReactionSpriteState(display?.reaction);
   const stateRows = defaultPetSprite.states;
@@ -1091,7 +1093,9 @@ async function createInstalledPetRender(petId: string, displayName: string, paus
   const imageUrl = pathToFileURL(spritesheetPath).toString();
   const hasPinned = Boolean(pluginBubbles?.pinned);
   const notify = notifications ? createAnyNotificationsMarkup(notifications, t as (key: string, vars?: Record<string, string | number>) => string) : { badge: "", flyout: "" };
-  const bubbleMarkup = notifications?.open ? "" : createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles);
+  const bubbleMarkup = notifications?.open
+    ? (pluginBubbles?.transient ? createPluginBubbleMarkup(pluginBubbles.transient, false) : "")
+    : createBubbleMarkup(display, paused, badge, dismissToken, pluginBubbles);
   const bodyHtml = createPetBodyMarkup(escapeHtml(displayName), bubbleMarkup, `<div class="installed-card" role="img" aria-label="${escapeHtml(displayName)}"><div class="installed-sprite"></div></div>`, createPinnedBubbleMarkup(pluginBubbles), hasPinned, notify.badge, notify.flyout);
   const reactionState = getReactionSpriteState(display?.reaction);
   const stateRows = defaultPetSprite.states;
