@@ -105,24 +105,6 @@ assert.ok(fetchedRecord);
 (fetchedRecord.config.nested as { message: string }).message = "fetched change";
 assert.deepEqual(reloadedStore.getRecord("clone-check")?.config, { nested: { message: "original" }, items: ["a"] });
 
-const updateStorePath = join(tempDir(), "update-plugin-state.json");
-const updateStore = initializePluginState({ statePath: updateStorePath });
-updateStore.upsertRecord(
-  makeRecord({
-    id: "update-check",
-    update: { availableVersion: "1.1.0", checkedAt: "2026-05-18T00:00:00.000Z", catalogUrl: "https://example.test/catalog.json" },
-  }),
-);
-updateStore.upsertRecord(makeRecord({ id: "update-normalized", update: { availableVersion: "", checkedAt: "   ", catalogUrl: undefined } }));
-const updateReload = new PluginStateStore({ statePath: updateStorePath });
-updateReload.read();
-assert.deepEqual(updateReload.getRecord("update-check")?.update, {
-  availableVersion: "1.1.0",
-  checkedAt: "2026-05-18T00:00:00.000Z",
-  catalogUrl: "https://example.test/catalog.json",
-});
-assert.equal(updateReload.getRecord("update-normalized")?.update, undefined);
-
 const orderingStore = initializePluginState({ statePath: join(tempDir(), "ordering-plugin-state.json") });
 orderingStore.upsertRecord(makeRecord({ id: "order-a", approvedPermissions: ["timer", "pet:reaction", "pet:speak"] }));
 orderingStore.upsertRecord(makeRecord({ id: "order-b", approvedPermissions: ["pet:reaction", "pet:speak", "timer"] }));
@@ -142,11 +124,10 @@ function makeRecord(patch: Partial<PluginStateRecord> = {}): PluginStateRecord {
     version: patch.version ?? "1.0.0",
     manifestPath: patch.manifestPath ?? `/tmp/${id}/openpets.plugin.json`,
     installPath: patch.installPath ?? `/tmp/${id}`,
-    source: patch.source ?? "catalog",
+    source: patch.source ?? "bundled",
     enabled: patch.enabled ?? true,
     approvedPermissions: patch.approvedPermissions ?? ["pet:speak", "timer"],
     config: patch.config ?? {},
     brokenReason: patch.brokenReason,
-    update: patch.update,
   }).filter(([, value]) => value !== undefined)) as unknown as PluginStateRecord;
 }

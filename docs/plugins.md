@@ -16,15 +16,14 @@ Source maps: `apps/desktop/src/codemap.md` (the `plugin-*.ts` modules),
 
 ## Source lanes
 
-Plugin source is split by publishing intent:
+Plugin source is split by intent:
 
-- `plugins/official/` — first-party, reviewed OpenPets plugins. Only these can be
-  bundled or enabled by default.
-- `plugins/community/` — public catalog plugins that are reviewed and shipped
-  through the same ZIP/SHA/catalog pipeline, but are labeled `publisherType:
-  "community"` and cannot be bundled.
-- `plugins/dev/` — local experiments only. The catalog generator ignores this
-  lane; move a plugin to `community/` or `official/` before publishing.
+- `plugins/official/` — first-party, reviewed OpenPets plugins. Auto-scanned and
+  bundled on launch.
+- `plugins/community/` — community plugins. Also auto-scanned and bundled on
+  launch, labeled `publisherType: "community"` in their manifests.
+- `plugins/dev/` — local experiments only. Not auto-scanned; use
+  `OPENPETS_DEV_PLUGIN_ROOTS` to load these during development.
 
 ## Mental model
 
@@ -255,64 +254,23 @@ delivery**, and **Disconnect Google Calendar**.
 Its manifest requests only `ui:delivery`, `auth`, `network`, `schedule`,
 `storage`, `commands`, and `status`.
 
-## Packaging, catalog & release validation
+## Packaging & validation
 
-The release path is documented operationally in `web/docs/plugin-publishing.md`
-and gated by the validators in [testing-and-validation.md](testing-and-validation.md).
-The command surface (run from repo root):
+Plugins ship with the app: on launch the desktop auto-scans `plugins/official/`
+and `plugins/community/` and seeds every valid plugin into the user profile —
+there is no remote catalog, download step, or release pipeline. See
+[plugins-quickstart.md](plugins-quickstart.md) for the day-to-day workflow.
 
 | Command | Purpose |
 |---------|---------|
-| `pnpm plugins:check` | Validate the package plan (dry-run, no writes) |
-| `pnpm plugins:package` | Write local catalog files + ZIP staging (no R2 upload) |
-| `pnpm plugins:validate-release` | **Release gate** — catch production-breaking mistakes before shipping |
-| `pnpm plugins:publish` | Generate + upload ZIPs to R2 |
-| `pnpm plugins:validate-live` | Post-deploy validation against the live catalog |
-| `pnpm plugins:deploy` | Deploy the web catalog |
-| `pnpm plugins:release` | Full package → validate → publish → deploy → live-validate sequence |
-| `pnpm plugins:test` | Run plugin locale checks + official/community plugin harness tests |
+| `pnpm create-plugin <id>` | Scaffold a new plugin under `plugins/official/` |
+| `pnpm plugins:locales` | Check plugin locale key coverage |
+| `pnpm plugins:test` | Locale checks + all official/community plugin test harnesses |
 
-The release validator exists to catch exactly the production-breakers
-`plugins:check` alone misses: unresolved `$t:` names/descriptions in catalog
-cards, missing ZIPs, SHA mismatches, missing `locales/en.json`, missing declared
-assets/entry files, and catalog/package drift. **Always run it before shipping a
-plugin release.**
-
-`plugins:package` and `plugins:publish` read both `plugins/official/` and
-`plugins/community/`. Catalog v2 entries include `publisherType` so the app and
-site can distinguish reviewed first-party plugins from community submissions.
-Community plugins follow the same release validation but cannot set `bundled`.
-
-### Community plugin provenance, pending submissions, and owner safe updates
-
-To lock down the integrity and security of community-submitted plugins without
-modifying the app-facing `catalog.v2.json` schema, OpenPets uses website-only
-sidecars:
-
-- `web/public/plugins/provenance.json` — reviewed provenance for installable
-  community plugins.
-- `web/public/plugins/submissions.json` — pending external GitHub submissions
-  shown on the website but not installable yet.
-
-`provenance.json` maps plugin IDs to their verified upstream metadata:
-- `publisher`: The GitHub username or organization owning the plugin.
-- `sourceUrl`: The canonical upstream GitHub repository URL.
-- `sourceSubdirectory`: Subdirectory in the repository containing the plugin manifest and files (if applicable).
-- `sourceCommit`: The specific git commit SHA that was reviewed and approved.
-- `reviewedAt`: ISO date when the current version/commit was reviewed.
-- `updatePolicy`: Can be `safe-auto` (safe for automated publishing of owner updates) or `manual-review` (always requires manual PR review).
-
-Pending entries in `submissions.json` are candidates only. They must not appear
-in the installable catalog until promoted into `plugins/community/`, packaged,
-uploaded to R2, and release-validated.
-
-Plugin owners can publish updates to their plugins without needing a manual PR to the main OpenPets repository. They do this by tag-publishing new releases on their immutable GitHub repository. OpenPets automation periodically validates updates against the following safety rules:
-1. **Repository & Publisher Match**: The release must originate from the same owner, repository, and plugin ID registered in `provenance.json`.
-2. **Version Increase**: The release version must be a clean semver increase.
-3. **No New Permissions/Capabilities**: The update must not request any new `permissions`, new `network.hosts`, new private local API/privileged capabilities, or changes to publisher configuration.
-4. **All Tests Pass**: The package must pass all validation gates (manifest, SDK compatibility, locales check, ZIP and SHA matches).
-
-If an update is determined to be **safe**, OpenPets CI/CD automation automatically updates the catalog entry version and re-packages the plugin. If any safety boundary is crossed, the update triggers a `manual-review` block and requires a maintainer to inspect and merge the change.
+Run `pnpm plugins:test` before committing plugin changes — it validates
+manifests, locale coverage (`locales/en.json` plus locale stubs), and runs
+each plugin's `test.js`. `publisherType` in the manifest distinguishes
+first-party plugins from community ones.
 
 ## Troubleshooting
 
@@ -321,8 +279,7 @@ If an update is determined to be **safe**, OpenPets CI/CD automation automatical
 | Plugin marked "broken" | Manifest/action validation failed — check `plugin-diagnostics` / the inspector |
 | SDK call silently does nothing | Permission not declared or not approved; or blocked by a global platform setting (audio/voice/quiet hours) |
 | Network call rejected | Host not in declared `network` hosts |
-| Catalog card shows raw `$t:...` | Missing locale key — `validate-release` should have caught it |
-| ZIP install fails | SHA mismatch, non-HTTPS/disallowed host, or oversized/invalid ZIP entries |
+| Plugin card shows raw `$t:...` | Missing locale key — `pnpm plugins:locales` catches it |
 | Local plugin won't load | Local loader rejected the folder (symlink/path/size) or manifest isn't at root |
 | Icon/image missing | Asset not declared in `assets`, wrong format, or over size cap |
 
@@ -335,7 +292,7 @@ If an update is determined to be **safe**, OpenPets CI/CD automation automatical
 | Runtime / scheduling / broken-state | `plugin-runtime.ts` |
 | Sandbox host | `plugin-js-host.ts` |
 | Permission + dispatch | `plugin-sdk-bridge.ts` + `plugin-sdk-*.ts` |
-| Catalog install/verify | `plugin-catalog.ts`, `plugin-package.ts` |
+| Bundled seeding / uninstall safety | `plugin-service.ts`, `plugin-package.ts` |
 | Local dev load | `plugin-local-loader.ts` |
 | Official plugin examples | `plugins/official/*` |
 </content>

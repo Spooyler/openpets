@@ -89,33 +89,10 @@ Each package runs its own `check`/`test`. Notable contract/boundary coverage:
   pointer selection persist, reduced motion is static, and a test delivery uses
   the selected courier without requiring any installed pet.
 
-## Plugin release validation (production gate)
+## Plugin validation
 
-`plugins:check` alone is **not** release-readiness. The dedicated validators are
-the production gate (`scripts/validate-plugin-release.mjs`):
-
-| Command | When | Catches |
-|---------|------|---------|
-| `pnpm plugins:package` | build artifacts | (produces catalog + ZIP staging) |
-| `pnpm plugins:validate-release` | **before deploy** | unresolved `$t:` names/descriptions in catalog cards, missing plugin ZIPs, SHA mismatches, missing `locales/en.json`, missing declared assets/entry files (including courier sprites), catalog/package drift, and **community plugin sidecar validation** (`provenance.json`, `submissions.json`) |
-| `pnpm plugins:validate-live` | **after deploy/R2 upload** | the same, against the live catalog + live ZIPs & live sidecars |
-
-### Plugin sidecar validation
-
-The release validator automatically loads `web/public/plugins/provenance.json`
-and `web/public/plugins/submissions.json` and asserts:
-1. Every community plugin mapped in the catalog has a matching provenance entry.
-2. All provenance entries contain valid URLs, hex SHAs (40 characters), and formatted dates.
-3. Update policy is strictly limited to either `safe-auto` or `manual-review`.
-4. Pending submissions are well-formed and are not also present in the installable catalog.
-
-The full pre-ship sequence (from `AGENTS.md`):
-`pnpm plugins:package` → `pnpm plugins:validate-release` → deploy/upload →
-`pnpm plugins:validate-live`. Treat a failing validator as a hard stop — these
-are exactly the mistakes that 404 a plugin or render a raw `$t:...` to users.
-For the full plugin catalog release path in one command, run
-`pnpm plugins:release`; it packages, validates, publishes ZIPs, deploys the web
-catalog, then validates the live catalog.
+Plugins are bundled locally from `plugins/official/` and `plugins/community/`.
+Validate with `pnpm plugins:test` (runs locale checks and all plugin test suites).
 
 ## Catalog verification (production gate for pets)
 

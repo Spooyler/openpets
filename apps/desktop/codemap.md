@@ -45,9 +45,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 - **External Services**: 
   - `https://openpets.dev/pets/catalog.v2.json` (pet catalog V2)
   - `https://openpets.dev/pets/catalog.v3.json` (pet catalog V3 with pagination)
-  - `https://openpets.dev/plugins/catalog.v1.json` (plugin catalog V1)
   - `https://zip.openpets.dev/pets/{id}.zip` (pet downloads)
-  - `https://zip.openpets.dev/plugins/{id}.zip` (plugin downloads)
   - GitHub API (release checks)
 - **System Integration**:
   - Claude Code: `~/.claude/CLAUDE.md`, `~/.claude/settings.json`, `claude mcp` commands
@@ -78,8 +76,7 @@ OpenPets desktop companion application. Tray-first Electron app providing animat
 - `plugin-runtime.ts`: Runtime that compiles enabled declarative timers and starts JavaScript plugin hosts for approved pet/schedule/storage/command/status/network actions
 - `plugin-state.ts`: Atomic JSON state store for installed plugins, enabled flag, approved permissions, config, broken state, and update metadata
 - `plugin-config.ts`: Plugin default/effective config validation and config reference resolution
-- `plugin-catalog.ts`/`plugin-catalog-validation.ts`: Plugin catalog fetch/cache and strict catalog entry validation
-- `plugin-package.ts`: Catalog plugin ZIP download, SHA-256 verification, manifest extraction, install, and safe uninstall path resolution
+- `plugin-package.ts`: Safe plugin install directory resolution and deletion with path traversal protection
 - `plugin-local-loader.ts`: Local developer plugin folder validation and manifest snapshotting into app data
 - `plugin-manifest-reader.ts`: Safe installed-manifest reader enforcing allowed roots, size limits, path containment, and expected id/version
 - `plugin-pet-api.ts`: Runtime bridge from plugin actions to default pet speech/reaction APIs

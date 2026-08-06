@@ -25,7 +25,6 @@ type DesktopAnalyticsEvent =
   | "desktop_agent_connected"
   | "desktop_integration_activity_received"
   | "desktop_lease_acquired"
-  | "desktop_plugin_catalog_opened"
   | "desktop_plugin_install_started"
   | "desktop_plugin_installed"
   | "desktop_plugin_install_failed"

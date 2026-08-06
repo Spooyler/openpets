@@ -37,7 +37,6 @@ const behaviorTests = [
   ".test-dist/tests/plugin-delivery.test.js",
   ".test-dist/tests/plugin-state.test.js",
   ".test-dist/tests/plugin-runtime.test.js",
-  ".test-dist/tests/plugin-catalog-validation.test.js",
   ".test-dist/tests/plugin-package.test.js",
   ".test-dist/tests/plugin-service.test.js",
   ".test-dist/tests/plugin-bridge-fuzz.test.js",

@@ -90,7 +90,7 @@ if (!gotSingleInstanceLock) {
     initializePluginPlatformSettings(app.getPath("userData"));
     const pluginCapabilities = createElectronPluginHostCapabilities(app.getPath("userData"));
     let devPluginWatcher: ReturnType<typeof startDevPluginWatcher> | undefined;
-    const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, process.env.OPENPETS_DISABLE_PLUGIN_CATALOG === "1" || devPluginMode, resolveBundledOfficialPluginRoots(), !devPluginMode, pluginCapabilities, (properties) => {
+    const pluginService = initializePluginService(app.getPath("userData"), defaultPluginPetApi, app.getVersion(), new ElectronPluginJsHost(), writePluginRuntimeLog, resolveBundledOfficialPluginRoots(), !devPluginMode, pluginCapabilities, (properties) => {
       trackDesktopEvent("desktop_plugin_runtime_error", properties);
     }, (sourcePath) => devPluginWatcher?.addPaths([sourcePath]), (sourcePath) => devPluginWatcher?.removePath(sourcePath));
     // Wall-clock schedules (daily/cron/at) re-arm deterministically after sleep.
@@ -137,7 +137,14 @@ function parseDevPluginEnv(value: string | undefined): string[] {
 }
 
 function resolveBundledOfficialPluginRoots(): string[] {
-  const candidates = [join(process.resourcesPath, "plugins", "official"), resolve(process.cwd(), "plugins", "official"), resolve(app.getAppPath(), "..", "..", "plugins", "official")];
+  const candidates = [
+    join(process.resourcesPath, "plugins", "official"),
+    resolve(process.cwd(), "plugins", "official"),
+    resolve(app.getAppPath(), "..", "..", "plugins", "official"),
+    join(process.resourcesPath, "plugins", "community"),
+    resolve(process.cwd(), "plugins", "community"),
+    resolve(app.getAppPath(), "..", "..", "plugins", "community"),
+  ];
   return Array.from(new Set(candidates.filter((candidate) => existsSync(candidate))));
 }
 

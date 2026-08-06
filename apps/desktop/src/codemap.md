@@ -126,9 +126,9 @@ Control Center plugins route:
 tray.ts → openControlCenterWindow("plugins") → windows.ts → renderer React app
 └── openpets:plugins-* IPC handlers call PluginService methods
 
-Catalog install/update:
-plugin-catalog.ts → plugin-catalog-validation.ts
-└── plugin-package.ts downloads HTTPS ZIP, validates SHA-256, extracts root manifest only, and installs to userData/plugins/{id}
+Bundled plugin seeding:
+plugin-service.ts auto-scans plugins/official/ and plugins/community/ directories
+└── seeds each plugin to userData/plugins/{id} on launch
 
 Local development load:
 plugin-local-loader.ts validates selected folder manifest and snapshots only openpets.plugin.json to userData/plugins-dev/{id}
@@ -153,7 +153,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
   - `pet-window.ts` ↔ `default-pet-controller.ts`, `agent-pet-controller.ts`
   - `pet-window.ts` ↔ `plugin-bubble-arbiter.ts`, `plugin-pet-registry.ts`, `pet-motion-engine.ts` for plugin-driven bubbles, spawned pets, and movement updates
   - `pet-installation.ts` ↔ `app-state.ts`, `catalog.ts`, `zip-safety.ts`
-  - `plugin-service.ts` ↔ `plugin-state.ts`, `plugin-runtime.ts`, `plugin-catalog.ts`, `plugin-package.ts`, `plugin-local-loader.ts`, `plugin-js-host.ts`, `plugin-sdk-bridge.ts`, plugin SDK namespace modules, diagnostics, assets, settings, panels, voice, OAuth, secrets, and user sounds
+  - `plugin-service.ts` ↔ `plugin-state.ts`, `plugin-runtime.ts`, `plugin-package.ts`, `plugin-local-loader.ts`, `plugin-js-host.ts`, `plugin-sdk-bridge.ts`, plugin SDK namespace modules, diagnostics, assets, settings, panels, voice, OAuth, secrets, and user sounds
   - `i18n/` ↔ `tray.ts`, `windows.ts`, `pet-window.ts`, `reaction-messages.ts`, `plugin-i18n.ts`
 
 - **To packages/**:
@@ -166,7 +166,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 
 - **To System**:
   - File system: `app.getPath("userData")`, `userData/plugins/`, `userData/plugins-dev/`, plugin storage JSON, `~/.codex/pets/`, `~/.claude/`, `~/.opencode/`
-  - Network: `fetch()` to openpets.dev, GitHub API, plugin catalog at `https://openpets.dev/plugins/catalog.v1.json`, plugin ZIPs restricted to `https://zip.openpets.dev/plugins/`
+  - Network: `fetch()` to openpets.dev, GitHub API (pet catalog, update checks)
   - Processes: `spawn()` for `claude`, `opencode`, `node`
 
 ## Key Modules
@@ -226,10 +226,8 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `plugin-state.ts`: Persistent plugin state store (`openpets-plugin-state.json`) with atomic temp+rename writes, normalized records, approved permissions, config, source, and broken reason.
 - `plugin-runtime.ts`: Runtime that compiles enabled declarative timer triggers, starts/stops JavaScript plugin hosts, verifies approved permissions, exposes public command/status state, validates actions, schedules cancellable timers, and marks broken plugins on validation/action failure.
 - `plugin-pet-api.ts`: Narrow adapter from plugin actions to default pet external `say`/`react` controller calls.
-- `plugin-service.ts`: Application-facing plugin orchestrator for safe snapshots, enable/disable, config save, command execution, reload, catalog install/update, local load, uninstall, permission prompts, compatibility checks, JavaScript host/SDK bridge integration, and runtime reloads.
-- `plugin-catalog.ts`: Remote plugin catalog fetch with timeout, redirect rejection, response size cap, cache, and refresh support.
-- `plugin-catalog-validation.ts`: Catalog V1 schema validation, duplicate id checks, semver/SHA fields, permissions canonicalization, and optional minimum OpenPets version.
-- `plugin-package.ts`: Catalog plugin package download/install with HTTPS host/path allowlist, SHA-256 verification, ZIP size/entry restrictions, manifest/catalog consistency checks, and safe uninstall path resolution.
+- `plugin-service.ts`: Application-facing plugin orchestrator for safe snapshots, enable/disable, config save, command execution, reload, local load, uninstall, permission prompts, bundled plugin auto-scan and seeding, JavaScript host/SDK bridge integration, and runtime reloads.
+- `plugin-package.ts`: Safe plugin install directory resolution and deletion with path traversal protection.
 - `plugin-local-loader.ts`: Developer loader that validates a selected local folder and snapshots only the manifest into `plugins-dev` with symlink/path/size protections.
 - `plugin-js-host.ts`: Sandboxed hidden BrowserWindow host for JavaScript plugin entry modules with per-plugin session partitioning, navigation/window-open hardening, SDK IPC tokening, registration handshake, config listener cleanup, and teardown.
 - `plugin-sdk-bridge.ts`: Permission-checked JavaScript plugin SDK bridge that validates routes, creates plugin contexts, enforces approved permissions/quotas, and delegates namespace behavior to focused SDK modules.
@@ -281,8 +279,8 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 | `windows.ts` | Renderer | State snapshots via IPC invoke |
 | `agent-setup.ts` | Claude/OpenCode/Cursor/VS Code | MCP add/remove, config writes |
 | All modules | `logger.ts` | Structured logs to `userData/logs/openpets.log` |
-| Plugin catalog | `plugin-catalog.ts`/`plugin-service.ts` | Discoverable plugin metadata filtered by app version and install state |
-| Plugin ZIP/local folder | `plugin-package.ts`/`plugin-local-loader.ts` | Validated manifest snapshot installed under `userData/plugins*` |
+| Bundled plugins | `plugin-service.ts` | Auto-scanned from plugins/official/ and plugins/community/, seeded to userData/plugins/ |
+| Plugin local folder | `plugin-local-loader.ts` | Validated manifest snapshot installed under `userData/plugins-dev/` |
 | `plugin-state.ts` | `userData/openpets-plugin-state.json` | Installed plugins, enabled flag, approved permissions, config, broken status |
 | Control Center renderer | `control-center-preload.cjs`/`windows.ts` | Narrow Dashboard/Pets/Integrations/Plugins/Settings snapshots and route-targeted actions |
 | `plugin-runtime.ts` | `plugin-pet-api.ts`/`plugin-js-host.ts`/`plugin-sdk-bridge.ts` | Declarative timers and JavaScript SDK actions on default/spawned pets, schedules, storage, commands, status, logs, network, UI, audio, events, bus, AI, OAuth, secrets, voice, and panels |

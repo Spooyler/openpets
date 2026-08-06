@@ -327,35 +327,6 @@ export function installInternalUiHandlers(): void {
     return getPluginService().loadLocal();
   });
 
-  ipcMain.handle("openpets:plugins-catalog-snapshot", async (event, refresh: unknown) => {
-    assertAllowedSender(event, ["control-center"]);
-    trackDesktopEvent("desktop_plugin_catalog_opened", { refresh: refresh === true });
-    const snapshot = await getPluginService().getCatalogSnapshot(refresh === true);
-    if (snapshot.error) trackDesktopEvent("desktop_catalog_fetch_failed", { catalog_kind: "plugin", error_code: classifyAnalyticsError(snapshot.error, "plugin_catalog_fetch_failed") });
-    return snapshot;
-  });
-
-  ipcMain.handle("openpets:plugins-install-catalog", async (event, id: unknown): Promise<PluginServiceResult> => {
-    assertAllowedSender(event, ["control-center"]);
-    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)) return pluginUiError("Invalid plugin install request.");
-    trackDesktopEvent("desktop_plugin_install_started", { plugin_source: "catalog" });
-    try {
-      const result = await getPluginService().installCatalog(id);
-      if (result.ok && isCatalogPluginInstalled(result.snapshot, id)) trackDesktopEvent("desktop_plugin_installed", { ...pluginTelemetryForSnapshot(result.snapshot, id), plugin_source: "catalog" });
-      else if (!result.ok) trackDesktopEvent("desktop_plugin_install_failed", { plugin_source: "catalog", error_code: classifyAnalyticsError(result.error, "plugin_install_failed") });
-      return result;
-    } catch (error) {
-      trackDesktopEvent("desktop_plugin_install_failed", { plugin_source: "catalog", error_code: classifyAnalyticsError(error, "plugin_install_failed") });
-      throw error;
-    }
-  });
-
-  ipcMain.handle("openpets:plugins-update-catalog", async (event, id: unknown): Promise<PluginServiceResult> => {
-    assertAllowedSender(event, ["control-center"]);
-    if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)) return pluginUiError("Invalid plugin update request.");
-    return getPluginService().updateCatalog(id);
-  });
-
   ipcMain.handle("openpets:plugins-uninstall", async (event, id: unknown): Promise<PluginServiceResult> => {
     assertAllowedSender(event, ["control-center"]);
     if (typeof id !== "string" || !/^[a-z0-9][a-z0-9._-]{1,62}[a-z0-9]$/.test(id)) return pluginUiError("Invalid plugin uninstall request.");
@@ -712,11 +683,6 @@ function pluginTelemetryForSnapshot(snapshot: PluginServiceResult["snapshot"], p
     plugin_runtime: plugin?.runtime,
     permission_count: plugin?.approvedPermissions.length,
   };
-}
-
-function isCatalogPluginInstalled(snapshot: PluginServiceResult["snapshot"], pluginId: string): boolean {
-  const plugin = snapshot.plugins.find((candidate) => candidate.id === pluginId);
-  return plugin?.source === "catalog" || plugin?.bundled === true;
 }
 
 function petTelemetryForId(petId: string): Record<string, string | boolean | undefined> {

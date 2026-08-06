@@ -170,10 +170,9 @@ await scenario("javascript early crash marks broken", async ({ store }) => {
   assert.match(store.getRecord("plug")?.brokenReason ?? "", /early crash/);
 });
 
-await scenario("disabled and killed javascript plugins do not start", async ({ store }) => {
+await scenario("disabled javascript plugins do not start", async ({ store }) => {
   const jsHost = new FakeJsHost();
   addPlugin(store, { manifestVersion: 2, runtime: "javascript", enabled: false, approvedPermissions: [] }, jsManifest());
-  addPlugin(store, { id: "killed", manifestVersion: 2, runtime: "javascript", catalogDisabled: true, approvedPermissions: [] }, jsManifest({ id: "killed" }));
   await runtime(store, new FakeScheduler(), new FakePetApi(), undefined, jsHost).start();
   assert.equal(jsHost.starts.length, 0);
 });
@@ -426,7 +425,7 @@ function addPlugin(store: PluginStateStore, patch: Partial<PluginStateRecord> = 
 }
 
 function record(patch: Partial<PluginStateRecord> = {}): PluginStateRecord {
-  return { id: patch.id ?? "plug", version: patch.version ?? "1.0.0", manifestPath: patch.manifestPath ?? "", installPath: patch.installPath ?? "", source: patch.source ?? "local", manifestVersion: patch.manifestVersion, runtime: patch.runtime, sdkVersion: patch.sdkVersion, enabled: patch.enabled ?? true, approvedPermissions: patch.approvedPermissions ?? ["timer", "pet:speak", "pet:reaction"], approvedNetworkHosts: patch.approvedNetworkHosts, config: patch.config ?? {}, brokenReason: patch.brokenReason, catalogDisabled: patch.catalogDisabled };
+  return { id: patch.id ?? "plug", version: patch.version ?? "1.0.0", manifestPath: patch.manifestPath ?? "", installPath: patch.installPath ?? "", source: patch.source ?? "local", manifestVersion: patch.manifestVersion, runtime: patch.runtime, sdkVersion: patch.sdkVersion, enabled: patch.enabled ?? true, approvedPermissions: patch.approvedPermissions ?? ["timer", "pet:speak", "pet:reaction"], approvedNetworkHosts: patch.approvedNetworkHosts, config: patch.config ?? {}, brokenReason: patch.brokenReason };
 }
 
 function manifest(patch: Partial<OpenPetsDeclarativePluginManifest> & { everyMinutes?: OpenPetsDeclarativePluginManifest["triggers"][number]["everyMinutes"]; actions?: OpenPetsDeclarativePluginManifest["triggers"][number]["actions"] } = {}): OpenPetsDeclarativePluginManifest {

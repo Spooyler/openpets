@@ -43,17 +43,13 @@ All from the repo root unless noted (full list in root `package.json`):
 |---------|---------|
 | `openpets plugin new <name> --template <t>` | Scaffold an SDK v3 plugin |
 | `openpets plugin validate <dir>` | Validate a plugin locally |
-| `pnpm plugins:test` | Locale checks + official-plugin harness tests |
-| `pnpm plugins:check` | Dry-run the catalog package plan |
-| `pnpm plugins:package` | Build catalog + ZIP staging (no upload) |
-| `pnpm plugins:validate-release` | Pre-ship release gate |
-| `pnpm plugins:publish` | Upload ZIPs to R2 |
-| `pnpm plugins:validate-live` | Post-deploy live check |
-| `pnpm plugins:deploy` | Deploy the web catalog |
+| `pnpm plugins:test` | Locale checks + official/community plugin harness tests |
+| `pnpm plugins:locales` | Check plugin locale key coverage |
+| `pnpm create-plugin <id>` | Scaffold a new plugin under `plugins/official/` |
 
-See [plugins.md](plugins.md) for the authoring workflow and
-[testing-and-validation.md](testing-and-validation.md) for what the validators
-catch.
+Plugins are bundled with the app from `plugins/official/` and
+`plugins/community/` — there is no separate release pipeline. See
+[plugins.md](plugins.md) for the authoring workflow.
 
 ## Running the desktop app
 
@@ -103,9 +99,9 @@ the packaging contract — see [testing-and-validation.md](testing-and-validatio
 
 ### Web catalog
 
-Pet and plugin catalog deploys run from `web/` with Bun (`bun run deploy`,
-`pnpm plugins:deploy`). Catalog generation/verification is in [catalog.md](catalog.md)
-and the runbooks under `web/docs/`.
+Pet catalog deploys run from `web/` with Bun (`bun run deploy`). Catalog
+generation/verification is in [catalog.md](catalog.md) and the runbooks under
+`web/docs/`.
 
 ## Cross-platform & Linux testing
 

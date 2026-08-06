@@ -79,21 +79,17 @@ not carry legacy bloat for deprecated plugin/catalog behavior.
 
 ## Plugin Docs
 
-Before changing plugin platform code, official plugins, plugin catalog generation, plugin packaging, plugin runtime behavior, or plugin-facing UI, read:
-- `docs/plugins.md` for the current plugin platform architecture, manifest/runtime rules, local development workflow, publishing commands, and troubleshooting notes.
+Before changing plugin platform code, official plugins, plugin packaging, plugin runtime behavior, or plugin-facing UI, read:
+- `docs/plugins.md` for the current plugin platform architecture, manifest/runtime rules, local development workflow, validation commands, and troubleshooting notes.
 - `docs/superplugins.md` for the companion-first plugin direction, planned official plugin lineup, bundling defaults, and right-click plugin action strategy.
 
-When plugin work is finished, update these docs if behavior, commands, manifests, plugin IDs, default bundled/enabled status, catalog workflow, permissions, or the planned plugin lineup changed. Do not leave plugin docs stale after implementation.
+When plugin work is finished, update these docs if behavior, commands, manifests, plugin IDs, default bundled/enabled status, permissions, or the planned plugin lineup changed. Do not leave plugin docs stale after implementation.
 
-For plugin release/catalog work, run the release validator before shipping:
-- `pnpm plugins:package`
-- `pnpm plugins:validate-release`
-- after deploy/R2 upload, `pnpm plugins:validate-live`
-
-The validator exists to catch production-breaking plugin mistakes: unresolved
-`$t:` names/descriptions in catalog cards, missing plugin ZIPs, SHA mismatches,
-missing `locales/en.json`, missing declared assets/entry files, and catalog/package
-drift. Do not rely on `plugins:check` alone for release readiness.
+Plugins ship bundled with the app (auto-scanned from `plugins/official/` and
+`plugins/community/`); there is no remote plugin catalog or release pipeline.
+Before committing plugin changes, run `pnpm plugins:test` — it validates
+manifests, locale coverage (`locales/en.json` plus locale stubs), and runs each
+plugin's `test.js` harness.
 
 See `docs/testing-and-validation.md` for the full quality ladder and what "production-valid" means per change type.
 

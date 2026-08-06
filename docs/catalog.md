@@ -15,8 +15,10 @@ producer view.
 
 - **Pet catalog v3 is the source of truth.** v2 exists only for old app versions
   and as a fallback. New work targets v3.
-- **Plugin catalog v2 is active.** v1 is kept as an *empty compatibility shim*
-  for older desktop builds. (Verified URLs in `apps/desktop/src/plugin-catalog.ts`.)
+- **There is no plugin catalog.** Plugins ship bundled with the desktop app
+  (auto-scanned from `plugins/official/` and `plugins/community/`); see
+  [plugins.md](plugins.md). The legacy `plugins/catalog.v*.json` endpoints may
+  stay live as empty shims for old desktop builds, but nothing new targets them.
 - This matches the forward-only direction in `AGENTS.md`: don't optimize new
   behavior for legacy catalog versions.
 
@@ -29,9 +31,6 @@ producer view.
 | Pet catalog v3 search | `…/pets/catalog.v3/search.json` (+ search pages) | `catalog.ts` |
 | Pet catalog v2 (legacy/fallback) | `https://openpets.dev/pets/catalog.v2.json` | `catalog.ts` |
 | Pet ZIPs | `https://zip.openpets.dev/pets/{slug}/{installId}.zip` | `pet-installation.ts` |
-| Plugin catalog v2 (active) | `https://openpets.dev/plugins/catalog.v2.json` | `plugin-catalog.ts` |
-| Plugin catalog v1 (empty compat) | `https://openpets.dev/plugins/catalog.v1.json` | `plugin-catalog.ts` |
-| Plugin ZIPs | `https://zip.openpets.dev/plugins/{plugin-id}.zip` | `plugin-package.ts` |
 
 ## Pet catalog v3 contract
 
@@ -90,49 +89,15 @@ verifying them is the `verify:catalog*` family (see
 [testing-and-validation.md](testing-and-validation.md)). The web build also emits
 `app/lib/pets.generated.js` / `pets.preview.js` for the site — out of scope here.
 
-## Plugin catalog contract
+## Plugins: no catalog
 
-The plugin catalog (`plugin-catalog-validation.ts`) is validated strictly:
-schema version, unique ids, semver + SHA fields, canonicalized permissions, and
-an optional minimum-OpenPets-version gate. Catalog cards may carry an
-`iconDataUrl` (base64 SVG) so the Plugins UI renders an icon without an extra
-fetch. Each entry's `downloadUrl` must point at `zip.openpets.dev/plugins/`.
-Catalog v2 also carries `publisherType: "official" | "community"`; older
-catalogs without the field are treated as official by the desktop validator.
-Community entries are public catalog plugins but cannot be bundled/default-on.
-
-### Sidecars: plugin provenance and submissions (website-only)
-
-To secure community-contributed plugins without changing the app-facing
-`catalog.v2.json` schema, the website serves sidecar metadata files:
-
-| File | Purpose |
-|------|---------|
-| `https://openpets.dev/plugins/provenance.json` | Reviewed provenance for installable community plugins. |
-| `https://openpets.dev/plugins/submissions.json` | Pending external GitHub submissions shown on the website but not installable. |
-
-These files are only used by the website/CI environment for provenance display,
-validation, and automated owner-publishing policy. `provenance.json` is keyed by
-plugin ID and defines:
-* `publisher`: GitHub user/organization owner.
-* `sourceUrl`: Upstream GitHub repository.
-* `sourceSubdirectory`: Optional subdirectory under the repository root.
-* `sourceCommit`: The reviewed and approved commit SHA.
-* `reviewedAt`: ISO date/time of review.
-* `updatePolicy`: `safe-auto` (safe for automated release updates) or `manual-review`.
-
-`submissions.json` is also keyed by plugin ID, but entries are candidates only:
-they must not appear in the installable catalog until promoted into
-`plugins/community/`, packaged, uploaded, and release-validated.
-
-The desktop fetch (`plugin-catalog.ts`) is hardened: timeout, redirect
-rejection, response-size cap, and caching with refresh. Install/verification of
-the downloaded ZIP (SHA-256, host/path allowlist, entry restrictions, manifest
-↔ catalog consistency) is `plugin-package.ts`. See [plugins.md](plugins.md).
+Plugins do not use a web catalog: they ship inside the desktop app, auto-scanned
+from `plugins/official/` and `plugins/community/` and seeded on launch. See
+[plugins.md](plugins.md).
 
 ## ZIP hosting (R2)
 
-Both pet and plugin ZIPs live on the R2 bucket (default `openpets`) backing
+Pet ZIPs live on the R2 bucket (default `openpets`) backing
 `zip.openpets.dev`. The hard rule: **never ship a catalog entry whose ZIP isn't
 live on R2.** The verification commands HEAD-check every ZIP for exactly this
 reason. Override the bucket with `OPENPETS_R2_BUCKET`; `--skip-r2` is for local
@@ -144,16 +109,12 @@ testing only.
   search index for filtering.
 - **Installing**: see the install flow in [pets.md](pets.md) — catalog lookup (which allows installing any valid v3 catalog pet by ID, even if not original or featured) →
   ZIP download → validated extraction → state update → tray refresh. (Control Center UI surfaces only curated original/featured pets, but explicit install by ID allows any valid v3 pet).
-- **Plugins**: the Plugins page lists catalog v2 entries filtered by app version
-  and install state; install downloads + verifies the plugin ZIP. See
-  [plugins.md](plugins.md).
+- **Plugins**: the Plugins page lists the bundled and locally loaded plugins;
+  nothing is fetched from the web. See [plugins.md](plugins.md).
 
 ## Pointers
 
 - Producer/runbook detail: `web/docs/pet_publishing.md`,
-  `web/docs/plugin-publishing.md`, `web/docs/pet-import-process.md`.
+  `web/docs/pet-import-process.md`.
 - Verification gates: [testing-and-validation.md](testing-and-validation.md).
-- Note: as of 2026-06-13, `web/docs/plugin-publishing.md` lists a stale official
-  lineup (see root `improvements.md`); trust the catalog generator + the live
-  `plugins/official/` folder.
 </content>

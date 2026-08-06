@@ -16,7 +16,7 @@
     "dev": "pnpm build && electron .",
     "dev:electron": "pnpm build:main && electron .",
     "dev:control-center": "concurrently -k -n renderer,electron -c cyan,magenta \"pnpm dev:renderer\" \"wait-on http://127.0.0.1:5173 && cross-env OPENPETS_RENDERER_URL=http://127.0.0.1:5173 pnpm dev:electron\"",
-    "dev:plugins": "cross-env OPENPETS_DISABLE_PLUGIN_CATALOG=1 OPENPETS_DEV_PLUGIN_ROOTS=../../plugins/official:../../plugins/dev pnpm dev",
+    "dev:plugins": "cross-env OPENPETS_DISABLE_PLUGIN_CATALOG=1 OPENPETS_DEV_PLUGIN_ROOTS=../../plugins/official pnpm dev",
     "dev:debug": "OPENPETS_LOG_LEVEL=debug OPENPETS_LOG_CONSOLE=1 pnpm dev",
     "package": "pnpm package:preflight && pnpm build && node scripts/clean-package-output.cjs && electron-builder",
     "package:dir": "pnpm package:preflight && pnpm build && node scripts/clean-package-output.cjs && electron-builder --dir && node dist/check-packaging-contract.js --output",

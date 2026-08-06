@@ -106,7 +106,7 @@ export class PluginRuntime {
     this.#cancelPlugin(id);
     if (!this.#active) { logPluginDiagnostic(this.#logger, "debug", "plugin reload", { pluginId: id, phase: "skip", reason: "runtime-inactive" }); return; }
     const record = this.#stateStore.getRecord(id);
-    if (!record || !record.enabled || record.catalogDisabled) { logPluginDiagnostic(this.#logger, "debug", "plugin reload", { pluginId: id, phase: "skip", reason: !record ? "not-installed" : !record.enabled ? "disabled" : "catalog-disabled" }); return; }
+    if (!record || !record.enabled) { logPluginDiagnostic(this.#logger, "debug", "plugin reload", { pluginId: id, phase: "skip", reason: !record ? "not-installed" : "disabled" }); return; }
     const slot = this.#slotFor(id);
     const generation = slot.generation;
 
@@ -136,7 +136,7 @@ export class PluginRuntime {
     const slot = this.#slots.get(record.id);
     if (!slot || slot.generation !== generation) return false;
     const current = this.#stateStore.getRecord(record.id);
-    return current?.enabled === true && current.catalogDisabled !== true && current.version === record.version && current.manifestPath === record.manifestPath && current.installPath === record.installPath;
+    return current?.enabled === true && current.version === record.version && current.manifestPath === record.manifestPath && current.installPath === record.installPath;
   }
 
   #compileDeclarativePlugin(record: PluginStateRecord, manifest: OpenPetsPluginManifest): CompiledTimer[] {

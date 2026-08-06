@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -23,17 +22,6 @@ class FakeRuntime {
   getPluginState(id: string): { commands: Array<{ id: string; title: string; description?: string; form?: { submitLabel?: string; fields: Array<{ id: string; type: string; label: string }> } }> } { return { commands: this.commandState[id] ?? [] }; }
   async executeCommand(pluginId: string, commandId: string): Promise<void> { this.executed.push({ pluginId, commandId }); if (this.commandError) throw this.commandError; }
   log(level: string, message: string, fields?: Record<string, unknown>): void { this.logs.push({ level, message, fields }); }
-}
-
-class ThrowingStateStore extends PluginStateStore {
-  failNextUpsert = false;
-  override upsertRecord(record: PluginStateRecord): PluginStateRecord {
-    if (this.failNextUpsert) {
-      this.failNextUpsert = false;
-      throw new Error("state write failed");
-    }
-    return super.upsertRecord(record);
-  }
 }
 
 await scenario("initializes store and roots", async ({ userData }) => {
@@ -179,7 +167,7 @@ await scenario("uninstall clears plugin user sounds", async ({ userData, root, s
   mkdirSync(join(userData, "plugins-dev"), { recursive: true });
   const runtime = new FakeRuntime();
   const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, allowedPluginRoots: [root] });
-  addPlugin(store, { source: "catalog", installPath: join(userData, "plugins", "plug") });
+  addPlugin(store, { source: "bundled", installPath: join(userData, "plugins", "plug") });
   const soundDir = join(userData, "plugin-user-sounds", "plug");
   mkdirSync(soundDir, { recursive: true });
   writeFileSync(join(soundDir, "a".repeat(32) + ".ogg"), "sound");
@@ -245,7 +233,7 @@ await localScenario("loadLocal rejects invalid manifest safely", async ({ servic
 await localScenario("loadLocal rejects source symlink", async ({ service, source, root }) => {
   writeManifest(source, manifest({ id: "symlink-folder" }));
   const link = join(root, "source-link");
-  symlinkSync(source, link, "dir");
+  symlinkSync(source, link, "junction");
   service["__source"] = link;
   const result = await service.loadLocal();
   assert.equal(result.ok, false);
@@ -254,7 +242,15 @@ await localScenario("loadLocal rejects source symlink", async ({ service, source
 await localScenario("loadLocal rejects manifest symlink", async ({ service, source, root }) => {
   const real = join(root, "real-manifest.json");
   writeFileSync(real, JSON.stringify(manifest({ id: "symlink-manifest" })), "utf8");
-  symlinkSync(real, join(source, OPENPETS_PLUGIN_MANIFEST_FILENAME));
+  try {
+    symlinkSync(real, join(source, OPENPETS_PLUGIN_MANIFEST_FILENAME));
+  } catch (error) {
+    // File symlinks (unlike directory junctions) need the Windows symlink
+    // privilege; skip rather than fail outside Developer Mode.
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+    console.error("SKIP: loadLocal rejects manifest symlink (file symlinks unavailable without Windows symlink privilege)");
+    return;
+  }
   const result = await service.loadLocal();
   assert.equal(result.ok, false);
 });
@@ -271,22 +267,11 @@ await localScenario("loadLocal reload preserves enabled for subset permissions",
   assert.deepEqual(runtime.reloads, ["reload-plug"]);
 });
 
-await localScenario("loadLocal rejects catalog collision", async ({ service, store, source, userData }) => {
-  writeManifest(source, manifest({ id: "catalog-plug" }));
-  const install = join(userData, "plugins", "catalog-plug");
-  const manifestPath = writeManifest(install, manifest({ id: "catalog-plug" }));
-  store.upsertRecord({ id: "catalog-plug", version: "1.0.0", installPath: install, manifestPath, source: "catalog", enabled: false, approvedPermissions: ["timer", "pet:speak"], config: {} });
-  const result = await service.loadLocal();
-  assert.equal(result.ok, false);
-  assert.match(result.error, /catalog plugin/);
-  assert.equal(existsSync(join(userData, "plugins-dev", "catalog-plug", OPENPETS_PLUGIN_MANIFEST_FILENAME)), false);
-});
-
 await localScenario("loadLocal rejects destination symlink before write", async ({ service, source, userData, root }) => {
   writeManifest(source, manifest({ id: "dest-link" }));
   const outside = join(root, "outside-target");
   mkdirSync(outside, { recursive: true });
-  symlinkSync(outside, join(userData, "plugins-dev", "dest-link"), "dir");
+  symlinkSync(outside, join(userData, "plugins-dev", "dest-link"), "junction");
   const result = await service.loadLocal();
   assert.equal(result.ok, false);
   assert.equal(existsSync(join(outside, OPENPETS_PLUGIN_MANIFEST_FILENAME)), false);
@@ -385,7 +370,7 @@ await localScenario("bundled seeding copies manifest and preserves user choices"
   const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official] });
   await service.start();
   let record = store.getRecord("openpets.reminders");
-  assert.equal(record?.source, "catalog");
+  assert.equal(record?.source, "bundled");
   assert.equal(record?.bundled, true);
   assert.equal(record?.enabled, true);
   assert.equal(readFileSync(join(record?.installPath ?? "", "index.js"), "utf8"), "OpenPetsPlugin.register({ start() {} });\n");
@@ -423,7 +408,7 @@ await localScenario("bundled defaults enable Focus Buddy and Launch Buddy but no
 await localScenario("bundled seeding prunes stale ids and blocks uninstall update", async ({ userData, root, store }) => {
   const oldInstall = join(userData, "plugins", "openpets.pomodoro");
   const oldManifest = writeManifest(oldInstall, manifest({ id: "openpets.pomodoro" }));
-  store.upsertRecord({ id: "openpets.pomodoro", version: "1.0.0", installPath: oldInstall, manifestPath: oldManifest, source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
+  store.upsertRecord({ id: "openpets.pomodoro", version: "1.0.0", installPath: oldInstall, manifestPath: oldManifest, source: "bundled", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
   const official = join(root, "official");
   const source = join(official, "openpets.reminders");
   writeManifest(source, { manifestVersion: 2, id: "openpets.reminders", name: "Quick Reminders", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["network"], network: { hosts: ["api.github.com"] } });
@@ -434,9 +419,6 @@ await localScenario("bundled seeding prunes stale ids and blocks uninstall updat
   assert.equal(store.getRecord("openpets.reminders")?.enabled, true);
   assert.deepEqual(store.getRecord("openpets.reminders")?.approvedNetworkHosts, ["api.github.com"]);
   assert.equal((await service.uninstall("openpets.reminders")).ok, false);
-  const update = await service.updateCatalog("openpets.reminders");
-  assert.equal(update.ok, false);
-  assert.match(update.error, /Bundled plugins update/);
 });
 
 await localScenario("bundled seeding prunes stale local old ids", async ({ userData, store }) => {
@@ -453,8 +435,8 @@ await localScenario("bundled stale prune refuses unsafe path", async ({ userData
   const outside = join(root, "outside-stale");
   mkdirSync(outside, { recursive: true });
   const link = join(userData, "plugins", "openpets.pomodoro");
-  symlinkSync(outside, link, "dir");
-  store.upsertRecord({ id: "openpets.pomodoro", version: "1.0.0", installPath: link, manifestPath: join(link, OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
+  symlinkSync(outside, link, "junction");
+  store.upsertRecord({ id: "openpets.pomodoro", version: "1.0.0", installPath: link, manifestPath: join(link, OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "bundled", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
   const runtime = new FakeRuntime();
   const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, bundledPluginSourceDirs: [] });
   await service.seedBundledPlugins();
@@ -467,7 +449,7 @@ await localScenario("bundled seeding rejects plugins root symlink", async ({ use
   rmSync(join(userData, "plugins"), { recursive: true, force: true });
   const outsideRoot = join(root, "outside-plugins");
   mkdirSync(outsideRoot, { recursive: true });
-  symlinkSync(outsideRoot, join(userData, "plugins"), "dir");
+  symlinkSync(outsideRoot, join(userData, "plugins"), "junction");
   const official = join(root, "official");
   const source = join(official, "openpets.reminders");
   writeManifest(source, { manifestVersion: 2, id: "openpets.reminders", name: "Quick Reminders", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"] });
@@ -488,17 +470,6 @@ await localScenario("start skips bundled seeding when disabled", async ({ userDa
   const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official], seedBundledPlugins: false });
   await service.start();
   assert.equal(store.getRecord("openpets.reminders"), undefined);
-});
-
-await scenario("catalog metadata ignores bundled records", async ({ userData, store, runtime }) => {
-  const install = join(userData, "plugins", "openpets.break-buddy");
-  const manifestPath = writeManifest(install, manifest({ id: "openpets.break-buddy" }));
-  store.upsertRecord({ id: "openpets.break-buddy", version: "1.0.0", installPath: install, manifestPath, source: "catalog", bundled: true, enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
-  const fetchImpl = async (): Promise<Response> => new Response(JSON.stringify({ version: 1, generatedAt: new Date().toISOString(), plugins: [{ ...catalogEntry("openpets.break-buddy", "1.0.0"), disabled: true, statusReason: "disabled" }] }), { status: 200 });
-  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, fetchImpl });
-  await service.getCatalogSnapshot(true);
-  assert.equal(store.getRecord("openpets.break-buddy")?.enabled, true);
-  assert.equal(store.getRecord("openpets.break-buddy")?.catalogDisabled, undefined);
 });
 
 await localScenario("loadLocalPath auto-approves explicit dev path", async ({ service, source, store }) => {
@@ -543,7 +514,15 @@ await localScenario("loadLocal rejects javascript nested entry symlink", async (
   mkdirSync(join(source, "nested"), { recursive: true });
   const real = join(root, "real-entry.mjs");
   writeFileSync(real, "export default {};\n", "utf8");
-  symlinkSync(real, join(source, "nested", "index.mjs"));
+  try {
+    symlinkSync(real, join(source, "nested", "index.mjs"));
+  } catch (error) {
+    // File symlinks (unlike directory junctions) need the Windows symlink
+    // privilege; skip rather than fail outside Developer Mode.
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+    console.error("SKIP: loadLocal rejects javascript nested entry symlink (file symlinks unavailable without Windows symlink privilege)");
+    return;
+  }
   const result = await service.loadLocal();
   assert.equal(result.ok, false);
 });
@@ -553,7 +532,7 @@ await localScenario("loadLocal rejects javascript symlinked entry parent", async
   const realNested = join(root, "real-nested");
   mkdirSync(realNested, { recursive: true });
   writeFileSync(join(realNested, "index.mjs"), "export default {};\n", "utf8");
-  symlinkSync(realNested, join(source, "nested"), "dir");
+  symlinkSync(realNested, join(source, "nested"), "junction");
   const result = await service.loadLocal();
   assert.equal(result.ok, false);
 });
@@ -561,7 +540,7 @@ await localScenario("loadLocal rejects javascript symlinked entry parent", async
 await localScenario("uninstall removes state reloads and rejects symlink deletion", async ({ service, store, runtime, userData, root }) => {
   const install = join(userData, "plugins", "remove-plug");
   const manifestPath = writeManifest(install, manifest({ id: "remove-plug" }));
-  store.upsertRecord({ id: "remove-plug", version: "1.0.0", installPath: install, manifestPath, source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
+  store.upsertRecord({ id: "remove-plug", version: "1.0.0", installPath: install, manifestPath, source: "bundled", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
   const result = await service.uninstall("remove-plug");
   assert.equal(result.ok, true);
   assert.equal(store.getRecord("remove-plug"), undefined);
@@ -570,8 +549,8 @@ await localScenario("uninstall removes state reloads and rejects symlink deletio
   const outside = join(root, "outside-remove");
   mkdirSync(outside, { recursive: true });
   const link = join(userData, "plugins", "link-plug");
-  symlinkSync(outside, link, "dir");
-  store.upsertRecord({ id: "link-plug", version: "1.0.0", installPath: link, manifestPath: join(link, OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
+  symlinkSync(outside, link, "junction");
+  store.upsertRecord({ id: "link-plug", version: "1.0.0", installPath: link, manifestPath: join(link, OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "bundled", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
   const rejected = await service.uninstall("link-plug");
   assert.equal(rejected.ok, false);
   assert.equal(store.getRecord("link-plug")?.id, "link-plug");
@@ -580,8 +559,8 @@ await localScenario("uninstall removes state reloads and rejects symlink deletio
   const rootOutside = join(root, "outside-root");
   mkdirSync(rootOutside, { recursive: true });
   rmSync(join(userData, "plugins"), { recursive: true, force: true });
-  symlinkSync(rootOutside, join(userData, "plugins"), "dir");
-  store.upsertRecord({ id: "root-link", version: "1.0.0", installPath: join(userData, "plugins", "root-link"), manifestPath: join(userData, "plugins", "root-link", OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
+  symlinkSync(rootOutside, join(userData, "plugins"), "junction");
+  store.upsertRecord({ id: "root-link", version: "1.0.0", installPath: join(userData, "plugins", "root-link"), manifestPath: join(userData, "plugins", "root-link", OPENPETS_PLUGIN_MANIFEST_FILENAME), source: "bundled", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
   const rootRejected = await service.uninstall("root-link");
   assert.equal(rootRejected.ok, false);
   assert.equal(store.getRecord("root-link")?.id, "root-link");
@@ -601,49 +580,20 @@ await localScenario("uninstall removes stale local record when dev snapshot is m
   assert.equal(store.getRecord("outside-missing")?.id, "outside-missing");
 });
 
-await catalogRollbackScenario("catalog update rolls back manifest if state write fails", async ({ service, store, runtime, userData }) => {
-  const oldManifest = manifest({ id: "rollback-plug", version: "1.0.0" });
-  const install = join(userData, "plugins", "rollback-plug");
-  const manifestPath = writeManifest(install, oldManifest);
-  store.upsertRecord({ id: "rollback-plug", version: "1.0.0", installPath: install, manifestPath, source: "catalog", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
-
-  store.failNextUpsert = true;
-  const result = await service.updateCatalog("rollback-plug");
-  assert.equal(result.ok, false);
-  assert.equal(store.getRecord("rollback-plug")?.version, "1.0.0");
-  assert.equal(JSON.parse(readFileSync(manifestPath, "utf8")).version, "1.0.0");
-  assert.deepEqual(runtime.reloads, []);
-});
-
-await catalogCompatibilityScenario("catalog filters and blocks incompatible plugins", async ({ service }) => {
-  const snapshot = await service.getCatalogSnapshot(true);
-  assert.deepEqual(snapshot.plugins.map((plugin) => plugin.id), ["compatible-plug"]);
-  const result = await service.installCatalog("future-plug");
-  assert.equal(result.ok, false);
-  assert.match(result.error, /incompatible with this OpenPets version/);
-});
-
-await scenario("disabled catalog returns no discover plugins", async ({ userData, store, runtime }) => {
-  const fetchImpl = async (): Promise<Response> => new Response(JSON.stringify({ version: 1, generatedAt: new Date().toISOString(), plugins: [catalogEntry("hidden-plug", "1.0.0")] }), { status: 200 });
-  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, fetchImpl, disableCatalog: true });
-  const snapshot = await service.getCatalogSnapshot(true);
-  assert.deepEqual(snapshot.plugins, []);
-});
-
 await scenario("right-click command helper groups caps and ignores stale commands", async ({ runtime }) => {
   setPluginServiceForTests({
     getSnapshot: async () => ({ plugins: [
-      { id: "zeta", name: "Zeta", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [{ id: "b", title: "Beta" }, { id: "a", title: "Alpha" }, { id: "c", title: "Gamma" }] },
-      { id: "alpha", name: "Alpha", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] },
-      { id: "disabled", name: "Disabled", version: "1.0.0", source: "catalog", enabled: false, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] },
-      { id: "broken", name: "Broken", version: "1.0.0", source: "catalog", enabled: true, brokenReason: "broken", approvedPermissions: [], commands: [{ id: "run", title: "Run" }] },
+      { id: "zeta", name: "Zeta", version: "1.0.0", source: "bundled", enabled: true, approvedPermissions: [], commands: [{ id: "b", title: "Beta" }, { id: "a", title: "Alpha" }, { id: "c", title: "Gamma" }] },
+      { id: "alpha", name: "Alpha", version: "1.0.0", source: "bundled", enabled: true, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] },
+      { id: "disabled", name: "Disabled", version: "1.0.0", source: "bundled", enabled: false, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] },
+      { id: "broken", name: "Broken", version: "1.0.0", source: "bundled", enabled: true, brokenReason: "broken", approvedPermissions: [], commands: [{ id: "run", title: "Run" }] },
     ] }),
     executeCommand: async (pluginId: string, commandId: string) => { runtime.executed.push({ pluginId, commandId }); },
     stop() {},
   } as unknown as PluginService);
   const commands = await getDefaultPetPluginCommands(2, 2);
   assert.deepEqual(commands.map((command) => `${command.pluginId}:${command.commandId}`), ["alpha:run", "zeta:b", "zeta:a"]);
-  setPluginServiceForTests({ getSnapshot: async () => ({ plugins: [{ id: "alpha", name: "Alpha", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] }, { id: "zeta", name: "Zeta", version: "1.0.0", source: "catalog", enabled: true, approvedPermissions: [], commands: [] }] }), executeCommand: async (pluginId: string, commandId: string) => { runtime.executed.push({ pluginId, commandId }); }, stop() {} } as unknown as PluginService);
+  setPluginServiceForTests({ getSnapshot: async () => ({ plugins: [{ id: "alpha", name: "Alpha", version: "1.0.0", source: "bundled", enabled: true, approvedPermissions: [], commands: [{ id: "run", title: "Run" }] }, { id: "zeta", name: "Zeta", version: "1.0.0", source: "bundled", enabled: true, approvedPermissions: [], commands: [] }] }), executeCommand: async (pluginId: string, commandId: string) => { runtime.executed.push({ pluginId, commandId }); }, stop() {} } as unknown as PluginService);
   assert.deepEqual((await getDefaultPetPluginCommands()).map((command) => command.pluginId), ["alpha"]);
   await executeDefaultPetPluginCommand("alpha", "run");
   assert.deepEqual(runtime.executed, [{ pluginId: "alpha", commandId: "run" }]);
@@ -688,54 +638,11 @@ async function localScenario(name: string, fn: (ctx: { root: string; userData: s
   try { await fn({ root, userData, source, store, service, runtime }); } catch (error) { throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
-async function catalogRollbackScenario(name: string, fn: (ctx: { root: string; userData: string; store: ThrowingStateStore; service: PluginService; runtime: FakeRuntime }) => Promise<void>): Promise<void> {
-  const root = mkdtempSync(join(tmpdir(), "openpets-plugin-catalog-root-"));
-  const userData = mkdtempSync(join(tmpdir(), "openpets-plugin-catalog-user-"));
-  mkdirSync(join(userData, "plugins"), { recursive: true });
-  mkdirSync(join(userData, "plugins-dev"), { recursive: true });
-  const store = new ThrowingStateStore({ statePath: join(userData, "state.json") });
-  store.initialize();
-  const runtime = new FakeRuntime();
-  const nextManifest = manifest({ id: "rollback-plug", version: "2.0.0" });
-  const zip = makeZip(OPENPETS_PLUGIN_MANIFEST_FILENAME, Buffer.from(JSON.stringify(nextManifest), "utf8"));
-  const downloadUrl = "https://zip.openpets.dev/plugins/rollback-plug.zip";
-  const catalog = { version: 1, generatedAt: new Date().toISOString(), plugins: [{ id: nextManifest.id, name: nextManifest.name, version: nextManifest.version, description: "Rollback", runtime: "declarative", permissions: nextManifest.permissions, downloadUrl, sha256: createHash("sha256").update(zip).digest("hex") }] };
-  const fetchImpl = async (url: string | URL | Request): Promise<Response> => {
-    const value = String(url);
-    if (value === downloadUrl) return new Response(new Uint8Array(zip), { status: 200 });
-    return new Response(JSON.stringify(catalog), { status: 200 });
-  };
-  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: runtime as never, fetchImpl, confirmPermissions: async () => true });
-  try { await fn({ root, userData, store, service, runtime }); } catch (error) { throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`); }
-}
-
-async function catalogCompatibilityScenario(name: string, fn: (ctx: { service: PluginService }) => Promise<void>): Promise<void> {
-  const userData = mkdtempSync(join(tmpdir(), "openpets-plugin-compat-user-"));
-  const store = new PluginStateStore({ statePath: join(userData, "state.json") });
-  store.initialize();
-  const catalog = { version: 1, generatedAt: new Date().toISOString(), plugins: [catalogEntry("compatible-plug", "1.0.0"), catalogEntry("future-plug", "9.0.0")] };
-  const fetchImpl = async (): Promise<Response> => new Response(JSON.stringify(catalog), { status: 200 });
-  const service = new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, fetchImpl, currentAppVersion: "2.0.0", confirmPermissions: async () => true });
-  try { await fn({ service }); } catch (error) { throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`); }
-}
-
-function catalogEntry(id: string, minOpenPetsVersion: string): object {
-  return { id, name: id, version: "1.0.0", description: "Test", runtime: "declarative", permissions: ["timer", "pet:speak"], downloadUrl: `https://zip.openpets.dev/plugins/${id}.zip`, sha256: "0".repeat(64), minOpenPetsVersion };
-}
-
 function addPlugin(store: PluginStateStore, patch: Partial<PluginStateRecord> = {}, data: unknown = manifest()): void {
   const id = patch.id ?? "plug";
   const installPath = patch.installPath ?? join(currentRootFromStore(store), id);
   const manifestPath = patch.manifestPath ?? writeManifest(installPath, data);
   store.upsertRecord({ id, version: patch.version ?? "1.0.0", manifestPath, installPath, source: patch.source ?? "local", bundled: patch.bundled, enabled: patch.enabled ?? true, approvedPermissions: patch.approvedPermissions ?? ["timer", "pet:speak"], config: patch.config ?? {}, brokenReason: patch.brokenReason });
-}
-
-function addCommandPlugin(store: PluginStateStore, userData: string, id: string, name: string, _commands: Array<{ id: string; title: string }>, patch: Partial<PluginStateRecord> = {}): void {
-  const data = manifest({ id, permissions: ["timer", "pet:speak"] });
-  data.name = name;
-  const installPath = join(userData, "plugins", id);
-  const manifestPath = writeManifest(installPath, data);
-  store.upsertRecord({ id, version: "1.0.0", manifestPath, installPath, source: "catalog", enabled: patch.enabled ?? true, approvedPermissions: ["timer", "pet:speak"], config: {}, brokenReason: patch.brokenReason });
 }
 
 function currentRootFromStore(_store: PluginStateStore): string { return lastRoot; }
@@ -751,13 +658,3 @@ function writeManifest(dir: string, data: unknown): string {
   return path;
 }
 
-function makeZip(name: string, data: Buffer): Buffer {
-  const nameBuffer = Buffer.from(name); const crc = crc32(data); const now = 0;
-  const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0, 6); local.writeUInt16LE(0, 8); local.writeUInt32LE(now, 10); local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(nameBuffer.length, 26);
-  const central = Buffer.alloc(46); central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(0, 8); central.writeUInt16LE(0, 10); central.writeUInt32LE(now, 12); central.writeUInt32LE(crc, 16); central.writeUInt32LE(data.length, 20); central.writeUInt32LE(data.length, 24); central.writeUInt16LE(nameBuffer.length, 28); central.writeUInt32LE((0o100644 << 16) >>> 0, 38);
-  const localPart = Buffer.concat([local, nameBuffer, data]); const centralPart = Buffer.concat([central, nameBuffer]);
-  const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10); end.writeUInt32LE(centralPart.length, 12); end.writeUInt32LE(localPart.length, 16);
-  return Buffer.concat([localPart, centralPart, end]);
-}
-
-function crc32(buffer: Buffer): number { let crc = -1; for (const byte of buffer) { crc ^= byte; for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1)); } return (crc ^ -1) >>> 0; }

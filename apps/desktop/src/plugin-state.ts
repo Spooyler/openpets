@@ -5,13 +5,7 @@ import { canonicalizePluginPermissions, type KnownPluginRuntime, type PluginPerm
 
 export const openPetsPluginStateFileName = "openpets-plugin-state.json";
 
-export type PluginSource = "catalog" | "local";
-
-export type PluginUpdateMetadata = {
-  readonly availableVersion?: string;
-  readonly checkedAt?: string;
-  readonly catalogUrl?: string;
-};
+export type PluginSource = "bundled" | "local";
 
 export type PluginStateRecord = {
   readonly id: string;
@@ -29,10 +23,6 @@ export type PluginStateRecord = {
   readonly approvedNetworkHosts?: readonly string[];
   readonly config: Record<string, unknown>;
   readonly brokenReason?: string;
-  readonly catalogDisabled?: boolean;
-  readonly catalogDeprecated?: boolean;
-  readonly catalogStatusReason?: string;
-  readonly update?: PluginUpdateMetadata;
 };
 
 export type OpenPetsPluginStateV1 = {
@@ -179,7 +169,8 @@ function normalizePluginState(value: unknown): OpenPetsPluginStateV1 {
 function normalizePluginRecordFromDisk(key: string, value: unknown): PluginStateRecord | null {
   if (!isPlainRecord(value) || value.id !== key) return null;
   if (!isNonEmptyString(value.id) || !isNonEmptyString(value.version) || !isNonEmptyString(value.manifestPath) || !isNonEmptyString(value.installPath)) return null;
-  if (value.source !== "catalog" && value.source !== "local") return null;
+  const source: PluginSource = value.source === "catalog" ? "bundled" : value.source as PluginSource;
+  if (source !== "bundled" && source !== "local") return null;
   if (typeof value.enabled !== "boolean" || !isPlainRecord(value.config)) return null;
   let approvedPermissions: readonly PluginPermission[];
   try {
@@ -193,8 +184,8 @@ function normalizePluginRecordFromDisk(key: string, value: unknown): PluginState
       version: value.version,
       manifestPath: value.manifestPath,
       installPath: value.installPath,
-      source: value.source,
-      sourcePath: value.source === "local" && isNonEmptyString(value.sourcePath) ? value.sourcePath : undefined,
+      source,
+      sourcePath: source === "local" && isNonEmptyString(value.sourcePath) ? value.sourcePath : undefined,
       bundled: value.bundled === true ? true : undefined,
       manifestVersion: value.manifestVersion === 1 || value.manifestVersion === 2 || value.manifestVersion === 3 ? value.manifestVersion : undefined,
       runtime: value.runtime === "declarative" || value.runtime === "javascript" ? value.runtime : undefined,
@@ -204,10 +195,6 @@ function normalizePluginRecordFromDisk(key: string, value: unknown): PluginState
       approvedNetworkHosts: normalizeStringArray(value.approvedNetworkHosts),
       config: normalizeConfigObjectFromDisk(value.config),
       brokenReason: isNonEmptyString(value.brokenReason) ? value.brokenReason : undefined,
-      catalogDisabled: typeof value.catalogDisabled === "boolean" ? value.catalogDisabled : undefined,
-      catalogDeprecated: typeof value.catalogDeprecated === "boolean" ? value.catalogDeprecated : undefined,
-      catalogStatusReason: isNonEmptyString(value.catalogStatusReason) ? value.catalogStatusReason : undefined,
-      update: normalizeUpdateMetadata(value.update),
     }) as PluginStateRecord;
   } catch {
     return null;
@@ -216,7 +203,7 @@ function normalizePluginRecordFromDisk(key: string, value: unknown): PluginState
 
 function normalizePluginRecordForApi(record: PluginStateRecord): PluginStateRecord {
   if (!isPlainRecord(record) || record.id.trim() === "" || record.version.trim() === "" || record.manifestPath.trim() === "" || record.installPath.trim() === "") throw new Error("Invalid plugin state record.");
-  if (record.source !== "catalog" && record.source !== "local") throw new Error("Invalid plugin state record.");
+  if (record.source !== "bundled" && record.source !== "local") throw new Error("Invalid plugin state record.");
   if (typeof record.enabled !== "boolean" || !isPlainRecord(record.config)) throw new Error("Invalid plugin state record.");
   assertJsonCompatibleConfigObject(record.config);
   return omitUndefined({
@@ -235,10 +222,6 @@ function normalizePluginRecordForApi(record: PluginStateRecord): PluginStateReco
     approvedNetworkHosts: normalizeStringArray(record.approvedNetworkHosts),
     config: cloneJsonObject(record.config),
     brokenReason: isNonEmptyString(record.brokenReason) ? record.brokenReason : undefined,
-    catalogDisabled: typeof record.catalogDisabled === "boolean" ? record.catalogDisabled : undefined,
-    catalogDeprecated: typeof record.catalogDeprecated === "boolean" ? record.catalogDeprecated : undefined,
-    catalogStatusReason: isNonEmptyString(record.catalogStatusReason) ? record.catalogStatusReason : undefined,
-    update: normalizeUpdateMetadata(record.update),
   });
 }
 
@@ -286,16 +269,6 @@ function assertJsonCompatibleValue(value: unknown, path: string): void {
     return;
   }
   throw new Error(`Plugin config value at ${path} must be JSON-compatible.`);
-}
-
-function normalizeUpdateMetadata(value: unknown): PluginUpdateMetadata | undefined {
-  if (!isPlainRecord(value)) return undefined;
-  const update: PluginUpdateMetadata = {
-    availableVersion: isNonEmptyString(value.availableVersion) ? value.availableVersion : undefined,
-    checkedAt: isNonEmptyString(value.checkedAt) ? value.checkedAt : undefined,
-    catalogUrl: isNonEmptyString(value.catalogUrl) ? value.catalogUrl : undefined,
-  };
-  return update.availableVersion || update.checkedAt || update.catalogUrl ? update : undefined;
 }
 
 function writePluginStateToDisk(path: string, state: OpenPetsPluginStateV1): void {

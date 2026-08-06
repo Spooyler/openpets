@@ -1,22 +1,19 @@
 import { existsSync, mkdirSync, promises as fs } from "node:fs";
 import { basename, dirname, extname, join, resolve } from "node:path";
 
-import { getCatalogPlugin, getPluginCatalog, type PluginCatalogOptions } from "./plugin-catalog.js";
-import type { PluginCatalogEntryV2 } from "./plugin-catalog-validation.js";
 import { getEffectivePluginConfig, validatePluginConfigReplacement, type PluginConfigValidationError, type PluginConfig } from "./plugin-config.js";
 import { publishLocalPluginSnapshot, readLocalPluginSourceManifest } from "./plugin-local-loader.js";
-import { readSafePluginManifest } from "./plugin-manifest-reader.js";
+import { isUnderPath, readSafePluginManifest } from "./plugin-manifest-reader.js";
 import type { OpenDialogOptions } from "electron";
 import type { PluginJsHost } from "./plugin-js-host.js";
 import { resolveDeclaredAssetPath } from "./plugin-assets.js";
 import { OPENPETS_PLUGIN_MANIFEST_FILENAME, type OpenPetsPluginManifest, type PluginConfigField, type PluginIcon, type PluginPermission } from "./plugin-manifest.js";
 import { ensureLoaded as ensurePluginLocales, resolvePluginText } from "./plugin-i18n.js";
-import { downloadCatalogPluginZip, installCatalogPluginPackage, readCatalogPluginManifestFromZip, resolveSafePluginInstallDir } from "./plugin-package.js";
+import { resolveSafePluginInstallDir } from "./plugin-package.js";
 import type { PluginPetApi } from "./plugin-pet-api.js";
 import { JsonPluginStorageStore, type PluginCommand, type PluginHostCapabilities, type PluginLogLevel, type PluginStatus } from "./plugin-sdk-bridge.js";
 import { PluginRuntime, type PluginRuntimeOptions, type PluginRuntimeScheduler } from "./plugin-runtime.js";
 import { PluginStateStore, type PluginSource, type PluginStateRecord } from "./plugin-state.js";
-import { getAppStateSnapshot } from "./app-state.js";
 
 export type SafePluginRecord = {
   readonly id: string;
@@ -33,9 +30,6 @@ export type SafePluginRecord = {
   readonly approvedPermissions: readonly PluginPermission[];
   readonly runtime?: "declarative" | "javascript";
   readonly sdkVersion?: string;
-  readonly catalogDisabled?: boolean;
-  readonly catalogDeprecated?: boolean;
-  readonly catalogStatusReason?: string;
   readonly configSchema?: OpenPetsPluginManifest["configSchema"];
   readonly effectiveConfig?: PluginConfig;
   readonly configErrors?: readonly PluginConfigValidationError[];
@@ -46,8 +40,6 @@ export type SafePluginRecord = {
 };
 
 export type PluginServiceSnapshot = { readonly plugins: readonly SafePluginRecord[] };
-export type SafeCatalogPluginRecord = { readonly id: string; readonly name: string; readonly version: string; readonly description: string; readonly runtime: "declarative" | "javascript"; readonly icon?: PluginIcon; readonly iconDataUrl?: string; readonly sdkVersion?: string; readonly permissions: readonly PluginPermission[]; readonly installed: boolean; readonly bundled?: boolean; readonly deprecated?: boolean; readonly statusReason?: string; readonly publisherType?: "official" | "community" };
-export type PluginCatalogSnapshot = { readonly plugins: readonly SafeCatalogPluginRecord[]; readonly error?: string };
 export type PluginServiceResult = { readonly ok: true; readonly snapshot: PluginServiceSnapshot } | { readonly ok: false; readonly error: string; readonly snapshot: PluginServiceSnapshot };
 export type PluginConfigSoundPickResult = { readonly ok: true; readonly sound: { readonly kind: "user-sound"; readonly id: string; readonly name?: string }; readonly snapshot: PluginServiceSnapshot } | { readonly ok: true; readonly canceled: true; readonly snapshot: PluginServiceSnapshot } | { readonly ok: false; readonly error: string; readonly snapshot: PluginServiceSnapshot };
 export type DevPluginLoadResult = { readonly path: string; readonly id?: string; readonly ok: true } | { readonly path: string; readonly ok: false; readonly error: string };
@@ -66,12 +58,9 @@ export type PluginServiceOptions = {
   readonly showOpenDialog?: PluginFolderDialog;
   readonly showSoundOpenDialog?: PluginFolderDialog;
   readonly confirmPermissions?: PluginPermissionDialog;
-  readonly catalogOptions?: PluginCatalogOptions;
-  readonly fetchImpl?: typeof fetch;
   readonly currentAppVersion?: string;
   readonly runtimeLogger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void;
   readonly onPluginRuntimeError?: PluginRuntimeOptions["onPluginRuntimeError"];
-  readonly disableCatalog?: boolean;
   readonly seedBundledPlugins?: boolean;
   readonly bundledPluginSourceDirs?: readonly string[];
   readonly capabilities?: PluginHostCapabilities;
@@ -79,7 +68,6 @@ export type PluginServiceOptions = {
   readonly onLocalPluginSourceRemoved?: (sourcePath: string) => void;
 };
 
-export const bundledOfficialPluginIds = ["openpets.reminders", "openpets.focus-buddy", "openpets.launch-buddy", "openpets.virtual-pet"] as const;
 const bundledEnabledByDefault = new Set<string>(["openpets.reminders", "openpets.focus-buddy", "openpets.launch-buddy"]);
 const staleBundledPluginIds = ["openpets.daily-reminders", "openpets.pomodoro", "openpets.ambient-companion", "openpets.break-buddy", "openpets.focus-buddy", "openpets.github-notifications", "openpets.pet-pal", "openpets.quick-reminders", "openpets.wander-buddy"] as const;
 
@@ -92,10 +80,7 @@ export class PluginService {
   readonly #showOpenDialog?: PluginFolderDialog;
   readonly #showSoundOpenDialog?: PluginFolderDialog;
   readonly #confirmPermissions?: PluginPermissionDialog;
-  readonly #catalogOptions?: PluginCatalogOptions;
-  readonly #fetchImpl?: typeof fetch;
   readonly #currentAppVersion: string;
-  readonly #disableCatalog: boolean;
   readonly #seedBundledPlugins: boolean;
   readonly #bundledPluginSourceDirs: readonly string[];
   readonly #capabilities?: PluginHostCapabilities;
@@ -110,10 +95,7 @@ export class PluginService {
     this.#showOpenDialog = options.showOpenDialog;
     this.#showSoundOpenDialog = options.showSoundOpenDialog;
     this.#confirmPermissions = options.confirmPermissions;
-    this.#catalogOptions = options.catalogOptions;
-    this.#fetchImpl = options.fetchImpl;
     this.#currentAppVersion = options.currentAppVersion ?? "0.0.0";
-    this.#disableCatalog = options.disableCatalog === true;
     this.#seedBundledPlugins = options.seedBundledPlugins !== false;
     this.#bundledPluginSourceDirs = options.bundledPluginSourceDirs ?? [];
     this.#capabilities = options.capabilities;
@@ -143,7 +125,7 @@ export class PluginService {
     if (!this.#userDataPath) return;
     for (const id of staleBundledPluginIds) {
       const stale = this.stateStore.getRecord(id);
-      if (stale?.source === "catalog" || stale?.source === "local") {
+      if (stale?.source === "bundled" || stale?.source === "local") {
         try {
           const safeInstall = await resolveSafePluginInstallDir(this.#userDataPath, id, stale.installPath, stale.source);
           this.stateStore.removeRecord(id);
@@ -160,11 +142,23 @@ export class PluginService {
   async seedBundledPlugins(): Promise<void> {
     if (!this.#userDataPath) return;
     await this.#pruneStaleBundledPlugins();
-    for (const id of bundledOfficialPluginIds) {
-      const sourceFolder = this.#findBundledSourceFolder(id);
-      if (!sourceFolder) continue;
-      try { await this.#seedBundledPluginFromSource(sourceFolder, id); }
-      catch (error) { this.#log("warn", "Bundled plugin seed failed.", { pluginId: id, reason: safeError(error) }); }
+    for (const root of this.#bundledPluginSourceDirs) {
+      let entries: string[];
+      try {
+        const dirents = await fs.readdir(root, { withFileTypes: true });
+        entries = dirents
+          .filter((d) => d.isDirectory() && !d.name.startsWith("."))
+          .map((d) => join(root, d.name));
+      } catch { continue; }
+      for (const sourceFolder of entries) {
+        if (!existsSync(join(sourceFolder, OPENPETS_PLUGIN_MANIFEST_FILENAME))) continue;
+        try {
+          const source = await readLocalPluginSourceManifest({ sourceFolder, maxManifestBytes: this.#maxManifestBytes });
+          await this.#seedBundledPluginFromSource(sourceFolder, source.manifest.id);
+        } catch (error) {
+          this.#log("warn", "Bundled plugin seed failed.", { sourceFolder, reason: safeError(error) });
+        }
+      }
     }
   }
 
@@ -188,7 +182,6 @@ export class PluginService {
   async setEnabled(id: string, enabled: boolean): Promise<PluginServiceResult> {
     const record = this.stateStore.getRecord(id);
     if (!record) return this.#error("Plugin is not installed.");
-    if (enabled && record.catalogDisabled) return this.#error("Plugin is disabled in the catalog.");
     if (enabled && record.brokenReason) return this.#error(record.brokenReason);
     this.stateStore.setEnabled(id, enabled);
     await this.runtime.reloadPlugin(id);
@@ -214,7 +207,6 @@ export class PluginService {
   async reload(id: string): Promise<PluginServiceResult> {
     const record = this.stateStore.getRecord(id);
     if (!record) return this.#error("Plugin is not installed.");
-    if (record.catalogDisabled) return this.#error("Plugin is disabled in the catalog.");
     await this.runtime.reloadPlugin(id);
     return { ok: true, snapshot: await this.getSnapshot() };
   }
@@ -260,28 +252,6 @@ export class PluginService {
     return { ok: true, snapshot: await this.getSnapshot() };
   }
 
-  async getCatalogSnapshot(refresh = false): Promise<PluginCatalogSnapshot> {
-    if (this.#disableCatalog) return { plugins: [] };
-    try {
-      const catalog = await getPluginCatalog({ ...this.#catalogOptions, fetchImpl: this.#fetchImpl ?? this.#catalogOptions?.fetchImpl, refresh });
-      for (const entry of catalog.plugins) await this.#updateCatalogMetadata(entry);
-      return { plugins: catalog.plugins.filter((entry) => !isEntryDisabled(entry) && isCatalogEntryCompatible(entry.minOpenPetsVersion, getMaxVersion(entry), this.#currentAppVersion)).map((entry) => { const installed = this.stateStore.getRecord(entry.id); return { id: entry.id, name: entry.name, version: entry.version, description: entry.description, runtime: entry.runtime, icon: entry.icon, iconDataUrl: "iconDataUrl" in entry ? entry.iconDataUrl : undefined, sdkVersion: getSdkVersion(entry), permissions: entry.permissions, installed: installed?.source === "catalog", bundled: installed?.bundled || undefined, deprecated: isEntryDeprecated(entry) || undefined, statusReason: getStatusReason(entry), publisherType: "publisherType" in entry ? entry.publisherType : undefined }; }) };
-    } catch (error) {
-      this.#log("warn", "Plugin catalog snapshot failed.", { reason: safeDetailedError(error) });
-      return { plugins: [], error: safeError(error) };
-    }
-  }
-
-  async installCatalog(id: string): Promise<PluginServiceResult> {
-    return this.#installOrUpdateCatalog(id, false);
-  }
-
-  async updateCatalog(id: string): Promise<PluginServiceResult> {
-    const record = this.stateStore.getRecord(id);
-    if (record?.bundled) return this.#error("Bundled plugins update with OpenPets.");
-    return this.#installOrUpdateCatalog(id, true);
-  }
-
   async uninstall(id: string): Promise<PluginServiceResult> {
     if (!this.#userDataPath) return this.#error("Plugin uninstall is unavailable.");
     const record = this.stateStore.getRecord(id);
@@ -324,7 +294,6 @@ export class PluginService {
       return this.#error(safeError(error));
     }
     const existing = this.stateStore.getRecord(source.manifest.id);
-    if (existing?.source === "catalog") return this.#error("A catalog plugin with this id is already installed.");
     const networkHosts = "network" in source.manifest ? source.manifest.network?.hosts : undefined;
     const approvalsChanged = existing ? !isPermissionSubset(source.manifest.permissions, existing.approvedPermissions) || !isStringSubset(networkHosts ?? [], existing.approvedNetworkHosts ?? []) : true;
     if (approvalsChanged) {
@@ -399,7 +368,7 @@ export class PluginService {
       if (record.source !== "local" || activeIds.has(record.id)) continue;
       let isDevRecord = false;
       try { isDevRecord = isUnderPath(await fs.realpath(record.installPath), realDevRoot); }
-      catch { isDevRecord = record.installPath.startsWith(`${devRoot}/`); }
+      catch { isDevRecord = isUnderPath(record.installPath, devRoot) && record.installPath !== devRoot; }
       if (!isDevRecord) continue;
       this.stateStore.removeRecord(record.id);
       await this.runtime.reloadPlugin(record.id);
@@ -410,51 +379,8 @@ export class PluginService {
     }
   }
 
-  async #installOrUpdateCatalog(id: string, update: boolean): Promise<PluginServiceResult> {
-    const started = Date.now();
-    this.#log("info", update ? "Plugin catalog update requested." : "Plugin catalog install requested.", { pluginId: id });
-    if (!this.#userDataPath) return this.#error("Catalog plugin installation is unavailable.");
-    const existing = this.stateStore.getRecord(id);
-    if (existing?.bundled) return this.#error(update ? "Bundled plugins update with OpenPets." : "Plugin is already installed as a bundled plugin.");
-    if (!update && existing) return this.#error("Plugin is already installed.");
-    if (update && (!existing || existing.source !== "catalog")) return this.#error("Catalog plugin is not installed.");
-    if (existing?.source === "local") return this.#error("A local plugin with this id is already loaded.");
-    const confirm = this.#confirmPermissions ?? defaultConfirmPermissions;
-    try {
-      const entry = await getCatalogPlugin(id, { ...this.#catalogOptions, fetchImpl: this.#fetchImpl ?? this.#catalogOptions?.fetchImpl, refresh: update });
-      this.#log("debug", "Plugin catalog entry selected.", { pluginId: id, version: entry.version, runtime: entry.runtime, sdkVersion: getSdkVersion(entry), currentAppVersion: this.#currentAppVersion });
-      if (isEntryDisabled(entry)) throw new Error("Plugin is disabled in the catalog.");
-      if (isEntryDeprecated(entry)) throw new Error("Plugin is deprecated in the catalog.");
-      if (!isCatalogEntryCompatible(entry.minOpenPetsVersion, getMaxVersion(entry), this.#currentAppVersion)) throw new Error("Plugin is incompatible with this OpenPets version.");
-      const zip = await downloadCatalogPluginZip(entry, this.#fetchImpl ?? this.#catalogOptions?.fetchImpl ?? fetch);
-      this.#log("debug", "Plugin catalog ZIP downloaded.", { pluginId: id, sizeBytes: zip.byteLength, downloadHost: safeUrlHost(entry.downloadUrl) });
-      const preview = await readCatalogPluginManifestFromZip({ catalogEntry: entry, zip, maxManifestBytes: this.#maxManifestBytes });
-      this.#log("debug", "Plugin catalog manifest previewed.", { pluginId: id, manifestVersion: preview.manifest.manifestVersion, runtime: preview.manifest.runtime, sdkVersion: "sdkVersion" in preview.manifest ? preview.manifest.sdkVersion : undefined });
-      const networkHosts = "network" in preview.manifest ? preview.manifest.network?.hosts : undefined;
-      const approvalsChanged = existing ? !isPermissionSubset(preview.manifest.permissions, existing.approvedPermissions) || !isStringSubset(networkHosts ?? [], existing.approvedNetworkHosts ?? []) : true;
-      if (approvalsChanged && !(await confirm(preview.manifest))) return { ok: true, snapshot: await this.getSnapshot() };
-      const previousInstallBackup = existing ? `${existing.installPath}.rollback-${process.pid}-${Date.now()}` : undefined;
-      if (previousInstallBackup && existing) await fs.cp(existing.installPath, previousInstallBackup, { recursive: true, force: true }).catch(() => undefined);
-      const loaded = await installCatalogPluginPackage({ userDataPath: this.#userDataPath, catalogEntry: entry, zip, maxManifestBytes: this.#maxManifestBytes });
-      const wasEnabled = existing?.enabled === true;
-      const enabled = existing ? existing.enabled : true;
-      try {
-        this.stateStore.upsertRecord({ id: loaded.manifest.id, version: loaded.manifest.version, source: "catalog", installPath: loaded.installPath, manifestPath: loaded.manifestPath, manifestVersion: loaded.manifest.manifestVersion, runtime: loaded.manifest.runtime, sdkVersion: "sdkVersion" in loaded.manifest ? loaded.manifest.sdkVersion : getSdkVersion(entry), enabled, approvedPermissions: loaded.manifest.permissions, approvedNetworkHosts: networkHosts, config: existing?.config ?? {}, catalogDeprecated: isEntryDeprecated(entry) || undefined, catalogStatusReason: getStatusReason(entry) });
-      } catch (error) {
-        if (previousInstallBackup && existing) { await fs.rm(loaded.installPath, { recursive: true, force: true }).catch(() => undefined); await fs.rename(previousInstallBackup, existing.installPath).catch(() => undefined); }
-        else await fs.rm(loaded.installPath, { recursive: true, force: true }).catch(() => undefined);
-        throw error;
-      } finally {
-        if (previousInstallBackup) await fs.rm(previousInstallBackup, { recursive: true, force: true }).catch(() => undefined);
-      }
-      if (enabled || wasEnabled) await this.runtime.reloadPlugin(loaded.manifest.id);
-      this.#log("info", update ? "Plugin catalog update succeeded." : "Plugin catalog install succeeded.", { pluginId: id, version: loaded.manifest.version, durationMs: Date.now() - started });
-      return { ok: true, snapshot: await this.getSnapshot() };
-    } catch (error) { this.#log("warn", update ? "Plugin catalog update failed." : "Plugin catalog install failed.", { pluginId: id, reason: safeDetailedError(error), uiReason: safeError(error), durationMs: Date.now() - started }); return this.#error(safeError(error)); }
-  }
-
   async #safeRecord(record: PluginStateRecord): Promise<SafePluginRecord> {
-    const base = { id: record.id, version: record.version, source: record.source, sourcePath: record.sourcePath, bundled: record.bundled, enabled: record.enabled, brokenReason: record.brokenReason, approvedPermissions: record.approvedPermissions, runtime: record.runtime, sdkVersion: record.sdkVersion, catalogDisabled: record.catalogDisabled, catalogDeprecated: record.catalogDeprecated, catalogStatusReason: record.catalogStatusReason };
+    const base = { id: record.id, version: record.version, source: record.source, sourcePath: record.sourcePath, bundled: record.bundled, enabled: record.enabled, brokenReason: record.brokenReason, approvedPermissions: record.approvedPermissions, runtime: record.runtime, sdkVersion: record.sdkVersion };
     try {
       const manifest = await this.#readManifest(record);
       const config = getEffectivePluginConfig(manifest, record.config);
@@ -464,16 +390,6 @@ export class PluginService {
     } catch (error) {
       return { ...base, brokenReason: sanitizePluginUiMessage(record.brokenReason) ?? safeError(error) };
     }
-  }
-
-  /** Sole authority for pet config options and validation. */
-
-  async #updateCatalogMetadata(entry: PluginCatalogEntryV2 | { readonly id: string }): Promise<void> {
-    const existing = this.stateStore.getRecord(entry.id);
-    if (!existing || existing.source !== "catalog" || existing.bundled) return;
-    const disabled = isEntryDisabled(entry);
-    this.stateStore.upsertRecord({ ...existing, enabled: disabled ? false : existing.enabled, catalogDisabled: disabled || undefined, catalogDeprecated: isEntryDeprecated(entry) || undefined, catalogStatusReason: getStatusReason(entry), sdkVersion: getSdkVersion(entry) ?? existing.sdkVersion });
-    if (disabled && existing.enabled) await this.runtime.reloadPlugin(entry.id);
   }
 
   #readManifest(record: PluginStateRecord): Promise<OpenPetsPluginManifest> {
@@ -490,14 +406,6 @@ export class PluginService {
 
   #ensureRoots(): void {
     for (const root of this.allowedPluginRoots) mkdirSync(root, { recursive: true });
-  }
-
-  #findBundledSourceFolder(id: string): string | null {
-    for (const root of this.#bundledPluginSourceDirs) {
-      const candidate = join(root, id);
-      if (existsSync(join(candidate, OPENPETS_PLUGIN_MANIFEST_FILENAME))) return candidate;
-    }
-    return null;
   }
 
   async #seedBundledPluginFromSource(sourceFolder: string, expectedId: string): Promise<void> {
@@ -530,7 +438,7 @@ export class PluginService {
     await readSafePluginManifest({ installPath, manifestPath, allowedPluginRoots: [root], maxManifestBytes: this.#maxManifestBytes, expectedId: source.manifest.id, expectedVersion: source.manifest.version });
     const networkHosts = "network" in source.manifest ? source.manifest.network?.hosts : undefined;
     const existing = this.stateStore.getRecord(source.manifest.id);
-    this.stateStore.upsertRecord({ id: source.manifest.id, version: source.manifest.version, source: "catalog", bundled: true, installPath, manifestPath, manifestVersion: source.manifest.manifestVersion, runtime: source.manifest.runtime, sdkVersion: "sdkVersion" in source.manifest ? source.manifest.sdkVersion : undefined, enabled: existing?.enabled ?? bundledEnabledByDefault.has(source.manifest.id), approvedPermissions: source.manifest.permissions, approvedNetworkHosts: networkHosts, config: existing?.config ?? {} });
+    this.stateStore.upsertRecord({ id: source.manifest.id, version: source.manifest.version, source: "bundled", bundled: true, installPath, manifestPath, manifestVersion: source.manifest.manifestVersion, runtime: source.manifest.runtime, sdkVersion: "sdkVersion" in source.manifest ? source.manifest.sdkVersion : undefined, enabled: existing?.enabled ?? bundledEnabledByDefault.has(source.manifest.id), approvedPermissions: source.manifest.permissions, approvedNetworkHosts: networkHosts, config: existing?.config ?? {} });
   }
 
   #log(level: PluginLogLevel, message: string, fields?: Record<string, unknown>): void {
@@ -541,8 +449,8 @@ export class PluginService {
 
 let appPluginService: PluginService | null = null;
 
-export function initializePluginService(userDataPath: string, petApi: PluginPetApi, currentAppVersion = "0.0.0", jsHost?: PluginJsHost, runtimeLogger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void, disableCatalog?: boolean, bundledPluginSourceDirs: readonly string[] = [], seedBundledPlugins = true, capabilities?: PluginHostCapabilities, onPluginRuntimeError?: PluginRuntimeOptions["onPluginRuntimeError"], onLocalPluginSourceLoaded?: (sourcePath: string) => void, onLocalPluginSourceRemoved?: (sourcePath: string) => void): PluginService {
-  appPluginService = new PluginService({ userDataPath, petApi, currentAppVersion, jsHost, runtimeLogger, disableCatalog, bundledPluginSourceDirs, seedBundledPlugins, capabilities, onPluginRuntimeError, onLocalPluginSourceLoaded, onLocalPluginSourceRemoved });
+export function initializePluginService(userDataPath: string, petApi: PluginPetApi, currentAppVersion = "0.0.0", jsHost?: PluginJsHost, runtimeLogger?: (level: PluginLogLevel, message: string, fields?: Record<string, unknown>) => void, bundledPluginSourceDirs: readonly string[] = [], seedBundledPlugins = true, capabilities?: PluginHostCapabilities, onPluginRuntimeError?: PluginRuntimeOptions["onPluginRuntimeError"], onLocalPluginSourceLoaded?: (sourcePath: string) => void, onLocalPluginSourceRemoved?: (sourcePath: string) => void): PluginService {
+  appPluginService = new PluginService({ userDataPath, petApi, currentAppVersion, jsHost, runtimeLogger, bundledPluginSourceDirs, seedBundledPlugins, capabilities, onPluginRuntimeError, onLocalPluginSourceLoaded, onLocalPluginSourceRemoved });
   return appPluginService;
 }
 
@@ -625,54 +533,6 @@ function redactErrorPaths(message: string): string {
     .replace(/'\/[^"]*?'/g, "[path]")
     .replace(/"\/[^"]*?"/g, "[path]")
     .replace(/(?:[A-Za-z]:\\|\/)[^\s,)]+/g, "[path]");
-}
-
-function resolvePermissionDialogManifest(manifest: OpenPetsPluginManifest, files?: ReadonlyMap<string, Buffer>, catalogName?: string, catalogDescription?: string): OpenPetsPluginManifest {
-  const locales = readEnglishLocaleCatalog(files);
-  return {
-    ...manifest,
-    name: catalogName ?? resolveManifestText(manifest.name, locales) ?? manifest.id,
-    description: catalogDescription ?? resolveManifestText(manifest.description, locales) ?? manifest.description,
-  };
-}
-
-function resolveManifestText(value: string | undefined, locales: Record<string, string>): string | undefined {
-  if (!value) return undefined;
-  if (!value.startsWith("$t:")) return value;
-  return locales[value.slice(3)];
-}
-
-function readEnglishLocaleCatalog(files?: ReadonlyMap<string, Buffer>): Record<string, string> {
-  const bytes = files?.get("locales/en.json");
-  if (!bytes) return {};
-  try { return flattenLocaleCatalog(JSON.parse(bytes.toString("utf8")) as unknown); }
-  catch { return {}; }
-}
-
-function flattenLocaleCatalog(value: unknown, prefix = ""): Record<string, string> {
-  if (!isRecord(value)) return {};
-  const output: Record<string, string> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    const nextKey = prefix ? `${prefix}.${key}` : key;
-    if (isRecord(entry)) Object.assign(output, flattenLocaleCatalog(entry, nextKey));
-    else if (typeof entry === "string") output[nextKey] = entry;
-  }
-  return output;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function safeDetailedError(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  if (!message || looksPathLike(message)) return safeError(error);
-  return message.slice(0, 220);
-}
-
-function safeUrlHost(value: string): string | undefined {
-  try { return new URL(value).hostname; }
-  catch { return undefined; }
 }
 
 const pluginIconDataUrlMaxBytes = 64 * 1024;
@@ -777,16 +637,12 @@ function isStringSubset(next: readonly string[], approved: readonly string[]): b
   return next.every((value) => approvedSet.has(value));
 }
 
-function isUnderPath(child: string, parent: string): boolean {
-  return child === parent || child.startsWith(`${parent}/`);
-}
-
 function isMissingPluginInstall(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "ENOENT";
 }
 
 function isExpectedMissingPluginInstallPath(userDataPath: string, id: string, installPath: string, source: PluginSource): boolean {
-  const root = resolve(userDataPath, source === "catalog" ? "plugins" : "plugins-dev");
+  const root = resolve(userDataPath, source === "bundled" ? "plugins" : "plugins-dev");
   return resolve(installPath) === resolve(root, id);
 }
 
@@ -815,29 +671,6 @@ async function replaceInstallDirectory(root: string, installPath: string, tempPa
 
 function getErrorCode(error: unknown): unknown {
   return typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined;
-}
-
-function isCatalogEntryCompatible(minOpenPetsVersion: string | undefined, maxOpenPetsVersion: string | undefined, currentAppVersion: string): boolean {
-  if (minOpenPetsVersion && compareSemver(currentAppVersion, minOpenPetsVersion) < 0) return false;
-  if (maxOpenPetsVersion && compareSemver(currentAppVersion, maxOpenPetsVersion) > 0) return false;
-  return true;
-}
-
-function isEntryDisabled(entry: object): boolean { return "disabled" in entry && entry.disabled === true; }
-function isEntryDeprecated(entry: object): boolean { return "deprecated" in entry && entry.deprecated === true; }
-function getStatusReason(entry: object): string | undefined { return "statusReason" in entry && typeof entry.statusReason === "string" ? entry.statusReason : undefined; }
-function getSdkVersion(entry: object): string | undefined { return "sdkVersion" in entry && typeof entry.sdkVersion === "string" ? entry.sdkVersion : undefined; }
-function getMaxVersion(entry: object): string | undefined { return "maxOpenPetsVersion" in entry && typeof entry.maxOpenPetsVersion === "string" ? entry.maxOpenPetsVersion : undefined; }
-
-function compareSemver(a: string, b: string): number {
-  const pa = parseCoreVersion(a); const pb = parseCoreVersion(b);
-  for (let i = 0; i < 3; i += 1) if (pa[i] !== pb[i]) return pa[i] > pb[i] ? 1 : -1;
-  return 0;
-}
-
-function parseCoreVersion(version: string): [number, number, number] {
-  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : [0, 0, 0];
 }
 
 async function defaultOpenDialog(): Promise<{ canceled: boolean; filePaths: string[] }> {

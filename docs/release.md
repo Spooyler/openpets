@@ -83,57 +83,13 @@ Manual desktop QA:
 
 For explicit local plugin development, run `pnpm dev:desktop:plugins` separately and confirm official plugins are loaded as local dev plugins and start disabled; this mode intentionally skips bundled seeding.
 
-### B. Web plugin catalog release
+### B. Plugins (bundled — no web release)
 
-Web release includes:
-
-- `plugins/official/**` and `plugins/community/**` source plugins.
-- `web/public/plugins/catalog.v2.json`, regenerated from the current manifest v3 official and community plugin sources. Catalog entries include `publisherType: "official" | "community"`; desktop treats missing `publisherType` as official for older catalogs. The desktop runtime currently reads the v2 catalog endpoint even when the contained plugins use manifest v3 / SDK v3.
-- `web/public/plugins/catalog.v1.json` retained as an empty compatibility catalog for old desktop versions.
-- Removal or hiding of legacy sample plugin manifests from current public discovery.
-- Updated `web/docs/plugin-publishing.md`.
-
-Required validation from the repository root:
-
-```bash
-pnpm plugins:locales
-pnpm plugins:test
-pnpm plugins:check
-pnpm plugins:package
-pnpm --dir web generate
-```
-
-Publishing sequence:
-
-1. From the repository root, validate and stage local catalog/ZIP artifacts:
-   ```bash
-   pnpm plugins:locales
-   pnpm plugins:test
-   pnpm plugins:check
-   pnpm plugins:package
-   ```
-2. Confirm `pnpm plugins:package` regenerated `web/public/plugins/catalog.v2.json` from the current official and community manifest v3 plugin lineup. Do not release if the checked-in v2 catalog still lists the old ambient/break/pet-pal/wander/quick-reminders/github lineup.
-3. Confirm `web/public/plugins/catalog.v1.json` has `plugins: []` and does not expose stale legacy plugins.
-4. Upload plugin ZIPs to R2 and regenerate catalogs:
-   ```bash
-   pnpm plugins:publish
-   ```
-5. Deploy web:
-   ```bash
-   pnpm plugins:deploy
-   ```
-   If the local web deploy times out during the large static upload, commit and
-   push both root and nested `web/` repos, then trigger the remote deploy helper:
-   ```bash
-   ./web/deploy.sh
-   ```
-   The helper SSHes to the remote checkout, force-resets it to `origin/main`, and
-   runs `npm run deploy` inside a tmux session. Remote reset is acceptable for
-   this deployment lane because the remote checkout is disposable deploy state.
-6. Verify live endpoints:
-   - `https://openpets.dev/plugins/catalog.v2.json`
-   - `https://openpets.dev/plugins/catalog.v1.json`
-   - each `https://zip.openpets.dev/plugins/<plugin-id>.zip`
+Plugins ship inside the desktop app: `plugins/official/` and
+`plugins/community/` are packaged as extra resources and auto-seeded on
+launch. There is no web plugin catalog, ZIP upload, or separate plugin release
+step. Before releasing, run `pnpm plugins:test` (locale checks + plugin
+harness tests); the packaging contract verifies the bundled plugin resources.
 
 ### C. GitHub Release notes
 
@@ -518,9 +474,8 @@ Smoke checklist inside the VM:
 3. Confirm the tray icon appears.
 4. Confirm a pet window appears.
 5. Open Control Center.
-6. Confirm the live plugin catalog loads from `https://openpets.dev/plugins/catalog.v2.json`.
-7. Confirm community plugins, including `openpets.spotify-buddy`, appear as installable when the live catalog includes them.
-8. Install, enable, and open configuration for at least one plugin without crashes or raw `$t:` strings.
+6. Confirm the Plugins page lists the bundled official and community plugins.
+7. Enable and open configuration for at least one plugin without crashes or raw `$t:` strings.
 
 The existing `/Volumes/external/vmware/ubuntu24` VM remains the Linux development
 VM. Prefer `ubuntu24-release-smoke` for fresh-user release validation, and use
