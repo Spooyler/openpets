@@ -94,7 +94,9 @@ The deepest integration, because Claude Code has a rich hook system.
   when no custom statusLine exists; a foreign entry reports `conflict` and is
   never replaced or removed. Managed from the Control Center Integrations page
   (Claude card) or via `open-pets-claude install-statusline`; `openpets doctor`
-  reports its status.
+  reports its status. The ping also feeds the desktop's idle-chat watchdog
+  (idle warnings + optional 59-minute auto-compact — see
+  [desktop.md](desktop.md)) as a "still busy" signal.
 - **Project-local awareness**: if a project defines its own OpenPets hook
   (`.claude/settings.local.json` with `--project-local`), the global hook stands
   down to avoid double-firing.

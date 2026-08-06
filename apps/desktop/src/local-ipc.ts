@@ -29,10 +29,13 @@ import { WindowPetRegistry, windowKeyForIdentity } from "./window-pet-registry.j
 import { NotificationStore, sessionLabelFromCwd } from "./notification-store.js";
 import { SessionLiveStatusTracker, type LiveStatus } from "./session-live-status.js";
 import { SpeechBubbleQueue } from "./speech-bubble-queue.js";
+import { createIdleChatWatchdog, type IdleChatWatchdog } from "./idle-chat-watchdog.js";
+import { injectCompactCommand } from "./console-inject.js";
 
 let ipcServer: net.Server | null = null;
 let ipcDiscovery: OpenPetsDiscoveryFile | null = null;
 let leaseCleanupTimer: NodeJS.Timeout | null = null;
+let idleChatWatchdog: IdleChatWatchdog | null = null;
 let agentConnectedTracked = false;
 const sessionLiveStatus = new SessionLiveStatusTracker();
 /** Queues speech bubbles from concurrent hub-mode sessions targeting the default pet, one visible at a time. */
@@ -394,6 +397,44 @@ export async function startLocalIpcServer(): Promise<void> {
     refreshDefaultPetNotifications();
   });
 
+  idleChatWatchdog = createIdleChatWatchdog({
+    listSessions: () => leaseManager.getAllRawLeases().map((l) => ({
+      leaseId: l.leaseId,
+      acquiredAt: l.acquiredAt,
+      lastActivityAt: Math.max(l.lastActivityAt ?? 0, l.lastHeartbeatAt),
+      clientPid: l.clientPid,
+    })),
+    getSettings: () => {
+      const { idleChatWarnEnabled, idleChatWarnMinutes, idleChatAutoCompactEnabled } = getAppStateSnapshot().preferences;
+      return { warnEnabled: idleChatWarnEnabled, warnMinutes: idleChatWarnMinutes, autoCompactEnabled: idleChatAutoCompactEnabled };
+    },
+    warn: (session, idleMinutes) => {
+      const lease = leaseManager.getRawLease(session.leaseId);
+      if (!lease) return;
+      const message = t("pet.idleChat.warnSpeech", { minutes: String(idleMinutes) });
+      const displayPet = displayPetForLease(lease);
+      if (displayPet) applyAgentPetSay(displayPet, message);
+      else sayToDefaultPet(lease, message, undefined);
+      recordSessionNotification(lease, "idle-warn", t("pet.notify.idleChatWarn", { minutes: String(idleMinutes) }));
+    },
+    compact: async (session) => {
+      if (session.clientPid === undefined) return false;
+      const result = await injectCompactCommand(session.clientPid);
+      const lease = leaseManager.getRawLease(session.leaseId);
+      if (lease) {
+        const notifyMsg = result.ok ? t("pet.notify.idleChatCompacted") : t("pet.notify.idleChatCompactFailed");
+        recordSessionNotification(lease, result.ok ? "idle-compacted" : "idle-compact-failed", notifyMsg);
+        if (result.ok) {
+          const displayPet = displayPetForLease(lease);
+          if (displayPet) applyAgentPetSay(displayPet, t("pet.idleChat.compactedSpeech"));
+          else sayToDefaultPet(lease, t("pet.idleChat.compactedSpeech"), undefined);
+        }
+      }
+      return result.ok;
+    },
+  });
+  idleChatWatchdog.start();
+
   info("ipc", "server started", { endpointKind: endpointConfig.bindEndpoint.kind, bindEndpoint: formatEndpoint(endpointConfig.bindEndpoint), advertisedEndpoint: listeningEndpoint, discoveryPath: getDiscoveryFilePath() });
   console.log(`OpenPets local IPC listening at ${listeningEndpoint}.`);
 }
@@ -406,6 +447,7 @@ export function stopLocalIpcServer(): void {
   info("ipc", "server stopping", { hadServer: Boolean(server), discoveryPath: discovery ? getDiscoveryFilePath() : undefined, endpoint: discovery?.endpoint });
   if (leaseCleanupTimer) clearInterval(leaseCleanupTimer);
   leaseCleanupTimer = null;
+  if (idleChatWatchdog) { idleChatWatchdog.stop(); idleChatWatchdog = null; }
   removeDiscoveryFile(discovery);
 
   if (server) {
@@ -777,6 +819,7 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const params = isRecord(request.params) ? request.params : {};
     const lease = getLeaseTarget(params.leaseId);
     debug("ipc", "agent activity ping", { requestId: request.id, leaseId: lease?.leaseId, targetKind: lease?.targetKind });
+    if (lease) idleChatWatchdog?.noteBusyPing(lease.leaseId);
     if (lease?.targetKind === "explicit") {
       return { ok: true, refreshed: refreshAgentPetBusyBadge(lease.actualTargetPetId), leaseId: lease.leaseId };
     }

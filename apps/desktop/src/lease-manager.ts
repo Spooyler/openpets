@@ -118,7 +118,7 @@ export class LeaseManager {
   readonly #isPetEligible: ((petId: string) => boolean) | undefined;
 
   constructor(options: LeaseManagerOptions = {}) {
-    this.#ttlMs = options.ttlMs ?? 15_000;
+    this.#ttlMs = options.ttlMs ?? 60_000;
     this.#now = options.now ?? Date.now;
     this.#resolveTarget = options.resolveTarget ?? (() => { throw new Error("Lease target resolver is not configured."); });
     this.#getDefaultPetId = options.getDefaultPetId ?? (() => { throw new Error("Default pet resolver is not configured."); });

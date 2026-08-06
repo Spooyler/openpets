@@ -114,6 +114,23 @@ macOS notification (once per unique pet ID) so the user knows why confinement
 is inactive. The notification includes the command to use once the pet is
 installed.
 
+**Idle chat watchdog:** `idle-chat-watchdog.ts` (pure, dependency-injected)
+polls live leases and measures per-session idle time from the freshest of the
+lease's `lastActivityAt` (touched by every hook-driven say/react) and the last
+statusline `agent.activity` ping, so a session mid-long-tool-run never reads
+as idle. When a chat has been idle for `idleChatWarnMinutes` (default 50,
+clamped 5–58), the session's routed pet warns once per idle stretch (speech
+bubble + notification row). With `idleChatAutoCompactEnabled` (default off;
+Windows only), at a fixed 59 minutes idle `console-inject.ts` injects the
+`/compact` command into the session: a PowerShell helper walks the process
+parent chain from the lease's `clientPid`, finds the Claude Code ancestor (it
+never injects into non-Claude sessions), attaches to that process's console,
+and writes synthetic key events (ESC to clear a stale draft, then `/compact` +
+Enter) into `CONIN$` — no window focus is taken, background terminal tabs
+work. Any activity resets the stretch; lease death drops all watchdog state.
+Settings live in Control Center → Settings (`idleChatWarnEnabled`,
+`idleChatWarnMinutes`, `idleChatAutoCompactEnabled`).
+
 ### App state
 
 `app-state.ts` persists a versioned JSON document under
