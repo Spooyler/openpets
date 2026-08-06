@@ -1217,7 +1217,8 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
  * of the session.
  */
 async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: number): Promise<void> {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  const retryDelays = [500, 1_500, 3_000];
+  for (let attempt = 1; attempt <= retryDelays.length + 1; attempt += 1) {
     const rawLease = leaseManager.getRawLease(leaseId);
     if (!rawLease) return;
     try {
@@ -1229,11 +1230,8 @@ async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: n
           terminalWindowId: termInfo.window?.id,
         });
         void captureClientAncestry(leaseId, clientPid);
-        // Identity resolved → register with the registry (pool draw / default
-        // coverage).
         const boundPetId = registerIdentifiedSession(leaseId);
         info("ipc", "terminal identity resolved (default lease)", { leaseId, clientPid, attempt, terminalPid: termInfo.terminalPid, appName: termInfo.appName, boundPetId });
-        // Pool-drawn pets need confinement tracking just like explicit-lease pets.
         if (boundPetId) {
           void subscribePoolConfinement(leaseId, clientPid, boundPetId);
         }
@@ -1243,7 +1241,9 @@ async function resolveDefaultLeaseTerminalIdentity(leaseId: string, clientPid: n
       info("ipc", "terminal identity resolution error (default lease)", { leaseId, clientPid, error: String(err) });
       return;
     }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 3_000));
+    if (attempt <= retryDelays.length) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, retryDelays[attempt - 1]!));
+    }
   }
   info("ipc", "terminal identity unresolved (default lease)", { leaseId, clientPid });
 }
