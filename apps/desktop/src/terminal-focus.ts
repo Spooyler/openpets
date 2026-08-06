@@ -92,7 +92,14 @@ async function focusTerminalWindowWin32(terminalPid: number, terminalWindowId?: 
     `  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);` +
     `  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);` +
     `  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);` +
+    `  [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);` +
     `}' -Language CSharp;`;
+
+  // Simulate Alt key press/release to lift the foreground lock — allows
+  // SetForegroundWindow to succeed from a non-foreground process.
+  const liftForegroundLock =
+    `[WinFocus]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero);` +
+    `[WinFocus]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero);`;
 
   // When we have a precise, finite-integer HWND, try targeting it directly
   // first. A non-finite value (NaN/Infinity) can't be marshalled into an
@@ -102,6 +109,7 @@ async function focusTerminalWindowWin32(terminalPid: number, terminalWindowId?: 
       const hwndScript = addTypeBlock +
         `$hwnd = [IntPtr]${terminalWindowId};` +
         `if ([WinFocus]::IsIconic($hwnd)) { [WinFocus]::ShowWindow($hwnd, 9) | Out-Null };` +
+        liftForegroundLock +
         `$ok = [WinFocus]::SetForegroundWindow($hwnd);` +
         `if (-not $ok) { exit 1 }`;
       await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", hwndScript]);
@@ -119,6 +127,7 @@ async function focusTerminalWindowWin32(terminalPid: number, terminalWindowId?: 
       `$proc = Get-Process -Id ${terminalPid} -ErrorAction SilentlyContinue;` +
       `if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {` +
       `  if ([WinFocus]::IsIconic($proc.MainWindowHandle)) { [WinFocus]::ShowWindow($proc.MainWindowHandle, 9) };` +
+      liftForegroundLock +
       `  [WinFocus]::SetForegroundWindow($proc.MainWindowHandle)` +
       `}`;
 
