@@ -1158,11 +1158,17 @@ async function resolveTerminalIdentity(leaseId: string, clientPid: number): Prom
       // Identity resolved → let the registry bind/spawn the pet for this window.
       registerIdentifiedSession(leaseId);
     },
-    // Confinement follows the registry's bound pet for this window (falling back
-    // to the explicit lease pet during the pre-identity grace window).
+    // Confinement follows the registry's bound pet for this window. When another
+    // window already owns this pet (e.g. same pet requested from two VS Code
+    // instances) only the owning window's poller drives confinement — the other
+    // poller is a no-op, preventing the pet from oscillating between two sets of
+    // terminal bounds.
     applyUpdate: (termInfo) => {
       const windowKey = windowKeyForIdentity(termInfo.window?.id, termInfo.terminalPid);
-      applyConfinementUpdate(windowPetRegistry.petForWindow(windowKey) ?? petId, termInfo);
+      const boundPet = windowPetRegistry.petForWindow(windowKey);
+      const effectivePet = boundPet ?? petId;
+      if (!boundPet && windowPetRegistry.windowForPet(effectivePet) !== null) return;
+      applyConfinementUpdate(effectivePet, termInfo);
     },
     isAlive: () => !!leaseManager.getRawLease(leaseId),
     onDead: () => unsubscribeConfinement(leaseId),
@@ -1266,7 +1272,10 @@ async function subscribePoolConfinement(leaseId: string, clientPid: number, petI
     },
     applyUpdate: (termInfo) => {
       const windowKey = windowKeyForIdentity(termInfo.window?.id, termInfo.terminalPid);
-      applyConfinementUpdate(windowPetRegistry.petForWindow(windowKey) ?? petId, termInfo);
+      const boundPet = windowPetRegistry.petForWindow(windowKey);
+      const effectivePet = boundPet ?? petId;
+      if (!boundPet && windowPetRegistry.windowForPet(effectivePet) !== null) return;
+      applyConfinementUpdate(effectivePet, termInfo);
     },
     isAlive: () => !!leaseManager.getRawLease(leaseId),
     onDead: () => unsubscribeConfinement(leaseId),
