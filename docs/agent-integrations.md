@@ -126,7 +126,7 @@ signals. `--pet <id>` targets a specific pet.
 > `openpets pets`; to install one use `openpets install <pet-id>` or the Pets
 > tab in Control Center.
 
-## Herdr pane focus (automatic, all integrations)
+## Herdr integration (automatic, all integrations)
 
 [Herdr](https://herdr.dev) is a terminal multiplexer for coding agents. Its
 panes run under a detached, windowless server process, so the process-ancestry
@@ -157,6 +157,22 @@ WT-spawned tabs is a direct child of the terminal emulator. Known limitation:
 a client hosted through the Windows *default-terminal handoff* leaves no
 process-tree link to the rendering terminal at all — there the window raise
 degrades to a no-op and only the pane switch happens.
+
+The desktop also follows herdr's own agent-state classification
+(`herdr-state.ts`). Herdr watches every pane's terminal output and classifies
+the agent as idle / working / blocked / done; the desktop subscribes to those
+changes over herdr's control socket (one connection per socket path, push
+events — no polling) and merges them into the session's live status:
+**blocked** sets the "waiting on you" dot, records a "Waiting for your input"
+notification row, and nudges the pet (once per blocked stretch, skipped when a
+hook already reported waiting); **working** fills in a busy dot when nothing
+more specific is known and counts as activity for the idle-chat watchdog;
+**idle**/**done** clear the dot immediately instead of waiting for the 30s
+hook-status decay. This matters most for sessions whose integration sends few
+events of its own (an MCP-only agent, say): herdr's classification gives their
+pets a live status and blocked alerts they otherwise wouldn't have. The
+watcher reconnects with backoff while herdr-hosted sessions exist and stands
+down once the last one ends.
 
 Nothing needs configuring: every integration that acquires a lease through the
 shared client (Claude Code hooks, the MCP server, OpenCode, Cursor) gets this

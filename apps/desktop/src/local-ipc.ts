@@ -18,7 +18,8 @@ import { clearConfinementState, getConfinementState, setConfinementState } from 
 import { isConfinementSupported } from "./capabilities.js";
 import { resolveAndSubscribe, type ConfinementPollerDeps } from "./confinement-poller.js";
 import { findTerminalWindowForPid, getAncestorPidChain, subscribeActiveWindowTracking, subscribeWindowTracking, type TerminalWindowInfo } from "./window-tracker.js";
-import { validateHerdrFocusContext } from "./herdr-focus.js";
+import { validateHerdrFocusContext, type HerdrFocusContext } from "./herdr-focus.js";
+import { createHerdrStateWatcher, herdrStatusActions, type HerdrAgentStatus, type HerdrStateWatcher } from "./herdr-state.js";
 import { focusSessionTarget, type SessionFocusTarget } from "./session-focus.js";
 import { hookNotificationMessage, notificationKindForHookEvent } from "./hook-notification-kind.js";
 import { parkWaitFocus, pruneWaitFocus, requestTabReveal } from "./vscode-tab-focus.js";
@@ -36,6 +37,7 @@ let ipcServer: net.Server | null = null;
 let ipcDiscovery: OpenPetsDiscoveryFile | null = null;
 let leaseCleanupTimer: NodeJS.Timeout | null = null;
 let idleChatWatchdog: IdleChatWatchdog | null = null;
+let herdrStateWatcher: HerdrStateWatcher | null = null;
 let agentConnectedTracked = false;
 const sessionLiveStatus = new SessionLiveStatusTracker();
 /** Queues speech bubbles from concurrent hub-mode sessions targeting the default pet, one visible at a time. */
@@ -261,6 +263,60 @@ function herdrPetFocusTarget(petId: string): SessionFocusTarget | null {
   return best ? herdrLeaseFocusTarget(best) : null;
 }
 
+/**
+ * Apply a herdr agent-status change to one lease: the merge rules
+ * (herdrStatusActions) decide how the coarse herdr classification combines
+ * with hook-driven live status; this executes them — live-status dot,
+ * once-per-stretch "waiting on input" notification, and lease activity.
+ */
+function applyHerdrStatus(lease: PetLease, status: HerdrAgentStatus, seeding: boolean): void {
+  const sessionKey = sessionKeyForLease(lease);
+  if (!sessionKey) return;
+  const actions = herdrStatusActions(status, sessionLiveStatus.get(sessionKey), seeding);
+  if (actions.touchActivity) leaseManager.touchActivity(lease.leaseId);
+  if (actions.liveReaction) sessionLiveStatus.update(sessionKey, actions.liveReaction);
+  if (!actions.notifyBlocked) return;
+  recordSessionNotification(lease, "permission", t("pet.notify.waitingInput"));
+  const displayPet = displayPetForLease(lease);
+  if (displayPet) applyAgentPetReaction(displayPet, "waiting");
+  else enqueueUrgentDefaultBubble(lease, "permission", "waiting");
+}
+
+/** Live leases whose herdr context points at this pane on this server. */
+function herdrLeasesForPane(socketPath: string, paneId: string): PetLease[] {
+  return leaseManager.getAllRawLeases().filter((lease) => lease.herdr?.paneId === paneId && lease.herdr.socketPath === socketPath);
+}
+
+/**
+ * Start (or keep) the herdr state watcher for a just-acquired lease's server
+ * and seed the lease from the pane's last known status, so a session joining
+ * mid-stream shows the right dot before the next transition. Contexts
+ * without a socket path are skipped: the raw-socket transport needs the
+ * concrete endpoint, and herdr exports HERDR_SOCKET_PATH into every pane.
+ */
+function ensureHerdrStateWatching(leaseId: string, herdr: HerdrFocusContext | undefined): void {
+  const socketPath = herdr?.socketPath;
+  if (!socketPath) return;
+  if (!herdrStateWatcher) {
+    herdrStateWatcher = createHerdrStateWatcher({
+      hasHerdrLeases: (sp) => leaseManager.getAllRawLeases().some((lease) => lease.herdr?.socketPath === sp),
+      onStatusChange: (event) => {
+        for (const lease of herdrLeasesForPane(event.socketPath, event.paneId)) applyHerdrStatus(lease, event.status, event.seeding);
+      },
+      onPaneGone: (sp, paneId) => {
+        for (const lease of herdrLeasesForPane(sp, paneId)) {
+          const sessionKey = sessionKeyForLease(lease);
+          if (sessionKey) sessionLiveStatus.remove(sessionKey);
+        }
+      },
+    });
+  }
+  herdrStateWatcher.ensureWatching(socketPath);
+  const known = herdrStateWatcher.statusFor(socketPath, herdr.paneId);
+  const rawLease = known ? leaseManager.getRawLease(leaseId) : null;
+  if (known && rawLease) applyHerdrStatus(rawLease, known, true);
+}
+
 // The default pet focuses the terminal of the session that most recently
 // interacted with it (say/react), falling back to the freshest heartbeat.
 setSessionTerminalFocusResolver(() => {
@@ -448,6 +504,7 @@ export function stopLocalIpcServer(): void {
   if (leaseCleanupTimer) clearInterval(leaseCleanupTimer);
   leaseCleanupTimer = null;
   if (idleChatWatchdog) { idleChatWatchdog.stop(); idleChatWatchdog = null; }
+  if (herdrStateWatcher) { herdrStateWatcher.stop(); herdrStateWatcher = null; }
   removeDiscoveryFile(discovery);
 
   if (server) {
@@ -748,6 +805,9 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
       throw new IpcProtocolError("session_blocked", "Session was disconnected from the UI.");
     }
     const lease = leaseManager.acquire(requestedPetId, clientPid, sessionNonce, cwd, herdr);
+    // Herdr-hosted sessions: follow the server's agent-state classification
+    // (working/blocked/idle) for the live-status dot and blocked alerts.
+    ensureHerdrStateWatching(lease.leaseId, herdr);
     // Project memory: an explicitly-called pet is remembered for this project;
     // an explicit return-to-default forgets it (spec: tri-state requestedPetId).
     if (requestedPetId === null && cwd) forgetProjectPet(cwd);

@@ -71,6 +71,7 @@ export const en = {
   "pet.notify.reaction.celebrating": "celebrating",
   "pet.notify.reaction.idle": "idle",
   "pet.notify.needsApproval": "Needs approval",
+  "pet.notify.waitingInput": "Waiting for your input",
   "pet.notify.taskComplete": "Task complete",
   "pet.notify.taskFailed": "Task failed",
   "pet.menu.notifications": "Notifications",
