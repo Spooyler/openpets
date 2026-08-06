@@ -16,6 +16,7 @@ const behaviorTests = [
   ".test-dist/tests/lease-manager.test.js",
   ".test-dist/tests/lease-manager-fixes.test.js",
   ".test-dist/tests/herdr-focus.test.js",
+  ".test-dist/tests/herdr-window.test.js",
   ".test-dist/tests/lan-state.test.js",
   ".test-dist/tests/lan-auth.test.js",
   ".test-dist/tests/lan-controller.test.js",

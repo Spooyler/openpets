@@ -144,6 +144,20 @@ which switches the attached herdr client to the session's workspace, tab, and
 pane. Dispatch is fire-and-forget: a missing `herdr` binary or dead server
 degrades to "nothing happens".
 
+The OS window is raised too: because the pane's own ancestry can't reach a
+terminal emulator, the desktop instead finds the herdr *client* process (the
+`herdr` invocation without a CLI subcommand; `--session`/`session attach`
+forms match their session against the lease's socket path, and an ambiguous
+multi-client setup raises nothing rather than the wrong window) and reuses the
+regular window resolution on that PID, so the terminal hosting herdr is
+restored/foregrounded alongside the pane switch (`herdr-window.ts`). When the
+client's own parent chain is severed (dead launcher process), resolution
+re-anchors on the client's console host (conhost/OpenConsole), which for
+WT-spawned tabs is a direct child of the terminal emulator. Known limitation:
+a client hosted through the Windows *default-terminal handoff* leaves no
+process-tree link to the rendering terminal at all — there the window raise
+degrades to a no-op and only the pane switch happens.
+
 Nothing needs configuring: every integration that acquires a lease through the
 shared client (Claude Code hooks, the MCP server, OpenCode, Cursor) gets this
 automatically when it runs inside a herdr pane.
