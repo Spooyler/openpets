@@ -1,0 +1,11 @@
+{
+  "plugin.name": "Claude Usage",
+  "plugin.description": "Always-on Claude usage HUD: weekly limits plus the 5-hour session broken down by model.",
+  "command.details.title": "Usage details",
+  "command.details.description": "Open the Claude usage breakdown panel.",
+  "command.toggle.title": "Show/hide widget",
+  "command.toggle.description": "Hide or show the pinned usage HUD without stopping the plugin.",
+  "config.standaloneWidget.label": "Standalone widget",
+  "config.standaloneWidget.description": "Show the usage HUD on its own widget pet instead of the default pet.",
+  "panel.title": "Claude usage"
+}

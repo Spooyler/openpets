@@ -1,0 +1,31 @@
+{
+  "manifestVersion": 3,
+  "id": "openpets.claude-usage",
+  "name": "$t:plugin.name",
+  "description": "$t:plugin.description",
+  "version": "1.0.0",
+  "runtime": "javascript",
+  "icon": "timer",
+  "sdkVersion": "3.0.0",
+  "entry": "index.js",
+  "panels": {
+    "details": "panel.html"
+  },
+  "permissions": [
+    "events",
+    "pet:speak",
+    "pet:pin",
+    "ui:panel",
+    "commands",
+    "storage",
+    "pets:manage"
+  ],
+  "configSchema": {
+    "standaloneWidget": {
+      "type": "boolean",
+      "default": false,
+      "label": "$t:config.standaloneWidget.label",
+      "description": "$t:config.standaloneWidget.description"
+    }
+  }
+}

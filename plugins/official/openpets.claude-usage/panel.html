@@ -1,0 +1,149 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Claude usage</title>
+<style>
+  :root {
+    --bg: #f7f7f8; --card: #ffffff; --text: #1c1c1f; --muted: #6b6b74;
+    --track: #e6e6ea; --blue: #3b82f6; --amber: #f59e0b; --red: #ef4444; --slate: #94a3b8;
+  }
+  html[data-theme="dark"] {
+    --bg: #17171b; --card: #212127; --text: #ececf1; --muted: #9a9aa5; --track: #34343d;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, sans-serif; padding: 14px; }
+  h1 { font-size: 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .stale { color: var(--amber); font-size: 11px; font-weight: 600; display: none; }
+  .card { background: var(--card); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  .bucket { margin-bottom: 10px; }
+  .bucket:last-child { margin-bottom: 0; }
+  .bucket-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+  .bucket-head .pct { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .bucket-head .reset { color: var(--muted); font-size: 11px; }
+  .track { height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+  .fill { height: 100%; border-radius: 3px; background: var(--blue); transition: width .3s; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 2px 6px 6px 0; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td { padding: 3px 6px 3px 0; }
+  .share { font-weight: 600; }
+  .empty { color: var(--muted); font-size: 12px; }
+  .updated { color: var(--muted); font-size: 11px; margin-top: 4px; }
+</style>
+</head>
+<body>
+  <h1>Claude usage <span class="stale" id="stale">stale</span></h1>
+  <div class="card" id="buckets"><div class="empty">Waiting for usage data…</div></div>
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th>Model (5h session)</th><th class="num">Share</th><th class="num">In</th><th class="num">Out</th><th class="num">Cache</th></tr>
+      </thead>
+      <tbody id="models"><tr><td colspan="5" class="empty">No model usage in this session yet.</td></tr></tbody>
+    </table>
+  </div>
+  <div class="updated" id="updated"></div>
+<script>
+  const tones = { blue: "var(--blue)", amber: "var(--amber)", red: "var(--red)", slate: "var(--slate)" };
+
+  function barColor(utilization, stale) {
+    if (stale) return tones.slate;
+    if (utilization >= 90) return tones.red;
+    if (utilization >= 70) return tones.amber;
+    return tones.blue;
+  }
+
+  function formatTokens(n) {
+    n = Number(n) || 0;
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+    if (n >= 1_000) return (n / 1_000).toFixed(1) + "k";
+    return String(n);
+  }
+
+  function resetLabel(resetsAt) {
+    const ms = Date.parse(resetsAt || "");
+    if (!Number.isFinite(ms)) return "";
+    const minutes = Math.max(0, Math.round((ms - Date.now()) / 60000));
+    if (minutes < 60) return "resets in " + minutes + "m";
+    if (minutes < 48 * 60) return "resets in " + Math.round(minutes / 60) + "h";
+    return "resets in " + Math.round(minutes / (24 * 60)) + "d";
+  }
+
+  function render(msg) {
+    document.documentElement.dataset.theme = msg.theme === "dark" ? "dark" : "light";
+    const payload = msg.payload || {};
+    document.getElementById("stale").style.display = payload.stale ? "inline" : "none";
+
+    const buckets = Array.isArray(payload.buckets) ? payload.buckets : [];
+    const bucketsEl = document.getElementById("buckets");
+    bucketsEl.textContent = "";
+    if (buckets.length === 0) {
+      bucketsEl.innerHTML = '<div class="empty">No limit data available.</div>';
+    }
+    for (const bucket of buckets) {
+      const pct = Math.max(0, Math.min(100, Math.round(Number(bucket.utilization) || 0)));
+      const row = document.createElement("div");
+      row.className = "bucket";
+      const head = document.createElement("div");
+      head.className = "bucket-head";
+      const label = document.createElement("span");
+      label.textContent = bucket.label || bucket.id || "";
+      const right = document.createElement("span");
+      const reset = document.createElement("span");
+      reset.className = "reset";
+      reset.textContent = resetLabel(bucket.resetsAt) + " ";
+      const pctEl = document.createElement("span");
+      pctEl.className = "pct";
+      pctEl.textContent = pct + "%";
+      right.append(reset, pctEl);
+      head.append(label, right);
+      const track = document.createElement("div");
+      track.className = "track";
+      const fill = document.createElement("div");
+      fill.className = "fill";
+      fill.style.width = pct + "%";
+      fill.style.background = barColor(pct, payload.stale);
+      track.append(fill);
+      row.append(head, track);
+      bucketsEl.append(row);
+    }
+
+    const models = Array.isArray(msg.models) ? msg.models : [];
+    const modelsEl = document.getElementById("models");
+    modelsEl.textContent = "";
+    if (models.length === 0) {
+      modelsEl.innerHTML = '<tr><td colspan="5" class="empty">No model usage in this session yet.</td></tr>';
+    }
+    for (const model of models) {
+      const tr = document.createElement("tr");
+      const cells = [
+        model.displayName || model.model,
+        Math.round((Number(model.weightedShare) || 0) * 100) + "%",
+        formatTokens(model.inputTokens),
+        formatTokens(model.outputTokens),
+        formatTokens((Number(model.cacheCreationTokens) || 0) + (Number(model.cacheReadTokens) || 0)),
+      ];
+      cells.forEach((text, index) => {
+        const td = document.createElement("td");
+        if (index > 0) td.className = "num";
+        if (index === 1) td.classList.add("share");
+        td.textContent = text;
+        tr.append(td);
+      });
+      modelsEl.append(tr);
+    }
+
+    const updatedMs = Number(payload.updatedAt) || 0;
+    document.getElementById("updated").textContent = updatedMs
+      ? "Updated " + new Date(updatedMs).toLocaleTimeString()
+      : "";
+  }
+
+  window.openPetsPanel?.onMessage((msg) => {
+    if (msg && msg.type === "usage") render(msg);
+  });
+  window.openPetsPanel?.postMessage({ type: "ready" });
+</script>
+</body>
+</html>

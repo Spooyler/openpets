@@ -297,7 +297,7 @@ const commandIdPattern = /^[A-Za-z0-9._:-]{1,64}$/;
 const scheduleIdPattern = /^[A-Za-z0-9._:-]{1,64}$/;
 const allowedEventNames = new Set([
   "pet:clicked", "pet:doubleClicked", "pet:dragStart", "pet:dragEnd", "pet:hover", "pet:drop",
-  "idle:enter", "idle:exit", "agent:activity", "config:changed",
+  "idle:enter", "idle:exit", "agent:activity", "agent:usage", "config:changed",
   "screen:locked", "screen:unlocked", "power:battery-low", "power:charging",
   "display:changed", "online", "offline", "day:partChanged",
 ]);

@@ -402,7 +402,8 @@ export type OpenPetsEventName =
   | "display:changed"
   | "online"
   | "offline"
-  | "day:partChanged";
+  | "day:partChanged"
+  | "agent:usage";
 
 /** A file delivered by an explicit user drop onto the pet (§13.7). */
 export interface OpenPetsDroppedFile {
@@ -418,6 +419,40 @@ export interface OpenPetsDropEvent {
   text?: string;
   files?: OpenPetsDroppedFile[];
   petId: string;
+}
+
+/** One rate-limit bucket reported by `agent:usage` (5h session, weekly, ...). */
+export interface OpenPetsAgentUsageBucket {
+  /** Stable bucket id from the provider (e.g. "five_hour", "seven_day"). */
+  id: string;
+  /** Short human-readable label (e.g. "Session", "Week (all)"). */
+  label: string;
+  /** Percent of the limit consumed, 0–100. */
+  utilization: number;
+  /** ISO timestamp when the bucket resets, when known. */
+  resetsAt?: string;
+}
+
+/** Per-model token usage within the current 5h session window (`agent:usage`). */
+export interface OpenPetsAgentUsageModel {
+  /** Provider model id (e.g. "claude-opus-4-8"). */
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  /** Cost-weighted share of the session across models, 0–1. */
+  weightedShare: number;
+}
+
+/** Payload for `agent:usage`: machine-global agent plan-usage snapshot. */
+export interface OpenPetsAgentUsageEvent {
+  /** Epoch ms when the snapshot was computed. */
+  updatedAt: number;
+  /** True when the data could not be refreshed and may be outdated. */
+  stale: boolean;
+  buckets: OpenPetsAgentUsageBucket[];
+  models: OpenPetsAgentUsageModel[];
 }
 
 /** Payload shapes per event. Unlisted events carry a small data record. */
@@ -440,6 +475,7 @@ export interface OpenPetsEventPayloads {
   online: Record<string, never>;
   offline: Record<string, never>;
   "day:partChanged": { part: "morning" | "afternoon" | "evening" | "night" };
+  "agent:usage": OpenPetsAgentUsageEvent;
 }
 
 export type OpenPetsEvent<E extends OpenPetsEventName> = OpenPetsEventPayloads[E];

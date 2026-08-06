@@ -8,6 +8,7 @@ import { getDefaultPetWindowForPlugins } from "./default-pet-controller.js";
 import { getActiveLocaleLang } from "./i18n/index.js";
 import { debug, warn } from "./logger.js";
 import { playPetWindowAudio, stopPetWindowAudio } from "./pet-window.js";
+import { getLastAgentUsagePayload, startClaudeUsageCollector, stopClaudeUsageCollector } from "./claude-usage-collector.js";
 import { PluginAiGateway } from "./plugin-ai-gateway.js";
 import { readDroppedFileText, startPluginEventSources, subscribePluginEvent } from "./plugin-events-source.js";
 import { PluginOauthBroker } from "./plugin-oauth.js";
@@ -92,6 +93,7 @@ export function createElectronPluginHostCapabilities(userDataPath: string): Elec
     didShutdown = true;
     app.off("before-quit", shutdown);
     stopDeliverySystem();
+    stopClaudeUsageCollector();
     closeAllPluginPets();
     if (activeCapabilities === capabilities) activeCapabilities = null;
   };
@@ -153,6 +155,11 @@ export function createElectronPluginHostCapabilities(userDataPath: string): Elec
     },
     events: {
       subscribe(event, handler) {
+        if (event === "agent:usage") {
+          startClaudeUsageCollector();
+          const last = getLastAgentUsagePayload();
+          if (last) setTimeout(() => handler(last as unknown as Record<string, unknown>), 0);
+        }
         return subscribePluginEvent(event, handler);
       },
     },
