@@ -21,7 +21,13 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const maxDepth = 12;
-const win32TimeoutMs = 2_000;
+// PowerShell startup + a full Win32_Process CIM enumeration measures ~2.1-2.4s
+// on a normally-loaded Windows box, and higher when several sessions run hooks
+// concurrently. A 2s ceiling made the enumeration time out on every call, so
+// this fell back to [process.pid] (a length-1 chain) and desktop-side session
+// routing could never match a bound pet — every say/react landed on the default
+// pet. Keep a bounded best-effort budget, but well above the real cost.
+const win32TimeoutMs = 8_000;
 
 export async function collectOwnProcessAncestry(): Promise<readonly number[]> {
   try {
