@@ -92,8 +92,11 @@ const loggerSource = readFileSync(join(appDir, "src", "logger.ts"), "utf8");
 const mainSource = readFileSync(join(appDir, "src", "main.ts"), "utf8");
 const appStateSource = readFileSync(join(appDir, "src", "app-state.ts"), "utf8");
 const analyticsSource = readFileSync(join(appDir, "src", "analytics.ts"), "utf8");
-const webPostHogPluginSource = readFileSync(join(repoRoot, "web", "app", "plugins", "posthog.client.js"), "utf8");
-const webAnalyticsSource = readFileSync(join(repoRoot, "web", "app", "composables", "useAnalytics.js"), "utf8");
+// The web site lives in a gitignored sibling checkout; its analytics checks
+// only run on machines that have it.
+const webCheckoutPresent = existsSync(join(repoRoot, "web"));
+const webPostHogPluginSource = webCheckoutPresent ? readFileSync(join(repoRoot, "web", "app", "plugins", "posthog.client.js"), "utf8") : "";
+const webAnalyticsSource = webCheckoutPresent ? readFileSync(join(repoRoot, "web", "app", "composables", "useAnalytics.js"), "utf8") : "";
 const localIpcSourceForLogging = readFileSync(join(appDir, "src", "local-ipc.ts"), "utf8");
 const localIpcPathsSource = readFileSync(join(appDir, "src", "local-ipc-paths.ts"), "utf8");
 const leaseManagerSource = readFileSync(join(appDir, "src", "lease-manager.ts"), "utf8");
@@ -115,12 +118,16 @@ for (const eventName of ["desktop_control_center_opened", "desktop_integration_a
 }
 assert.doesNotMatch(analyticsSource + localIpcSourceForLogging, /desktop_agent_reaction_received|desktop_first_agent_reaction_received/, "desktop analytics must not emit old per-reaction agent events.");
 assert.match(analyticsSource, /function classifyAnalyticsError/, "desktop analytics must classify errors into safe buckets before capture.");
-assert.match(webPostHogPluginSource, /autocapture:\s*!!cfg\.debug/, "web autocapture must be disabled unless explicit debug mode is enabled.");
-for (const eventName of ["web_app_download_clicked", "web_pet_download_clicked", "web_install_command_copied", "web_outbound_link_clicked", "web_github_stars_observed"]) {
-  assert.match(webAnalyticsSource, new RegExp(eventName), `web analytics must use canonical event: ${eventName}`);
+if (webCheckoutPresent) {
+  assert.match(webPostHogPluginSource, /autocapture:\s*!!cfg\.debug/, "web autocapture must be disabled unless explicit debug mode is enabled.");
+  for (const eventName of ["web_app_download_clicked", "web_pet_download_clicked", "web_install_command_copied", "web_outbound_link_clicked", "web_github_stars_observed"]) {
+    assert.match(webAnalyticsSource, new RegExp(eventName), `web analytics must use canonical event: ${eventName}`);
+  }
+  assert.doesNotMatch(webAnalyticsSource, /pet_name|\bhref\s*:/, "web analytics must not send pet names or full outbound href properties.");
+  assert.match(webAnalyticsSource, /pathname:\s*safePathOf\(href\)/, "web outbound analytics must send only a conservative safe pathname bucket.");
+} else {
+  console.error("SKIP: web analytics contract checks (web/ checkout not present)");
 }
-assert.doesNotMatch(webAnalyticsSource, /pet_name|\bhref\s*:/, "web analytics must not send pet names or full outbound href properties.");
-assert.match(webAnalyticsSource, /pathname:\s*safePathOf\(href\)/, "web outbound analytics must send only a conservative safe pathname bucket.");
 assert.doesNotMatch(windowsSource, /plugin_id|pet_id|command_id/, "desktop analytics must not send raw local pet, plugin, or command identifiers.");
 assert.doesNotMatch(windowsSource + localIpcSourceForLogging + mainSource, /trackDesktopEvent\([^\n]*(filePaths|selectedPath|installPath|manifestPath|href\s*:)/, "desktop analytics must not send local paths or hrefs.");
 assert.match(mainSource, /isLinux && !allowWayland[\s\S]*?appendSwitch\("ozone-platform", "x11"\)/, "Linux desktop pets must force X11/Xwayland because native Wayland blocks always-on-top and programmatic window positioning.");
@@ -242,8 +249,8 @@ assert.match(petWindowSource, /loadExplicitPetContent[\s\S]*?state\.preferences\
 assert.match(petWindowSource, /interface AgentPetWindowOptions[\s\S]*?readonly scale: PetScaleValue/, "new agent pet windows must receive the current pet scale explicitly for their first render.");
 assert.match(petWindowSource, /loadExplicitPetContent\(window, options\.petId, options\.display, options\.badge, dismissToken, options\.scale\)/, "agent pet first render must not fall back to the medium default scale.");
 assert.match(agentPetControllerSourceForLogging, /function getPreferredPetScale\(\): PetScaleValue/, "agent pet reloads must share one explicit saved scale helper.");
-assert.match(agentPetControllerSourceForLogging, /loadExplicitPetContent\(window, petId, display, badge, getCurrentDismissToken\(petId, display, badge\), scale\)/, "agent pet refreshes must pass the saved pet scale explicitly.");
-assert.match(agentPetControllerSourceForLogging, /loadExplicitPetContent\(window, petId, preparedDisplay, statusBadges\.get\(petId\) \?\? null, preparedDisplay\.dismissToken, getPreferredPetScale\(\)\)/, "agent pet transient updates must pass the saved pet scale explicitly.");
+assert.match(agentPetControllerSourceForLogging, /loadExplicitPetContent\(window, petId, display, badge, getCurrentDismissToken\(petId, display, badge\), scale[,)]/, "agent pet refreshes must pass the saved pet scale explicitly.");
+assert.match(agentPetControllerSourceForLogging, /loadExplicitPetContent\(window, petId, preparedDisplay, statusBadges\.get\(petId\) \?\? null, preparedDisplay\.dismissToken, getPreferredPetScale\(\)[,)]/, "agent pet transient updates must pass the saved pet scale explicitly.");
 assert.match(mappingDoc, /waving/i, "pet docs must describe waving animation behavior.");
 assert.match(mappingDoc, /reaction-animation-mapping\.ts/, "mapping docs must reference the shared reaction animation mapping source of truth.");
 assert.match(mappingDoc, /overrid/i, "mapping docs must mention that reaction animation defaults can be overridden in Settings.");

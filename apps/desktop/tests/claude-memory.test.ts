@@ -55,14 +55,23 @@ try {
   const symlinkTarget = join(dir, "outside");
   mkdirSync(symlinkHome);
   mkdirSync(symlinkTarget);
-  symlinkSync(symlinkTarget, join(symlinkHome, ".claude"));
+  symlinkSync(symlinkTarget, join(symlinkHome, ".claude"), "junction");
   assert.throws(() => installClaudeOpenPetsMemory(symlinkHome));
 
   const symlinkFileHome = join(dir, "symlink-file-home");
   mkdirSync(join(symlinkFileHome, ".claude"), { recursive: true });
   writeFileSync(join(dir, "outside-file"), "x", "utf8");
-  symlinkSync(join(dir, "outside-file"), join(symlinkFileHome, ".claude", "CLAUDE.md"));
-  assert.throws(() => installClaudeOpenPetsMemory(symlinkFileHome));
+  let fileSymlinkAvailable = true;
+  try {
+    symlinkSync(join(dir, "outside-file"), join(symlinkFileHome, ".claude", "CLAUDE.md"));
+  } catch (error) {
+    // File symlinks (unlike directory junctions) need the Windows symlink
+    // privilege; skip rather than fail outside Developer Mode.
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+    fileSymlinkAvailable = false;
+    console.error("SKIP: CLAUDE.md symlink rejection (file symlinks unavailable without Windows symlink privilege)");
+  }
+  if (fileSymlinkAvailable) assert.throws(() => installClaudeOpenPetsMemory(symlinkFileHome));
 
   const oversizedHome = join(dir, "oversized-home");
   mkdirSync(join(oversizedHome, ".claude"), { recursive: true });
