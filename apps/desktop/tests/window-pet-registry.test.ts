@@ -335,7 +335,7 @@ function makeRecorder() {
 
   const sA1 = { sessionKey: "40:a1", leaseId: "LA1", terminalOwnerPid: 400, terminalWindowId: 40, label: "proj-a", terminalAppName: "iTerm2" };
   const sA2 = { sessionKey: "41:a2", leaseId: "LA2", terminalOwnerPid: 400, terminalWindowId: 40, label: "proj-a", terminalAppName: "iTerm2" };
-  const sB1 = { sessionKey: "42:b1", leaseId: "LB1", terminalOwnerPid: 420, terminalWindowId: 42, label: "proj-b", terminalAppName: "Terminal" };
+  const sB1 = { sessionKey: "42:b1", leaseId: "LB1", terminalOwnerPid: 420, terminalWindowId: 42, label: "proj-b", terminalAppName: "Terminal", cwd: "/home/user/proj-b" };
 
   assert.equal(reg.onSessionIdentified(sA1, undefined, false), null, "parked on default");
   assert.equal(reg.onSessionIdentified(sA2, undefined, false), null, "parked on default");
@@ -345,7 +345,7 @@ function makeRecorder() {
   assert.equal(coverage.length, 2, "2 windows under default coverage");
   const byKey = new Map(coverage.map((c) => [c.windowKey, c]));
   assert.deepEqual(byKey.get("w:40"), { windowKey: "w:40", terminalAppName: "iTerm2", sessionCount: 2 });
-  assert.deepEqual(byKey.get("w:42"), { windowKey: "w:42", terminalAppName: "Terminal", sessionCount: 1 });
+  assert.deepEqual(byKey.get("w:42"), { windowKey: "w:42", terminalAppName: "Terminal", sessionCount: 1, cwd: "/home/user/proj-b" });
 
   // Binding one window to a pet removes it from default coverage.
   assert.equal(reg.assignPetToWindow("w:40", "fox"), true);

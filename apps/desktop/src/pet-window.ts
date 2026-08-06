@@ -51,7 +51,7 @@ export interface DefaultPetWindowOptions extends PetWindowInteractionHooks {
   /** Toggles the notifications flyout (menu mirrors the badge-click behavior). */
   readonly onToggleNotifications?: () => void;
   /** Windows currently under default coverage, for the "Summon pet" submenu. */
-  readonly getSummonTargets?: () => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number }>;
+  readonly getSummonTargets?: () => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number; cwd?: string }>;
   /** Installed pets eligible to be summoned into a window. */
   readonly getSummonablePets?: () => ReadonlyArray<{ id: string; displayName: string; inUse: boolean }>;
   /** Binds the selected pet to the selected window (Summon pet submenu). */
@@ -238,7 +238,7 @@ interface PetContextMenuAction {
   /** Agent pets only: hides the window while keeping its binding/store alive. */
   readonly onHideRequested?: () => void;
   /** Default pet only: windows under default coverage, for the "Summon pet" submenu. */
-  readonly getSummonTargets?: () => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number }>;
+  readonly getSummonTargets?: () => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number; cwd?: string }>;
   /** Default pet only: installed pets eligible to be summoned into a window. */
   readonly getSummonablePets?: () => ReadonlyArray<{ id: string; displayName: string; inUse: boolean }>;
   /** Default pet only: binds the selected pet to the selected window. */
@@ -324,21 +324,30 @@ async function buildPetContextMenuTemplate(action: PetContextMenuAction): Promis
 }
 
 function buildSummonPetMenuItem(
-  targets: ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number }>,
+  targets: ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number; cwd?: string }>,
   pets: ReadonlyArray<{ id: string; displayName: string; inUse: boolean }>,
   onSummonPet: ((windowKey: string, petId: string) => void) | undefined,
 ): Electron.MenuItemConstructorOptions {
   const label = t("pet.menu.summon");
   if (targets.length === 0 || pets.length === 0) return { label, enabled: false };
+  const appNameCounts = new Map<string, number>();
+  for (const target of targets) appNameCounts.set(target.terminalAppName, (appNameCounts.get(target.terminalAppName) ?? 0) + 1);
   return {
     label,
-    submenu: targets.map((target) => ({
-      label: `${target.terminalAppName} (${target.sessionCount} ${target.sessionCount === 1 ? "session" : "sessions"})`,
-      submenu: pets.map((pet) => ({
-        label: pet.inUse ? `${pet.displayName} (${t("pet.menu.summon.inUse")})` : pet.displayName,
-        click: () => onSummonPet?.(target.windowKey, pet.id),
-      })),
-    })),
+    submenu: targets.map((target) => {
+      const needsDisambiguation = (appNameCounts.get(target.terminalAppName) ?? 0) > 1;
+      const folder = needsDisambiguation && target.cwd ? target.cwd.replace(/\\/g, "/").split("/").pop() : null;
+      const windowLabel = folder
+        ? `${target.terminalAppName} — ${folder} (${target.sessionCount} ${target.sessionCount === 1 ? "session" : "sessions"})`
+        : `${target.terminalAppName} (${target.sessionCount} ${target.sessionCount === 1 ? "session" : "sessions"})`;
+      return {
+        label: windowLabel,
+        submenu: pets.map((pet) => ({
+          label: pet.inUse ? `${pet.displayName} (${t("pet.menu.summon.inUse")})` : pet.displayName,
+          click: () => onSummonPet?.(target.windowKey, pet.id),
+        })),
+      };
+    }),
   };
 }
 

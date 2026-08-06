@@ -278,21 +278,22 @@ export class WindowPetRegistry {
 
   /** Windows currently under default coverage (no bound pet), grouped with
    *  their terminal app name and how many sessions share the window. */
-  defaultCoverageWindows(): ReadonlyArray<{ windowKey: WindowKey; terminalAppName: string; sessionCount: number }> {
-    const groups = new Map<WindowKey, { terminalAppName: string; count: number }>();
+  defaultCoverageWindows(): ReadonlyArray<{ windowKey: WindowKey; terminalAppName: string; sessionCount: number; cwd?: string }> {
+    const groups = new Map<WindowKey, { terminalAppName: string; count: number; cwd?: string }>();
     for (const session of this.#defaultSessions.values()) {
       const wk = windowKeyForIdentity(session.terminalWindowId, session.terminalOwnerPid);
       const existing = groups.get(wk);
       if (existing) {
         existing.count += 1;
       } else {
-        groups.set(wk, { terminalAppName: session.terminalAppName ?? session.label, count: 1 });
+        groups.set(wk, { terminalAppName: session.terminalAppName ?? session.label, count: 1, cwd: session.cwd });
       }
     }
     return [...groups.entries()].map(([windowKey, g]) => ({
       windowKey,
       terminalAppName: g.terminalAppName,
       sessionCount: g.count,
+      ...(g.cwd !== undefined ? { cwd: g.cwd } : {}),
     }));
   }
 

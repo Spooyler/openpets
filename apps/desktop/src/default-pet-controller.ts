@@ -84,9 +84,9 @@ export function setDefaultPetBubbleDismissedHandler(handler: (sessionKey: string
 
 // Injected by local-ipc.ts: windows under default coverage, for the default
 // pet's right-click "Summon pet" submenu.
-let summonTargetsAccessor: (() => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number }>) | null = null;
+let summonTargetsAccessor: (() => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number; cwd?: string }>) | null = null;
 
-export function setSummonTargetsAccessor(accessor: () => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number }>): void {
+export function setSummonTargetsAccessor(accessor: () => ReadonlyArray<{ windowKey: string; terminalAppName: string; sessionCount: number; cwd?: string }>): void {
   summonTargetsAccessor = accessor;
 }
 

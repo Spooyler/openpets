@@ -584,6 +584,20 @@ function SessionsView() {
     else groups.set(key, [s]);
   }
 
+  const appNameCounts = new Map<string, number>();
+  for (const [key, sessions] of groups) {
+    if (key === IDENTIFYING) continue;
+    const name = sessions[0]?.terminalAppName ?? "";
+    appNameCounts.set(name, (appNameCounts.get(name) ?? 0) + 1);
+  }
+  const groupLabel = (sessions: SessionLeaseSnapshot[]): string => {
+    const appName = sessions[0]?.terminalAppName || "—";
+    if ((appNameCounts.get(sessions[0]?.terminalAppName ?? "") ?? 0) <= 1) return appName;
+    const cwd = sessions[0]?.cwd;
+    const folder = cwd ? shortenCwd(cwd) : null;
+    return folder ? `${appName} — ${folder}` : appName;
+  };
+
   return (
     <div className="sessions-layout">
       <GlassCard>
@@ -621,7 +635,7 @@ function SessionsView() {
                 <div key={groupKey} className="sessions-group">
                   <div className="sessions-group-header">
                     <span className="sessions-group-title">
-                      {isIdentifying ? t("sessions.group.identifying") : (lead.terminalAppName || "—")}
+                      {isIdentifying ? t("sessions.group.identifying") : groupLabel(groupSessions)}
                       {!isIdentifying && <span className="sessions-pet-name">{groupPetName ?? t("sessions.group.defaultPet")}</span>}
                       {!isIdentifying && (
                         <span className={`pill text-[9px] px-1.5 py-0 ${lead.displayPetOrigin === "pool" ? "pill-orange" : groupPetId ? "pill-purple" : "pill-blue"}`}>
