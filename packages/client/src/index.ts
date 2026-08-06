@@ -16,6 +16,39 @@ export { allowedReactions, OpenPetsClientError, type OpenPetsReaction, type VsCo
  */
 const SESSION_NONCE = randomUUID();
 
+/** Herdr pane identity a client inherits when it runs inside a herdr pane. */
+export interface HerdrEnvContext {
+  readonly paneId: string;
+  readonly tabId?: string;
+  readonly socketPath?: string;
+}
+
+const maxHerdrIdLength = 64;
+const maxHerdrSocketPathLength = 512;
+
+/**
+ * Read the herdr multiplexer pane identity from the environment. Herdr
+ * (herdr.dev) exports HERDR_PANE_ID / HERDR_TAB_ID / HERDR_SOCKET_PATH into
+ * every pane, and the agent process inherits them. Sent with lease.acquire so
+ * the desktop can focus the exact pane on double-click — herdr panes run
+ * under a windowless detached server, so the usual process-ancestry terminal
+ * resolution never reaches a terminal window for them.
+ */
+export function readHerdrEnvContext(env: Record<string, string | undefined>): HerdrEnvContext | undefined {
+  const paneId = env.HERDR_PANE_ID;
+  if (typeof paneId !== "string" || paneId.length === 0 || paneId.length > maxHerdrIdLength) return undefined;
+  const tabId = env.HERDR_TAB_ID;
+  const socketPath = env.HERDR_SOCKET_PATH;
+  return {
+    paneId,
+    tabId: typeof tabId === "string" && tabId.length > 0 && tabId.length <= maxHerdrIdLength ? tabId : undefined,
+    socketPath: typeof socketPath === "string" && socketPath.length > 0 && socketPath.length <= maxHerdrSocketPathLength ? socketPath : undefined,
+  };
+}
+
+/** Captured once at module load — pane identity cannot change for a live process. */
+const HERDR_CONTEXT = readHerdrEnvContext(process.env);
+
 export interface OpenPetsClientOptions {
   readonly discoveryPath?: string;
   readonly connectTimeoutMs?: number;
@@ -103,7 +136,7 @@ export function createOpenPetsClient(options: OpenPetsClientOptions = {}): OpenP
       }
       return parsePetInstallResult(await sendDiscoveredRequest("pets.install-local", { path: trimmedPath, kind: installOptions.kind }, { ...options, responseTimeoutMs: options.responseTimeoutMs ?? 60_000 }));
     },
-    acquireLease: (leaseOptions) => sendDiscoveredRequest("lease.acquire", { requestedPetId: leaseOptions?.requestedPetId, clientPid: process.pid, sessionNonce: SESSION_NONCE, cwd: process.cwd() }, options),
+    acquireLease: (leaseOptions) => sendDiscoveredRequest("lease.acquire", { requestedPetId: leaseOptions?.requestedPetId, clientPid: process.pid, sessionNonce: SESSION_NONCE, cwd: process.cwd(), herdr: HERDR_CONTEXT }, options),
     heartbeatLease: (leaseId) => sendDiscoveredRequest("lease.heartbeat", { leaseId }, options),
     releaseLease: (leaseId) => sendDiscoveredRequest("lease.release", { leaseId }, options),
     react: (reaction, reactOptions) => sendDiscoveredRequest("pet.react", { reaction: validateReaction(reaction), leaseId: reactOptions?.leaseId, clientPid: process.pid, clientAncestorPids: reactOptions?.clientAncestorPids, hookEventName: reactOptions?.hookEventName }, options),

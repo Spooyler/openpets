@@ -100,9 +100,17 @@ const read = (name: string): string => readFileSync(join(appRoot, "src", name), 
 {
   const src = read("default-pet-controller.ts");
   assert.ok(src.includes(`"pet:doubleClicked"`), "(B1) default pet must handle pet:doubleClicked");
-  assert.ok(src.includes("focusTerminalWindow"), "(B1) default pet must call focusTerminalWindow");
+  assert.ok(src.includes("focusSessionTarget"), "(B1) default pet must dispatch via focusSessionTarget");
   assert.ok(src.includes("setSessionTerminalFocusResolver"), "(B1) resolver setter must exist");
   assert.ok(src.includes(`publishPluginPetEvent("default", name, payload)`), "(B1) plugin pet-event forwarding must be preserved");
+}
+
+// (B1b) session-focus: the shared dispatch must cover both focus mechanisms —
+// raising the terminal window and switching the herdr pane.
+{
+  const src = read("session-focus.ts");
+  assert.ok(src.includes("focusTerminalWindow"), "(B1b) session focus must raise the terminal window");
+  assert.ok(src.includes("focusHerdrPane"), "(B1b) session focus must switch the herdr pane");
 }
 
 // (B2) local-ipc registers the resolver backed by the lease manager

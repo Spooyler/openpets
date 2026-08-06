@@ -7,7 +7,7 @@ import { defaultPetWindowSize, clampToVisibleWorkArea, getDefaultPetInitialPosit
 import { debug, info } from "./logger.js";
 import { transientDisplayMs, type OpenPetsReaction } from "./local-ipc-protocol.js";
 import { clearTransientReaction, createAgentPetWindow, getTransientDisplayDurationMs, getTransientReactionAnimationMs, isPetWindowDragging, loadExplicitPetContent, markNotifyDismiss, mergePetTransientDisplay, readWindowPosition, setPetReactionState, type PetStatusBadgeReaction, type PetTransientDisplay } from "./pet-window.js";
-import { focusTerminalWindow } from "./terminal-focus.js";
+import { focusSessionTarget, type SessionFocusTarget } from "./session-focus.js";
 import { buildNotificationsView, type PetNotificationsView } from "./notification-view.js";
 import { t } from "./i18n/index.js";
 import type { NotificationStore } from "./notification-store.js";
@@ -42,18 +42,18 @@ export function setAgentPetStoreAccessor(accessor: (petId: string) => Notificati
 
 // Injected by local-ipc.ts: resolves the focus target for an agent pet from the
 // window-pet-registry (oldest unresolved → freshest activity).
-let focusTargetAccessor: ((petId: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null) | null = null;
+let focusTargetAccessor: ((petId: string) => SessionFocusTarget | null) | null = null;
 
-export function setAgentPetFocusTargetAccessor(accessor: (petId: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
+export function setAgentPetFocusTargetAccessor(accessor: (petId: string) => SessionFocusTarget | null): void {
   focusTargetAccessor = accessor;
 }
 
 // Injected by local-ipc.ts: resolves a specific session's own focus target from
 // the window-pet-registry, so clicking a notification row raises the window
 // that actually owns that session (falls back to focusTargetAccessor above).
-let sessionFocusTargetAccessor: ((sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null) | null = null;
+let sessionFocusTargetAccessor: ((sessionKey: string) => SessionFocusTarget | null) | null = null;
 
-export function setAgentSessionFocusTargetAccessor(accessor: (sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
+export function setAgentSessionFocusTargetAccessor(accessor: (sessionKey: string) => SessionFocusTarget | null): void {
   sessionFocusTargetAccessor = accessor;
 }
 
@@ -368,8 +368,8 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
   const focusSessionTerminal = (): void => {
     const target = focusTargetAccessor?.(petId);
     const focusPid = target?.terminalOwnerPid ?? getConfinementState(petId)?.terminalOwnerPid;
-    if (focusPid) {
-      focusTerminalWindow(focusPid, target?.terminalWindowId)
+    if (focusPid || target?.herdr) {
+      focusSessionTarget({ ...target, terminalOwnerPid: focusPid })
         .then(() => {
           revealTabForLeaseAccessor?.(target?.leaseId);
         })
@@ -407,9 +407,9 @@ function getOrCreateAgentPetWindow(petId: string): BrowserWindow {
           const target = sessionFocusTargetAccessor?.(sessionKey) ?? focusTargetAccessor?.(petId) ?? null;
           const focusPid = target?.terminalOwnerPid ?? getConfinementState(petId)?.terminalOwnerPid;
           let focused = false;
-          if (focusPid) {
+          if (focusPid || target?.herdr) {
             try {
-              focused = await focusTerminalWindow(focusPid, target?.terminalWindowId);
+              focused = await focusSessionTarget({ ...target, terminalOwnerPid: focusPid });
               revealTabForLeaseAccessor?.(target?.leaseId);
             } catch (err) {
               debug("pet.agent", "focus notification session failed", { petId, sessionKey, error: String(err) });

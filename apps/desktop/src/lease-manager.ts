@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { HerdrFocusContext } from "./herdr-focus.js";
+
 export type LeaseTargetKind = "default" | "explicit";
 export type LeaseFallbackReason = "invalid_pet_id" | "pet_not_installed" | "pet_broken" | "default_broken_fallback_builtin";
 
@@ -38,6 +40,13 @@ export interface PetLease {
    * (e.g. Claude Code hooks) be routed to this session's pet.
    */
   readonly clientAncestorPids?: readonly number[];
+  /**
+   * Herdr pane identity captured from the client's environment at acquire
+   * time. Herdr panes run under a windowless detached server, so terminal
+   * identity never resolves for them — this context is what lets focus
+   * actions reach the session's pane (see herdr-focus.ts).
+   */
+  readonly herdr?: HerdrFocusContext;
 }
 
 export interface LeaseSnapshot {
@@ -121,7 +130,7 @@ export class LeaseManager {
     this.#isPetEligible = options.isPetEligible;
   }
 
-  acquire(requestedPetId?: string | null, clientPid?: number, sessionNonce?: string, cwd?: string): LeaseSnapshot {
+  acquire(requestedPetId?: string | null, clientPid?: number, sessionNonce?: string, cwd?: string, herdr?: HerdrFocusContext): LeaseSnapshot {
     const now = this.#now();
 
     // FIX M1 + FIX 1: Idempotent per-clientPid lease reuse, guarded by sessionNonce.
@@ -175,6 +184,7 @@ export class LeaseManager {
       clientPid,
       sessionNonce,
       cwd,
+      herdr,
     };
 
     const hadExplicitLease = lease.targetKind === "explicit" && this.countExplicitLeases(lease.actualPetId) > 0;
@@ -429,17 +439,20 @@ export class LeaseManager {
 
   /**
    * The lease whose terminal the default pet should focus: active, with a
-   * resolved terminalOwnerPid. Default-target (pet-sharing) leases are
-   * preferred; when none exist — e.g. every session holds a pool or adopted
-   * pet — explicit leases are eligible so the default pet can still focus the
-   * most recent session. Within a tier, the most recent activity (say/react)
-   * wins, falling back to the most recent heartbeat.
+   * resolved terminalOwnerPid or a herdr pane context (herdr sessions never
+   * resolve terminal identity — the pane context is their focus handle).
+   * Default-target (pet-sharing) leases are preferred; when none exist —
+   * e.g. every session holds a pool or adopted pet — explicit leases are
+   * eligible so the default pet can still focus the most recent session.
+   * Within a tier, the most recent activity (say/react) wins, falling back
+   * to the most recent heartbeat.
    */
   getFocusableDefaultLease(): PetLease | undefined {
     const now = this.#now();
     let best: PetLease | undefined;
     for (const lease of this.#leases.values()) {
-      if (!lease.terminalOwnerPid || lease.terminalOwnerPid <= 0) continue;
+      const hasTerminal = lease.terminalOwnerPid !== undefined && lease.terminalOwnerPid > 0;
+      if (!hasTerminal && !lease.herdr) continue;
       if (lease.expiresAt <= now) continue;
       if (!best) { best = lease; continue; }
       const bestIsDefault = best.targetKind === "default";

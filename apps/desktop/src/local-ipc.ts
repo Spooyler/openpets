@@ -18,7 +18,8 @@ import { clearConfinementState, getConfinementState, setConfinementState } from 
 import { isConfinementSupported } from "./capabilities.js";
 import { resolveAndSubscribe, type ConfinementPollerDeps } from "./confinement-poller.js";
 import { findTerminalWindowForPid, getAncestorPidChain, subscribeActiveWindowTracking, subscribeWindowTracking, type TerminalWindowInfo } from "./window-tracker.js";
-import { focusTerminalWindow } from "./terminal-focus.js";
+import { validateHerdrFocusContext } from "./herdr-focus.js";
+import { focusSessionTarget, type SessionFocusTarget } from "./session-focus.js";
 import { hookNotificationMessage, notificationKindForHookEvent } from "./hook-notification-kind.js";
 import { parkWaitFocus, pruneWaitFocus, requestTabReveal } from "./vscode-tab-focus.js";
 import { warnPetFallback } from "./pet-fallback-notify.js";
@@ -213,25 +214,72 @@ export function getWindowPetRegistry(): WindowPetRegistry {
   return windowPetRegistry;
 }
 
+/**
+ * Attach the lease's herdr pane context to a registry focus target, so the
+ * focus action can also switch the herdr tab/pane (see session-focus.ts).
+ * Registry targets only carry terminal identity; the herdr context lives on
+ * the raw lease.
+ */
+function withHerdrContext(target: SessionFocusTarget | null): SessionFocusTarget | null {
+  if (!target?.leaseId) return target;
+  const herdr = leaseManager.getRawLease(target.leaseId)?.herdr;
+  return herdr ? { ...target, herdr } : target;
+}
+
+/** Build a focus target straight from a lease that carries herdr context. */
+function herdrLeaseFocusTarget(lease: PetLease): SessionFocusTarget {
+  return { terminalOwnerPid: lease.terminalOwnerPid, terminalWindowId: lease.terminalWindowId, herdr: lease.herdr, leaseId: lease.leaseId };
+}
+
+/**
+ * Herdr fallback for session-row focus: herdr-hosted sessions never resolve a
+ * terminal identity, so they are absent from the window registry — match the
+ * lease by session key instead and focus via the pane context.
+ */
+function herdrSessionFocusTarget(sessionKey: string): SessionFocusTarget | null {
+  for (const lease of leaseManager.getAllRawLeases()) {
+    if (!lease.herdr) continue;
+    if (sessionKeyForLease(lease) !== sessionKey) continue;
+    return herdrLeaseFocusTarget(lease);
+  }
+  return null;
+}
+
+/** Herdr fallback for an explicit pet's focus target (freshest activity wins). */
+function herdrPetFocusTarget(petId: string): SessionFocusTarget | null {
+  let best: PetLease | undefined;
+  for (const lease of leaseManager.getAllRawLeases()) {
+    if (!lease.herdr || lease.targetKind !== "explicit" || lease.actualPetId !== petId) continue;
+    if (!best) { best = lease; continue; }
+    const bestKey = best.lastActivityAt ?? 0;
+    const leaseKey = lease.lastActivityAt ?? 0;
+    if (leaseKey > bestKey || (leaseKey === bestKey && lease.lastHeartbeatAt > best.lastHeartbeatAt)) best = lease;
+  }
+  return best ? herdrLeaseFocusTarget(best) : null;
+}
+
 // The default pet focuses the terminal of the session that most recently
 // interacted with it (say/react), falling back to the freshest heartbeat.
 setSessionTerminalFocusResolver(() => {
-  const target = windowPetRegistry.focusTargetForDefault();
+  const target = withHerdrContext(windowPetRegistry.focusTargetForDefault());
   if (target) return target;
-  // Legacy fallback: lease manager's focusable default lease (pre-registry path).
+  // Legacy fallback: lease manager's focusable default lease (pre-registry
+  // path). Also the primary path for herdr-hosted sessions, which have no
+  // terminal identity and therefore no registry entry.
   const lease = leaseManager.getFocusableDefaultLease();
-  if (!lease?.terminalOwnerPid) return null;
-  return { terminalOwnerPid: lease.terminalOwnerPid, terminalWindowId: lease.terminalWindowId, leaseId: lease.leaseId };
+  if (!lease) return null;
+  if (!lease.terminalOwnerPid && !lease.herdr) return null;
+  return herdrLeaseFocusTarget(lease);
 });
 setDefaultNotificationStoreAccessor(() => windowPetRegistry.defaultStore);
 setAgentPetStoreAccessor((petId) => windowPetRegistry.storeForPet(petId));
-setAgentPetFocusTargetAccessor((petId) => windowPetRegistry.focusTargetForPet(petId));
+setAgentPetFocusTargetAccessor((petId) => withHerdrContext(windowPetRegistry.focusTargetForPet(petId)) ?? herdrPetFocusTarget(petId));
 // Row-level focus: target the clicked session's own window, not the pet's
 // aggregate target — a pet's coverage can span multiple terminal windows.
-setAgentSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
-setDefaultSessionFocusTargetAccessor((sessionKey) => windowPetRegistry.sessionFocusTarget(sessionKey));
+setAgentSessionFocusTargetAccessor((sessionKey) => withHerdrContext(windowPetRegistry.sessionFocusTarget(sessionKey)) ?? herdrSessionFocusTarget(sessionKey));
+setDefaultSessionFocusTargetAccessor((sessionKey) => withHerdrContext(windowPetRegistry.sessionFocusTarget(sessionKey)) ?? herdrSessionFocusTarget(sessionKey));
 // Group header focus: raise the whole terminal window for a grouped-flyout header click.
-setDefaultWindowFocusTargetAccessor((windowKey) => windowPetRegistry.windowFocusTarget(windowKey));
+setDefaultWindowFocusTargetAccessor((windowKey) => withHerdrContext(windowPetRegistry.windowFocusTarget(windowKey)));
 // Per-session activity status (thinking/editing/running/...) for the grouped flyout's status dots.
 setSessionLiveStatusesAccessor(() => sessionLiveStatus.all());
 // Windows under default coverage + installed pets, for the default pet's "Summon pet" submenu.
@@ -649,12 +697,15 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     const clientPid = typeof params.clientPid === "number" && params.clientPid > 0 ? params.clientPid : undefined;
     const sessionNonce = validateSessionNonce(params.sessionNonce);
     const cwd = validateCwd(params.cwd);
-    debug("ipc", "lease acquire requested", { requestId: request.id, requestedPetId, clientPid, sessionNonce });
+    // Herdr pane context (optional): lets focus actions reach the session's
+    // multiplexer pane, since herdr panes never resolve a terminal identity.
+    const herdr = validateHerdrFocusContext(params.herdr);
+    debug("ipc", "lease acquire requested", { requestId: request.id, requestedPetId, clientPid, sessionNonce, herdrPaneId: herdr?.paneId });
     if (isSessionBlocked(sessionNonce, clientPid)) {
       debug("ipc", "lease acquire rejected — session blocked", { requestId: request.id, sessionNonce, clientPid });
       throw new IpcProtocolError("session_blocked", "Session was disconnected from the UI.");
     }
-    const lease = leaseManager.acquire(requestedPetId, clientPid, sessionNonce, cwd);
+    const lease = leaseManager.acquire(requestedPetId, clientPid, sessionNonce, cwd, herdr);
     // Project memory: an explicitly-called pet is remembered for this project;
     // an explicit return-to-default forgets it (spec: tri-state requestedPetId).
     if (requestedPetId === null && cwd) forgetProjectPet(cwd);
@@ -1443,9 +1494,10 @@ export async function focusSessionTerminal(leaseId: string): Promise<boolean> {
   const raw = leaseManager.getRawLease(leaseId);
   if (!raw) return false;
   const sessionKey = sessionKeyForLease(raw);
-  const target = sessionKey ? windowPetRegistry.sessionFocusTarget(sessionKey) : null;
+  const registryTarget = sessionKey ? windowPetRegistry.sessionFocusTarget(sessionKey) : null;
+  const target = withHerdrContext(registryTarget) ?? (raw.herdr ? herdrLeaseFocusTarget(raw) : null);
   if (!target) return false;
-  const focused = await focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId);
+  const focused = await focusSessionTarget(target);
   revealTabForLease(target.leaseId ?? leaseId);
   return focused;
 }

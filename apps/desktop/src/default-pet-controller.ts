@@ -12,7 +12,7 @@ import { PetBubbleArbiter, type ActiveBubble, type PetBubbleSink } from "./plugi
 import { publishPluginPetEvent } from "./plugin-events-source.js";
 import { reclampAgentPetWindows } from "./agent-pet-controller.js";
 import { reclampPluginPetWindows } from "./plugin-pet-registry.js";
-import { focusTerminalWindow } from "./terminal-focus.js";
+import { focusSessionTarget, type SessionFocusTarget } from "./session-focus.js";
 import { buildGroupedNotificationsView, type GroupedNotificationsView } from "./notification-view.js";
 import { t } from "./i18n/index.js";
 import type { NotificationStore } from "./notification-store.js";
@@ -23,9 +23,9 @@ let defaultPetWindow: BrowserWindow | null = null;
 // Resolves the focus target of the session the default pet should focus
 // (registered by local-ipc, which owns the lease manager — the import points
 // the other way, so registration avoids a module cycle).
-let sessionTerminalFocusResolver: (() => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null) | null = null;
+let sessionTerminalFocusResolver: (() => SessionFocusTarget | null) | null = null;
 
-export function setSessionTerminalFocusResolver(resolver: () => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
+export function setSessionTerminalFocusResolver(resolver: () => SessionFocusTarget | null): void {
   sessionTerminalFocusResolver = resolver;
 }
 
@@ -33,18 +33,18 @@ export function setSessionTerminalFocusResolver(resolver: () => { terminalOwnerP
 // the window-pet-registry, so clicking a notification row raises the window
 // that actually owns that session (falls back to sessionTerminalFocusResolver
 // above, the default pet's aggregate target).
-let sessionFocusTargetAccessor: ((sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null) | null = null;
+let sessionFocusTargetAccessor: ((sessionKey: string) => SessionFocusTarget | null) | null = null;
 
-export function setDefaultSessionFocusTargetAccessor(accessor: (sessionKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
+export function setDefaultSessionFocusTargetAccessor(accessor: (sessionKey: string) => SessionFocusTarget | null): void {
   sessionFocusTargetAccessor = accessor;
 }
 
 // Injected by local-ipc.ts: resolves a focus target for any live session under
 // a windowKey, so clicking a group header in the grouped flyout raises that
 // whole terminal window (falls back to nothing when the window has gone away).
-let windowFocusTargetAccessor: ((windowKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null) | null = null;
+let windowFocusTargetAccessor: ((windowKey: string) => SessionFocusTarget | null) | null = null;
 
-export function setDefaultWindowFocusTargetAccessor(accessor: (windowKey: string) => { terminalOwnerPid: number; terminalWindowId?: number; leaseId?: string } | null): void {
+export function setDefaultWindowFocusTargetAccessor(accessor: (windowKey: string) => SessionFocusTarget | null): void {
   windowFocusTargetAccessor = accessor;
 }
 
@@ -115,7 +115,7 @@ function focusSessionTerminalFromDefaultPet(trigger: string): void {
     debug("pet.default", "focus session window skipped", { trigger, reason: "no-focusable-session" });
     return;
   }
-  focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId)
+  focusSessionTarget(target)
     .then(() => {
       revealTabForLeaseAccessor?.(target.leaseId);
     })
@@ -442,7 +442,7 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
           let focused = false;
           if (target) {
             try {
-              focused = await focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId);
+              focused = await focusSessionTarget(target);
               revealTabForLeaseAccessor?.(target?.leaseId);
             } catch (err) {
               debug("pet.default", "focus notification session failed", { sessionKey, terminalOwnerPid: target.terminalOwnerPid, error: String(err) });
@@ -469,7 +469,7 @@ function getOrCreateDefaultPetWindow(): BrowserWindow {
           const target = windowFocusTargetAccessor?.(windowKey) ?? null;
           if (target) {
             try {
-              const focused = await focusTerminalWindow(target.terminalOwnerPid, target.terminalWindowId);
+              const focused = await focusSessionTarget(target);
               if (focused) revealTabForLeaseAccessor?.(target.leaseId);
             } catch (err) {
               debug("pet.default", "focus group header failed", { windowKey, terminalOwnerPid: target.terminalOwnerPid, error: String(err) });

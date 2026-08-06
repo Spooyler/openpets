@@ -130,3 +130,53 @@ console.log("Lease manager validation passed.");
   assert.notEqual(switched.leaseId, lease.leaseId, "null vs explicit is a mismatch → fresh acquire");
   console.log("tri-state requestedPetId — PASS");
 }
+
+// --- Herdr pane context on leases ---
+
+{
+  const herdrManager = new LeaseManager({
+    ttlMs: 60_000,
+    now: () => 1_000,
+    resolveTarget: (id) => id ? { targetKind: "explicit", actualPetId: id } : { targetKind: "default", actualPetId: "builtin" },
+    getDefaultPetId: () => "builtin",
+    getPetDisplayName: (petId) => petId,
+  });
+  const herdr = { paneId: "wC:p1", tabId: "wC:t1", socketPath: "C:\herdr\herdr.sock" };
+  const lease = herdrManager.acquire(undefined, 111, "nonce-herdr", "/repo", herdr);
+  const raw = herdrManager.getRawLease(lease.leaseId);
+  assert.deepEqual(raw?.herdr, herdr, "acquire stores herdr context on the raw lease");
+
+  // Reuse (same pid + nonce) preserves the stored context.
+  const reused = herdrManager.acquire(undefined, 111, "nonce-herdr", "/repo", herdr);
+  assert.equal(reused.leaseId, lease.leaseId, "same pid+nonce reuses lease");
+  assert.deepEqual(herdrManager.getRawLease(reused.leaseId)?.herdr, herdr, "reuse preserves herdr context");
+
+  // setTerminalIdentity keeps the herdr context intact.
+  herdrManager.setTerminalIdentity(lease.leaseId, { terminalOwnerPid: 999, terminalAppName: "Terminal" });
+  assert.deepEqual(herdrManager.getRawLease(lease.leaseId)?.herdr, herdr, "terminal identity update preserves herdr context");
+  console.log("herdr context stored and preserved — PASS");
+}
+
+{
+  // getFocusableDefaultLease treats a herdr-only lease (no terminal identity)
+  // as focusable — herdr panes never resolve a terminal window.
+  const herdrManager = new LeaseManager({
+    ttlMs: 60_000,
+    now: () => 1_000,
+    resolveTarget: (id) => id ? { targetKind: "explicit", actualPetId: id } : { targetKind: "default", actualPetId: "builtin" },
+    getDefaultPetId: () => "builtin",
+    getPetDisplayName: (petId) => petId,
+  });
+  assert.equal(herdrManager.getFocusableDefaultLease(), undefined, "no focusable lease without identity or herdr");
+  const plain = herdrManager.acquire(undefined, 222, "nonce-plain", "/repo");
+  assert.equal(herdrManager.getFocusableDefaultLease(), undefined, "identity-less non-herdr lease is not focusable");
+  const withHerdr = herdrManager.acquire(undefined, 333, "nonce-herdr2", "/repo", { paneId: "wB:p2" });
+  assert.equal(herdrManager.getFocusableDefaultLease()?.leaseId, withHerdr.leaseId, "herdr-only lease is focusable");
+  // A lease with resolved terminal identity and fresher activity wins as before.
+  const withTerminal = herdrManager.acquire(undefined, 444, "nonce-term", "/repo");
+  herdrManager.setTerminalIdentity(withTerminal.leaseId, { terminalOwnerPid: 555, terminalAppName: "Terminal" });
+  herdrManager.touchActivity(withTerminal.leaseId);
+  assert.equal(herdrManager.getFocusableDefaultLease()?.leaseId, withTerminal.leaseId, "freshest activity still wins across kinds");
+  void plain;
+  console.log("getFocusableDefaultLease herdr eligibility — PASS");
+}

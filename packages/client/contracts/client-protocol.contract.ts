@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { parseIpcEndpoint, validateDiscovery } from "../src/discovery.js";
-import { createOpenPetsClient, parsePetInstallResult, parsePetListResult } from "../src/index.js";
+import { createOpenPetsClient, parsePetInstallResult, parsePetListResult, readHerdrEnvContext } from "../src/index.js";
 import { OpenPetsClientError, parseIpcResponse, validateReaction, type OpenPetsIpcMethod, type VsCodeFocusCommand } from "../src/protocol.js";
 
 const baseDiscovery = {
@@ -110,6 +110,20 @@ assertRejects(() => parsePetInstallResult({ ok: true, petId: "fixer" }));
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+// --- Herdr env context capture (sent as `herdr` on lease.acquire) ---
+assert.deepEqual(
+  readHerdrEnvContext({ HERDR_PANE_ID: "wC:p1", HERDR_TAB_ID: "wC:t1", HERDR_SOCKET_PATH: "C:\\herdr\\herdr.sock" }),
+  { paneId: "wC:p1", tabId: "wC:t1", socketPath: "C:\\herdr\\herdr.sock" },
+);
+assert.equal(readHerdrEnvContext({}), undefined, "no HERDR_PANE_ID → no context on the wire");
+assert.equal(readHerdrEnvContext({ HERDR_PANE_ID: "" }), undefined, "empty pane id → no context");
+assert.equal(readHerdrEnvContext({ HERDR_PANE_ID: "x".repeat(65) }), undefined, "oversized pane id → no context");
+assert.deepEqual(
+  readHerdrEnvContext({ HERDR_PANE_ID: "wC:p1", HERDR_TAB_ID: "" }),
+  { paneId: "wC:p1", tabId: undefined, socketPath: undefined },
+  "empty optional fields are dropped, pane id survives",
+);
 
 // vscode.wait-focus method is part of the protocol union (compile-time) and
 // its result payloads have the documented runtime shape.

@@ -124,6 +124,28 @@ signals. `--pet <id>` targets a specific pet.
 > `openpets pets`; to install one use `openpets install <pet-id>` or the Pets
 > tab in Control Center.
 
+## Herdr pane focus (automatic, all integrations)
+
+[Herdr](https://herdr.dev) is a terminal multiplexer for coding agents. Its
+panes run under a detached, windowless server process, so the process-ancestry
+walk that normally resolves a session's terminal window never reaches a
+terminal emulator — herdr-hosted sessions have no terminal identity and no
+window registry entry.
+
+Instead, herdr exports `HERDR_PANE_ID` / `HERDR_TAB_ID` / `HERDR_SOCKET_PATH`
+into every pane, and any process started in the pane inherits them. The shared
+client (`@open-pets/client`) captures them once at startup and sends them with
+`lease.acquire`; the desktop validates and stores the context on the lease.
+Focus actions (pet double-click, notification-row click) then run
+`herdr agent focus <paneId>` — falling back to `herdr tab focus <tabId>` —
+which switches the attached herdr client to the session's workspace, tab, and
+pane. Dispatch is fire-and-forget: a missing `herdr` binary or dead server
+degrades to "nothing happens".
+
+Nothing needs configuring: every integration that acquires a lease through the
+shared client (Claude Code hooks, the MCP server, OpenCode, Cursor) gets this
+automatically when it runs inside a herdr pane.
+
 ## OpenCode — `@open-pets/opencode`
 
 Ships both a config manager and a runtime plugin.

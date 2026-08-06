@@ -13,7 +13,7 @@ Main client implementation (193 lines). `createOpenPetsClient()` factory, all cl
 - `status(options?)` - App connectivity check with graceful error handling
 - `listPets()` - Fetch installed pets with metadata
 - `installPet(petId)` - Install pet with 60s timeout
-- `acquireLease(options?)` - Get lease for targeted pet operations
+- `acquireLease(options?)` - Get lease for targeted pet operations; sends `clientPid`, per-process `sessionNonce`, `cwd`, and (when running inside a herdr pane) the `herdr` context from `readHerdrEnvContext()` (`HERDR_PANE_ID`/`HERDR_TAB_ID`/`HERDR_SOCKET_PATH`) so the desktop can focus the exact multiplexer pane
 - `heartbeatLease(leaseId)` - Keep lease alive
 - `releaseLease(leaseId)` - Release acquired lease
 - `react(reaction, options?)` - Send reaction (lease-aware)
