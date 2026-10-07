@@ -39,12 +39,17 @@ their own pet from a user-configured ordered list.
 - The user configures an ordered list of installed pets in Settings. Slot 1 is
   the primary/default pet; subsequent slots are assigned to additional concurrent
   sessions in order.
-- When a new session starts without `--pet`, the lease manager assigns it the
-  first pool slot not currently held by an active session.
-- Once every pool slot is occupied, additional sessions are assigned a random
-  eligible pet (installed, non-broken, excluding the built-in default).
-- When a session ends its lease, its pet slot is freed and available to the next
-  session.
+- When a new session's terminal window is identified and the session passed no
+  `--pet`, the desktop binds a free pool pet to that window (random or in list
+  order) — sessions sharing a window share its pet. This requires the
+  `auto-spawn` session-assignment mode; see [desktop.md](desktop.md).
+- Once every pool pet is bound, additional windows stay on the default pet.
+- When a window's last session ends, its binding goes dormant (a returning
+  session in that window gets the same pet back) and the pet is freed for
+  other windows once the dormancy expires.
+- A pet remembered for the session's project is used instead of a pool draw
+  when nothing was requested and that pet is still eligible (see the pet
+  assignment mode in [desktop.md](desktop.md)).
 - **`--pet <id>` always takes priority** and bypasses the pool entirely —
   unchanged from current behavior.
 

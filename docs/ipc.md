@@ -87,6 +87,14 @@ one window. The model (server side in `lease-manager.ts`):
 - A lease is a short-lived claim with a **15s TTL**, kept alive by heartbeats.
 - `resolveTarget()` decides whether a command hits the **default pet** or an
   **explicit agent pet**.
+- **Requested pet is tri-state**: a pet id, `null` (explicitly the default
+  pet), or absent (unspecified). Only when it is absent does `lease.acquire`
+  fill in the project's remembered pet, and only if that pet is still installed
+  and not broken (`resolveAcquirePetId()` in `lease-manager.ts`, applied in
+  `local-ipc.ts`); an explicit `--pet <id>` or `null` always wins.
+- The Control Center can **reassign** a live lease's pet (Sessions page);
+  `reassignPet()` swaps the lease to an explicit target. See the pet assignment
+  mode in [desktop.md](desktop.md).
 - **Re-acquiring is idempotent per client.** When a client process re-acquires
   while it still holds a live lease, the manager refreshes that existing lease
   (same `leaseId`, same target) instead of resolving a new target. This stops a

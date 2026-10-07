@@ -28,7 +28,7 @@ import { getPluginService, type PluginConfigSoundPickResult, type PluginServiceR
 import { defaultPetSprite, reactionAnimationMetadata, selectableAnimationMetadata } from "./reaction-animation-mapping.js";
 import { readSafePluginManifest } from "./plugin-manifest-reader.js";
 import { registerPluginAssetProtocol } from "./plugin-asset-protocol.js";
-import { assignWindowPet, focusSessionTerminal, getSessionsSnapshot, releaseSessionFromUi, toggleSessionPetVisibility } from "./local-ipc.js";
+import { assignWindowPet, focusSessionTerminal, getSessionsSnapshot, reassignProjectPet, reassignSessionPet, releaseSessionFromUi, toggleSessionPetVisibility } from "./local-ipc.js";
 import { checkForGitHubReleaseUpdate, getUpdateStatus, openUpdateReleasePage } from "./update-checker.js";
 
 type InternalUiWindowKind = "control-center";
@@ -77,7 +77,7 @@ function getPetsStateSnapshot(): { preferences: { defaultPetId: string }; pets: 
 }
 
 function getSettingsStateSnapshot(): {
-  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "petScale" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "petConfinementEnabled" | "petCrossDisplayEnabled" | "petGravityEnabled" | "idleChatWarnEnabled" | "idleChatWarnMinutes" | "idleChatAutoCompactEnabled" | "notificationPolicy">;
+  preferences: Pick<ReturnType<typeof getAppStateSnapshot>["preferences"], "openDefaultPetOnLaunch" | "petScale" | "reactionAnimationOverrides" | "petPoolOrder" | "petPoolEnabled" | "petConfinementEnabled" | "petCrossDisplayEnabled" | "petGravityEnabled" | "idleChatWarnEnabled" | "idleChatWarnMinutes" | "idleChatAutoCompactEnabled" | "notificationPolicy" | "petAssignmentMode">;
   /** Whether console-input injection for idle auto-compact works on this platform (win32 only). */
   idleChatAutoCompactSupported: boolean;
   petScaleOptions: typeof petScaleOptions;
@@ -101,6 +101,7 @@ function getSettingsStateSnapshot(): {
       idleChatWarnMinutes: state.preferences.idleChatWarnMinutes,
       idleChatAutoCompactEnabled: state.preferences.idleChatAutoCompactEnabled,
       notificationPolicy: state.preferences.notificationPolicy,
+      petAssignmentMode: state.preferences.petAssignmentMode,
     },
     idleChatAutoCompactSupported: process.platform === "win32",
     petScaleOptions,
@@ -233,6 +234,20 @@ export function installInternalUiHandlers(): void {
     if (typeof windowKey !== "string" || windowKey.length === 0) throw new Error("Invalid window key.");
     if (petId !== null && typeof petId !== "string") throw new Error("Invalid pet id.");
     return { assigned: assignWindowPet(windowKey, petId) };
+  });
+
+  ipcMain.handle("openpets:reassign-session-pet", (event, leaseId: unknown, petId: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (typeof leaseId !== "string" || leaseId.length === 0) throw new Error("Invalid lease ID.");
+    if (petId !== null && typeof petId !== "string") throw new Error("Invalid pet id.");
+    return { assigned: reassignSessionPet(leaseId, petId) };
+  });
+
+  ipcMain.handle("openpets:reassign-project-pet", (event, cwd: unknown, petId: unknown) => {
+    assertAllowedSender(event, ["control-center"]);
+    if (typeof cwd !== "string" || cwd.length === 0) throw new Error("Invalid cwd.");
+    if (petId !== null && typeof petId !== "string") throw new Error("Invalid pet id.");
+    return { assigned: reassignProjectPet(cwd, petId) };
   });
 
   ipcMain.handle("openpets:clear-project-pet-assignments", (event) => {

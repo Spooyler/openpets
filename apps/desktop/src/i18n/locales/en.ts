@@ -325,6 +325,11 @@ export const en = {
   "settings.notifications.mode.off": "Hidden",
   "settings.notifications.toast.saved": "Notification preferences saved",
 
+  "settings.petAssignmentMode.label": "Pet assignment mode",
+  "settings.petAssignmentMode.description": "Per-session: each session gets its own pet. Per-project: sessions in the same project share a pet.",
+  "settings.petAssignmentMode.perSession": "Per session",
+  "settings.petAssignmentMode.perProject": "Per project",
+  "settings.toast.assignmentModeSaved": "Pet assignment mode saved.",
   "settings.petPool.label": "Auto-assign pool pets to new terminal windows",
   "settings.petPool.description": "When on, a new terminal window with no remembered pet draws the next free pet from the pool.",
   "settings.memory.clear": "Clear remembered assignments",

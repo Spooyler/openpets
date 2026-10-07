@@ -104,6 +104,25 @@ export interface LeaseManagerOptions {
 
 const safePetIdPattern = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
+/** Normalize a cwd for per-project grouping: lowercase, forward slashes, no trailing slash. */
+export function normalizeCwdForGrouping(cwd: string): string {
+  return cwd.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+/**
+ * Pet to request on lease acquire. An explicit request (a pet id, or null for
+ * return-to-default) always wins; a remembered project pet only fills in when
+ * nothing was requested and it is still eligible.
+ */
+export function resolveAcquirePetId(
+  requestedPetId: string | null | undefined,
+  rememberedPetId: string | undefined,
+  isEligible: (petId: string) => boolean,
+): string | null | undefined {
+  if (requestedPetId !== undefined) return requestedPetId;
+  return rememberedPetId !== undefined && isEligible(rememberedPetId) ? rememberedPetId : undefined;
+}
+
 export class LeaseManager {
   readonly #leases = new Map<string, PetLease>();
   readonly #ttlMs: number;
@@ -322,6 +341,12 @@ export class LeaseManager {
     return [...this.#leases.values()].filter(l => l.expiresAt > now);
   }
 
+  /** Return non-expired raw leases whose cwd falls in the same project group as `cwd`. */
+  getRawLeasesInProject(cwd: string): readonly PetLease[] {
+    const key = normalizeCwdForGrouping(cwd);
+    return this.getAllRawLeases().filter((l) => l.cwd !== undefined && normalizeCwdForGrouping(l.cwd) === key);
+  }
+
   /** Return all current non-expired leases as snapshots. */
   getAllLeaseSnapshots(): readonly LeaseSnapshot[] {
     const now = this.#now();
@@ -363,6 +388,17 @@ export class LeaseManager {
     this.#leases.set(leaseId, updated);
     this.#onLog("debug", "terminal identity set", { leaseId, terminalOwnerPid: info.terminalOwnerPid, terminalAppName: info.terminalAppName, terminalWindowId: info.terminalWindowId });
     return true;
+  }
+
+  /** Swap the pet on an existing lease (UI-driven reassignment). Returns the old petId, or null if the lease doesn't exist. */
+  reassignPet(leaseId: string, newPetId: string): string | null {
+    const lease = this.#leases.get(leaseId);
+    if (!lease) return null;
+    const oldPetId = lease.actualPetId;
+    if (oldPetId === newPetId) return null;
+    this.#leases.set(leaseId, { ...lease, actualPetId: newPetId, requestedPetId: newPetId, targetKind: "explicit" });
+    this.#onLog("info", "pet reassigned", { leaseId, oldPetId, newPetId });
+    return oldPetId;
   }
 
   /** Record the client's ancestor PID chain (resolved with terminal identity). */

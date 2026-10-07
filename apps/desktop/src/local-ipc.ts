@@ -8,7 +8,7 @@ import { classifyAnalyticsError, trackDesktopEvent, trackDesktopIntegrationActiv
 import { forgetProjectPet, getAppStateSnapshot, getRememberedProjectPet, recordOpenPetsActivity, rememberProjectPet } from "./app-state.js";
 import { builtInPet } from "./built-in-pet.js";
 import { applyExternalPetReaction, applyExternalPetSay, getDefaultPetPaused, isDefaultPetVisible, refreshDefaultPetBusyBadge, refreshDefaultPetNotifications, setDefaultNotificationStoreAccessor, setDefaultPetBubbleDismissedHandler, setDefaultSessionFocusTargetAccessor, setDefaultWindowFocusTargetAccessor, setRevealTabForLease, setSessionLiveStatusesAccessor, setSessionTerminalFocusResolver, setSummonablePetsAccessor, setSummonPetHandler, setSummonTargetsAccessor } from "./default-pet-controller.js";
-import { createStaleLeaseStatus, LeaseManager, type LeaseSnapshot, type PetLease } from "./lease-manager.js";
+import { createStaleLeaseStatus, LeaseManager, normalizeCwdForGrouping, resolveAcquirePetId, type LeaseSnapshot, type PetLease } from "./lease-manager.js";
 import { debug, error as logError, info } from "./logger.js";
 import { cleanupUnixSocket, getDiscoveryFilePath, getIpcEndpointConfig, parseIpcEndpoint, protectUnixSocket, removeDiscoveryFile, writeDiscoveryFile, type IpcEndpoint, type IpcEndpointConfig, type OpenPetsDiscoveryFile } from "./local-ipc-paths.js";
 import { stat } from "node:fs/promises";
@@ -78,6 +78,7 @@ export interface EnrichedSessionSnapshot extends LeaseSnapshot {
   readonly displayPetName?: string;
   readonly displayPetOrigin?: "explicit" | "pool";
   readonly windowKey?: string;
+  readonly groupKey?: string;
   readonly liveStatus?: string;
 }
 
@@ -799,12 +800,17 @@ async function handleRequest(request: OpenPetsIpcRequest): Promise<unknown> {
     // Herdr pane context (optional): lets focus actions reach the session's
     // multiplexer pane, since herdr panes never resolve a terminal identity.
     const herdr = validateHerdrFocusContext(params.herdr);
-    debug("ipc", "lease acquire requested", { requestId: request.id, requestedPetId, clientPid, sessionNonce, herdrPaneId: herdr?.paneId });
+    // Project-pet memory: an explicit --pet (or null) always wins; the
+    // remembered project pet only replaces the default when nothing was
+    // requested and it is still eligible.
+    const rememberedPetId = cwd ? getRememberedProjectPet(cwd) : undefined;
+    const effectiveRequestedPetId = resolveAcquirePetId(requestedPetId, rememberedPetId, isPetEligible);
+    debug("ipc", "lease acquire requested", { requestId: request.id, requestedPetId, effectiveRequestedPetId, clientPid, sessionNonce, herdrPaneId: herdr?.paneId });
     if (isSessionBlocked(sessionNonce, clientPid)) {
       debug("ipc", "lease acquire rejected — session blocked", { requestId: request.id, sessionNonce, clientPid });
       throw new IpcProtocolError("session_blocked", "Session was disconnected from the UI.");
     }
-    const lease = leaseManager.acquire(requestedPetId, clientPid, sessionNonce, cwd, herdr);
+    const lease = leaseManager.acquire(effectiveRequestedPetId, clientPid, sessionNonce, cwd, herdr);
     // Herdr-hosted sessions: follow the server's agent-state classification
     // (working/blocked/idle) for the live-status dot and blocked alerts.
     ensureHerdrStateWatching(lease.leaseId, herdr);
@@ -1504,6 +1510,7 @@ export function getSessionsSnapshot(): {
   pool: { used: number; total: number } | null;
   assignablePets: ReadonlyArray<{ id: string; displayName: string; inUse: boolean }>;
   serverTime: number;
+  petAssignmentMode: "per-session" | "per-project";
 } {
   const now = Date.now();
   const rawLeases = leaseManager.getAllRawLeases();
@@ -1548,7 +1555,22 @@ export function getSessionsSnapshot(): {
     const windowKey = lease.terminalOwnerPid ? windowKeyForIdentity(lease.terminalWindowId, lease.terminalOwnerPid) : undefined;
     const liveStatus = sessionKey ? sessionLiveStatus.get(sessionKey) : undefined;
 
-    return { ...snap, unresolvedNotifications, confinementState, petVisible, petDismissed, canFocus, healthPct, displayPetId, displayPetName, displayPetOrigin, windowKey, liveStatus };
+    // Compute groupKey based on the assignment mode.
+    const assignmentMode = state.preferences.petAssignmentMode;
+    let groupKey: string | undefined;
+    if (assignmentMode === "per-project" && lease.cwd) {
+      groupKey = `cwd:${normalizeCwdForGrouping(lease.cwd)}`;
+    } else if (windowKey) {
+      groupKey = windowKey;
+    } else if (lease.herdr) {
+      groupKey = `herdr:${lease.herdr.paneId}`;
+    }
+
+    // Herdr sessions can focus via pane context even without registry entry.
+    const herdrCanFocus = lease.herdr !== undefined;
+    const effectiveCanFocus = canFocus || herdrCanFocus;
+
+    return { ...snap, unresolvedNotifications, confinementState, petVisible, petDismissed, canFocus: effectiveCanFocus, healthPct, displayPetId, displayPetName, displayPetOrigin, windowKey, groupKey, liveStatus };
   });
 
   const boundPets = new Set(windowPetRegistry.boundPetIds());
@@ -1565,7 +1587,7 @@ export function getSessionsSnapshot(): {
   const assignableEligible = getEligiblePoolPetIds(state.pets.installed, builtInPet.id, state.preferences.defaultPetId);
   const assignablePets = assignableEligible.map((id) => ({ id, displayName: getPetDisplayName(id), inUse: boundPets.has(id) }));
 
-  return { sessions, recentlyDisconnected: [...recentlyDisconnected], pool, assignablePets, serverTime: now };
+  return { sessions, recentlyDisconnected: [...recentlyDisconnected], pool, assignablePets, serverTime: now, petAssignmentMode: state.preferences.petAssignmentMode };
 }
 
 export function releaseSessionFromUi(leaseId: string): boolean {
@@ -1667,4 +1689,58 @@ export function assignWindowPet(windowKey: string, petId: string | null): boolea
   }
   info("ipc", "window pet assigned from ui", { windowKey, petId });
   return true;
+}
+
+/** Reassign the pet for a single lease (UI-driven). Works for both window-registered
+ *  and herdr (registry-less) sessions. petId=null reverts to the default pet. */
+export function reassignSessionPet(leaseId: string, petId: string | null): boolean {
+  const raw = leaseManager.getRawLease(leaseId);
+  if (!raw) return false;
+
+  if (petId !== null && !isPetEligible(petId)) return false;
+
+  const sessionKey = sessionKeyForLease(raw);
+  const windowKey = raw.terminalOwnerPid ? windowKeyForIdentity(raw.terminalWindowId, raw.terminalOwnerPid) : undefined;
+
+  // Window-registered sessions: delegate to the existing registry path.
+  if (windowKey && windowPetRegistry.petForWindow(windowKey) !== null) {
+    return assignWindowPet(windowKey, petId);
+  }
+
+  // Herdr / registry-less sessions: swap directly on the lease.
+  const effectivePetId = petId ?? getCurrentDefaultPet().id;
+  const oldPetId = leaseManager.reassignPet(leaseId, effectivePetId);
+  if (oldPetId === null) return false;
+
+  // Close old pet if no other leases use it.
+  if (leaseManager.countExplicitLeases(oldPetId) === 0) {
+    clearAgentPetLeaseState(oldPetId);
+    clearConfinementState(oldPetId);
+  }
+
+  // Spawn new pet.
+  clearAgentPetDismissal(effectivePetId);
+  showAgentPet(effectivePetId);
+
+  // Update project memory.
+  if (raw.cwd) {
+    if (petId === null) forgetProjectPet(raw.cwd);
+    else rememberProjectPet(raw.cwd, petId);
+  }
+
+  info("ipc", "session pet reassigned", { leaseId, oldPetId, newPetId: effectivePetId });
+  return true;
+}
+
+/** Reassign the pet for all sessions sharing a cwd (UI-driven, per-project mode). */
+export function reassignProjectPet(cwd: string, petId: string | null): boolean {
+  if (petId !== null && !isPetEligible(petId)) return false;
+
+  let changed = false;
+  for (const lease of leaseManager.getRawLeasesInProject(cwd)) {
+    if (reassignSessionPet(lease.leaseId, petId)) changed = true;
+  }
+
+  info("ipc", "project pet reassigned", { cwd, petId, changed });
+  return changed;
 }

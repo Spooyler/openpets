@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
-import { LeaseManager, type PetLease } from "../src/lease-manager.js";
+import { LeaseManager, resolveAcquirePetId, type PetLease } from "../src/lease-manager.js";
 
 // ---------------------------------------------------------------------------
 // T1: Fix 1/M1 — same clientPid + same nonce re-acquires same lease
@@ -400,6 +400,38 @@ console.log("T3 (routing guard): SKIPPED — covered by local-ipc-confinement.te
   assert.equal(expired.length, 0, "T8: onExpired must NOT fire for reuse-mismatch release (session lives on)");
 
   console.log("T8 (onExpired NOT fired for reuse-mismatch release): PASS");
+}
+
+// ---------------------------------------------------------------------------
+// T9: explicit --pet wins over a remembered project pet; a remembered pet only
+// applies when no pet was requested and it is still eligible (bug A1).
+// ---------------------------------------------------------------------------
+{
+  const eligible = (petId: string) => petId === "rex" || petId === "kitty";
+  assert.equal(resolveAcquirePetId("kitty", "rex", eligible), "kitty", "T9: explicit --pet must beat remembered pet");
+  assert.equal(resolveAcquirePetId(null, "rex", eligible), null, "T9: explicit return-to-default must beat remembered pet");
+  assert.equal(resolveAcquirePetId(undefined, "rex", eligible), "rex", "T9: remembered pet applies when nothing requested");
+  assert.equal(resolveAcquirePetId(undefined, "gone", eligible), undefined, "T9: ineligible remembered pet must be ignored");
+  console.log("T9 (explicit pet beats remembered project pet): PASS");
+}
+
+// ---------------------------------------------------------------------------
+// T10: project lookup uses the same cwd normalization as Sessions grouping, so
+// project-wide reassign reaches every session in the group (bug A2).
+// ---------------------------------------------------------------------------
+{
+  const mgr = new LeaseManager({
+    ttlMs: 10_000,
+    now: () => 1_000,
+    resolveTarget: () => ({ targetKind: "default", actualPetId: "builtin" }),
+    getDefaultPetId: () => "builtin",
+  });
+  const a = mgr.acquire(undefined, 1, "n1", "C:\\Dev\\Proj");
+  const b = mgr.acquire(undefined, 2, "n2", "c:/dev/proj/");
+  mgr.acquire(undefined, 3, "n3", "c:/dev/other");
+  const ids = mgr.getRawLeasesInProject("C:\\Dev\\Proj").map((l) => l.leaseId).sort();
+  assert.deepEqual(ids, [a.leaseId, b.leaseId].sort(), "T10: same-group cwds must all match");
+  console.log("T10 (project lookup matches grouping normalization): PASS");
 }
 
 console.log("\nAll lease-manager-fixes tests passed.");

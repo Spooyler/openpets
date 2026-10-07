@@ -22,6 +22,7 @@ export type PreferencePatch = {
   idleChatWarnMinutes?: number;
   idleChatAutoCompactEnabled?: boolean;
   notificationPolicy?: Record<string, "persistent" | "fade" | "off">;
+  petAssignmentMode?: "per-session" | "per-project";
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -92,6 +93,11 @@ export function validatePreferencePatch(value: unknown): PreferencePatch {
 
   if ("reactionAnimationOverrides" in value) {
     patch.reactionAnimationOverrides = validateReactionAnimationOverrides(value.reactionAnimationOverrides);
+  }
+
+  if ("petAssignmentMode" in value) {
+    if (value.petAssignmentMode !== "per-session" && value.petAssignmentMode !== "per-project") throw new Error("Invalid pet-assignment-mode value.");
+    patch.petAssignmentMode = value.petAssignmentMode;
   }
 
   if ("notificationPolicy" in value) {

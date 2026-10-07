@@ -144,23 +144,47 @@ options, onboarding normalization) that are testable without Electron.
 #### Pet pool preference
 
 The **pet pool** is an ordered list of installed pets plus a master enable/disable
-toggle (`petPoolEnabled`, default `true`), both configurable in Control Center →
-Settings → General. When enabled, the lease manager uses the ordered list to
-assign a distinct pet to each concurrent agent session that does not explicitly
-request one via `--pet <id>`. Slot 1 is the primary/default pet; slot 2 onwards
-are assigned to additional sessions in order. When all pool slots are taken,
-further sessions receive a random eligible pet (installed, non-broken, not the
-built-in default). Slots free up when their session ends. `--pet <id>` bypasses
-the pool entirely. When disabled, all sessions without `--pet` share the single
-default pet (legacy behavior). Pool assignment is pure lease logic and works on
+toggle (`petPoolEnabled`, default `false`), both configurable in Control Center →
+Settings → General. Pool pets are bound **per terminal window**, not per lease:
+when a session's terminal identity resolves, `window-pet-registry.ts` binds a
+pet to that window, and every session in the same window shares it. A pool draw
+only happens with `sessionAssignment` set to `auto-spawn` (the default `hub`
+keeps no-pet sessions on the default pet), for sessions that did not request a
+pet via `--pet <id>`. The draw (`pet-pool.ts`) picks a free eligible pool pet
+(installed, non-broken, not the built-in or current default) at random or in
+list order per `petSelectionStrategy`; when every pool pet is bound, further
+windows stay on the default pet until one frees up. A remembered project pet
+(see below) is tried before the pool, and a pool draw is itself remembered for
+that project. `--pet <id>` bypasses the pool entirely. Pool assignment works on
 all platforms.
 
-**Toggle side-effects:** disabling the pool immediately despawns all active pool
-pets (releases their leases, which closes their windows). Re-enabling respawns a
-pool pet for every session whose client PID is still alive — those sessions
-acquire new leases and their windows reopen. Sessions whose processes have already
-terminated are skipped. This is handled by `dispatchPoolToggle` in `local-ipc.ts`,
-wired from the `update-preferences` IPC handler in `windows.ts`.
+**Toggle side-effects:** disabling the pool immediately closes every
+pool-origin window binding (its pet window closes and the window's sessions
+fall back to the default pet). Re-enabling draws a fresh pool pet for each
+suspended window that still has sessions. This is handled by
+`dispatchPoolToggle` in `local-ipc.ts` (delegating to the registry), wired from
+the `update-preferences` IPC handler in `windows.ts`.
+
+#### Pet assignment mode
+
+`petAssignmentMode` (Control Center → Settings → General, default
+`per-session`) controls how the **Sessions** page groups sessions and what its
+per-group pet picker reassigns. In `per-session` mode sessions are grouped by
+terminal window (herdr sessions without a window by herdr pane), and the picker
+binds the pet to that window, or to the single session for registry-less herdr
+sessions. In `per-project` mode sessions are grouped by normalized working
+directory, and the picker reassigns every live session of that project. Each
+reassignment also updates the project→pet memory (choosing "Default" forgets
+it). The group key is computed in `getSessionsSnapshot()` in `local-ipc.ts`;
+the reassign entry points (`reassignSessionPet`, `reassignProjectPet`,
+`assignWindowPet`) live there too, with the lease-level swap in
+`lease-manager.ts`, the handlers in `windows.ts`, and the UI in
+`renderer/src/main.tsx`.
+
+The remembered project pet is applied on `lease.acquire` regardless of mode,
+but only when the client requested no pet and the remembered pet is still
+installed and not broken; an explicit `--pet <id>` (or an explicit
+return-to-default) always wins.
 
 **Session teardown:** a periodic liveness sweep (the `local-ipc.ts` cleanup timer
 calling `lease-manager.ts`'s `checkPidLiveness`) releases an agent pet's lease —

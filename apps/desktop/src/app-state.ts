@@ -98,6 +98,10 @@ export interface OpenPetsStateV1 {
      * 59 minutes (console-input injection; Windows only). Defaults to false —
      * it types into the user's terminal, so it must be explicit opt-in. */
     readonly idleChatAutoCompactEnabled: boolean;
+    /** How pets are assigned to sessions: "per-session" gives each session its own
+     * pet binding; "per-project" groups sessions by cwd so all sessions in the same
+     * project share a pet. Defaults to "per-session". */
+    readonly petAssignmentMode: "per-session" | "per-project";
   };
   readonly pets: {
     readonly installed: readonly InstalledPetState[];
@@ -696,6 +700,9 @@ function normalizePreferences(value: Partial<OpenPetsStateV1["preferences"]>): O
     idleChatAutoCompactEnabled: typeof value.idleChatAutoCompactEnabled === "boolean"
       ? value.idleChatAutoCompactEnabled
       : defaultState.preferences.idleChatAutoCompactEnabled,
+    petAssignmentMode: value.petAssignmentMode === "per-session" || value.petAssignmentMode === "per-project"
+      ? value.petAssignmentMode
+      : defaultState.preferences.petAssignmentMode,
   };
 }
 
@@ -781,6 +788,7 @@ function createDefaultState(): OpenPetsStateV1 {
       idleChatWarnEnabled: true,
       idleChatWarnMinutes: defaultIdleChatWarnMinutes,
       idleChatAutoCompactEnabled: false,
+      petAssignmentMode: "per-session",
     },
     pets: {
       installed: [builtInPet],

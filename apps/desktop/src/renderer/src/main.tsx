@@ -26,10 +26,10 @@ type ReactionAnimationOverrides = Record<string, UserSelectableAnimationState>;
 type AnalyticsConsent = "unset" | "granted" | "denied";
 type PetPoolCandidate = { id: string; displayName: string };
 type PetScaleRange = { min: number; max: number; step: number };
-type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean; idleChatWarnEnabled: boolean; idleChatWarnMinutes: number; idleChatAutoCompactEnabled: boolean; notificationPolicy?: Record<string, string> }; idleChatAutoCompactSupported: boolean; petScaleOptions: PetScaleOption[]; petScaleRange: PetScaleRange; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
-type SessionLeaseSnapshot = { leaseId: string; targetKind: "default" | "explicit"; actualTargetPetId: string; actualTargetPetName: string; usingDefaultPet: boolean; requestedPetId?: string; fallbackReason?: string; clientPid?: number; terminalOwnerPid?: number; terminalAppName?: string; cwd?: string; acquiredAt: number; lastHeartbeatAt: number; lastActivityAt?: number; expiresAt: number; unresolvedNotifications: number; confinementState?: "confined" | "minimized" | "occluded" | "free-roam"; petVisible: boolean; petDismissed: boolean; canFocus: boolean; healthPct: number; displayPetId?: string; displayPetName?: string; displayPetOrigin?: "explicit" | "pool"; windowKey?: string; liveStatus?: string };
+type SettingsState = { preferences: { openDefaultPetOnLaunch: boolean; locale?: "system" | string; petScale: number; reactionAnimationOverrides?: ReactionAnimationOverrides; petPoolEnabled: boolean; petPoolOrder?: readonly string[]; petConfinementEnabled: boolean; petCrossDisplayEnabled: boolean; petGravityEnabled: boolean; idleChatWarnEnabled: boolean; idleChatWarnMinutes: number; idleChatAutoCompactEnabled: boolean; notificationPolicy?: Record<string, string>; petAssignmentMode: "per-session" | "per-project" }; idleChatAutoCompactSupported: boolean; petScaleOptions: PetScaleOption[]; petScaleRange: PetScaleRange; analytics: { consent: AnalyticsConsent; enabled: boolean }; petPoolCandidates: ReadonlyArray<PetPoolCandidate> };
+type SessionLeaseSnapshot = { leaseId: string; targetKind: "default" | "explicit"; actualTargetPetId: string; actualTargetPetName: string; usingDefaultPet: boolean; requestedPetId?: string; fallbackReason?: string; clientPid?: number; terminalOwnerPid?: number; terminalAppName?: string; cwd?: string; acquiredAt: number; lastHeartbeatAt: number; lastActivityAt?: number; expiresAt: number; unresolvedNotifications: number; confinementState?: "confined" | "minimized" | "occluded" | "free-roam"; petVisible: boolean; petDismissed: boolean; canFocus: boolean; healthPct: number; displayPetId?: string; displayPetName?: string; displayPetOrigin?: "explicit" | "pool"; windowKey?: string; groupKey?: string; liveStatus?: string };
 type DisconnectedSession = { actualPetName: string; targetKind: "default" | "explicit"; terminalAppName?: string; cwd?: string; clientPid?: number; disconnectedAt: number; reason: "released" | "expired" | "pid_dead" };
-type SessionsSnapshot = { sessions: SessionLeaseSnapshot[]; recentlyDisconnected: DisconnectedSession[]; pool: { used: number; total: number } | null; serverTime: number; assignablePets: { id: string; displayName: string; inUse: boolean }[] };
+type SessionsSnapshot = { sessions: SessionLeaseSnapshot[]; recentlyDisconnected: DisconnectedSession[]; pool: { used: number; total: number } | null; serverTime: number; assignablePets: { id: string; displayName: string; inUse: boolean }[]; petAssignmentMode: "per-session" | "per-project" };
 type LaunchAtLoginState = { supported: boolean; enabled: boolean };
 type LanTopologyIssue = { code: "self_reference" | "missing_reverse"; host: string; edge: "left" | "right" | "up" | "down"; neighbor: string };
 type LanStatusSnapshot = { mode: "off" | "server" | "client"; localHost: string; serverUrl: string; port: number; auth: "token" | "none"; authSource: "env" | "stored" | "generated" | "none"; authInsecure: boolean; tokenHint: string | null; topologyHosts: number; topologyLinks: number; topologyIssues: LanTopologyIssue[]; currentHost: string | null; clients: Array<{ host: string; lastSeen: number; position?: { x: number; y: number } }>; updatedAt: number; persistedCurrentHost: string | null; persistedUpdatedAt: number | null };
@@ -74,6 +74,8 @@ type ControlCenterApi = {
   focusSession(leaseId: string): Promise<{ focused: boolean }>;
   toggleSessionPet(leaseId: string): Promise<{ toggled: boolean }>;
   assignWindowPet(windowKey: string, petId: string | null): Promise<{ assigned: boolean }>;
+  reassignSessionPet(leaseId: string, petId: string | null): Promise<{ assigned: boolean }>;
+  reassignProjectPet(cwd: string, petId: string | null): Promise<{ assigned: boolean }>;
   clearProjectPetAssignments(): Promise<SettingsState>;
   getSettingsState(): Promise<SettingsState>;
   getLanStatus(): Promise<LanStatusSnapshot>;
@@ -576,9 +578,10 @@ function SessionsView() {
   }
 
   const IDENTIFYING = "__identifying__";
+  const isPerProject = snapshot.petAssignmentMode === "per-project";
   const groups = new Map<string, SessionLeaseSnapshot[]>();
   for (const s of snapshot.sessions) {
-    const key = s.windowKey ?? IDENTIFYING;
+    const key = s.groupKey ?? IDENTIFYING;
     const list = groups.get(key);
     if (list) list.push(s);
     else groups.set(key, [s]);
@@ -590,7 +593,16 @@ function SessionsView() {
     const name = sessions[0]?.terminalAppName ?? "";
     appNameCounts.set(name, (appNameCounts.get(name) ?? 0) + 1);
   }
-  const groupLabel = (sessions: SessionLeaseSnapshot[]): string => {
+  const groupLabel = (gKey: string, sessions: SessionLeaseSnapshot[]): string => {
+    if (gKey.startsWith("cwd:")) {
+      const cwd = sessions[0]?.cwd;
+      return cwd ? shortenCwd(cwd) : "—";
+    }
+    if (gKey.startsWith("herdr:")) {
+      const paneId = gKey.slice("herdr:".length);
+      const cwd = sessions[0]?.cwd;
+      return cwd ? `${shortenCwd(cwd)} (${paneId})` : paneId;
+    }
     const appName = sessions[0]?.terminalAppName || "—";
     if ((appNameCounts.get(sessions[0]?.terminalAppName ?? "") ?? 0) <= 1) return appName;
     const cwd = sessions[0]?.cwd;
@@ -629,13 +641,13 @@ function SessionsView() {
             {[...groups.entries()].map(([groupKey, groupSessions]) => {
               const isIdentifying = groupKey === IDENTIFYING;
               const lead = groupSessions[0]!;
-              const groupPetId = isIdentifying ? undefined : lead.displayPetId;
-              const groupPetName = groupPetId ? (lead.displayPetName ?? groupPetId) : undefined;
+              const groupPetId = isIdentifying ? undefined : (lead.displayPetId ?? (lead.targetKind === "explicit" ? lead.actualTargetPetId : undefined));
+              const groupPetName = groupPetId ? (lead.displayPetName ?? lead.actualTargetPetName) : undefined;
               return (
                 <div key={groupKey} className="sessions-group">
                   <div className="sessions-group-header">
                     <span className="sessions-group-title">
-                      {isIdentifying ? t("sessions.group.identifying") : groupLabel(groupSessions)}
+                      {isIdentifying ? t("sessions.group.identifying") : groupLabel(groupKey, groupSessions)}
                       {!isIdentifying && <span className="sessions-pet-name">{groupPetName ?? t("sessions.group.defaultPet")}</span>}
                       {!isIdentifying && (
                         <span className={`pill text-[9px] px-1.5 py-0 ${lead.displayPetOrigin === "pool" ? "pill-orange" : groupPetId ? "pill-purple" : "pill-blue"}`}>
@@ -650,7 +662,14 @@ function SessionsView() {
                           value={groupPetId ?? ""}
                           onChange={(e) => {
                             const v = e.target.value;
-                            void api.assignWindowPet(groupKey, v === "" ? null : v).then(() => void load());
+                            const petIdOrNull = v === "" ? null : v;
+                            if (isPerProject && lead.cwd) {
+                              void api.reassignProjectPet(lead.cwd, petIdOrNull).then(() => void load());
+                            } else if (groupKey.startsWith("herdr:") || groupKey.startsWith("cwd:")) {
+                              void api.reassignSessionPet(lead.leaseId, petIdOrNull).then(() => void load());
+                            } else {
+                              void api.assignWindowPet(groupKey, petIdOrNull).then(() => void load());
+                            }
                           }}
                         >
                           <option value="">{t("sessions.picker.default")}</option>
@@ -1486,6 +1505,24 @@ function SettingsView() {
                   <select className="settings-select" value={localePreference} disabled={!!busy} onChange={(event) => changeLocale(event.target.value)}>
                     <option value="system">{t("settings.language.system")}</option>
                     {availableLocales.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="settings-group">
+                <div className="settings-row flex items-center justify-between gap-4">
+                  <div className="settings-row-info">
+                    <strong>{t("settings.petAssignmentMode.label")}</strong>
+                    <small>{t("settings.petAssignmentMode.description")}</small>
+                  </div>
+                  <select
+                    className="settings-select"
+                    value={settings?.preferences.petAssignmentMode ?? "per-session"}
+                    disabled={!settings || !!busy}
+                    onChange={(e) => patchPreferences({ petAssignmentMode: e.target.value as "per-session" | "per-project" }, t("settings.toast.assignmentModeSaved"))}
+                  >
+                    <option value="per-session">{t("settings.petAssignmentMode.perSession")}</option>
+                    <option value="per-project">{t("settings.petAssignmentMode.perProject")}</option>
                   </select>
                 </div>
               </div>
