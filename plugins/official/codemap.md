@@ -2,7 +2,7 @@
 
 ## Responsibility
 
-First-party SDK v3 plugin product source. These plugins are the reviewed default/catalog lineup for OpenPets and demonstrate the current SuperPlugins direction: localized manifests, command surfaces, scheduled behaviors, host-rendered alerts/bubbles, persistent storage, and bundled asset references.
+First-party SDK v3 plugin product source. These plugins are the reviewed, bundled lineup for OpenPets and demonstrate the current SuperPlugins direction: localized manifests, command surfaces, scheduled behaviors, host-rendered alerts/bubbles, persistent storage, and bundled asset references.
 
 ## Design/Patterns
 
@@ -26,6 +26,7 @@ First-party SDK v3 plugin product source. These plugins are the reviewed default
 | `openpets.reminders` | Quick reminders with due/missed alert delivery, snooze/done actions, status text, optional notification/sound, and localized reminder messages. | `schedule`, `storage`, `status`, `ui.alert`, `commands`, `assets`, `config`, `notify` |
 | `openpets.launch-buddy` | Launch/checklist companion for shipping moments, using scheduled prompts and command-driven progress feedback. | `schedule`, `storage`, `commands`, `pet`, `audio`, `assets`, `config` |
 | `openpets.water-reminder` | Hydration reminder loop with configurable cadence and localized alerts. | `schedule`, `storage`, `commands`, `ui.alert`, `assets`, `config` |
+| `openpets.claude-usage` | Always-on Claude usage HUD fed by the host's `agent:usage` event: weekly limits plus per-model 5-hour session usage, a details panel, and an optional standalone widget pet. | `events`, `ui.bubble`, `ui.panel`, `pets.spawn`, `commands`, `storage`, `config` |
 | `openpets.focus-buddy` | Focus-session helper with timers, commands, status updates, and completion/break feedback. | `schedule`, `storage`, `status`, `commands`, `ui`, `config` |
 | `openpets.magic-8-ball` | Command-driven decision/fortune response plugin with stored usage state. | `commands`, `storage`, `pet.speak` |
 | `openpets.day-routine` | Daily routine nudges and scheduled check-ins. | `schedule`, `storage`, `commands`, `pet.speak`, `config` |
@@ -36,6 +37,6 @@ First-party SDK v3 plugin product source. These plugins are the reviewed default
 ## Integration Points
 
 - **Desktop dev mode**: `OPENPETS_DEV_PLUGIN_ROOTS=plugins/official` lets the app hot-load these packages through the local loader.
-- **Release validation**: `pnpm plugins:package` and `pnpm plugins:validate-release` package manifests, entries, assets, panels, and `locales/en.json` while checking catalog/package drift.
-- **Catalog direction**: These plugins are packaged into catalog v3-compatible published artifacts; current runtime work should not optimize for legacy v2 defaults.
+- **Validation**: `pnpm plugins:test` checks locale coverage and runs each plugin's `test.js` harness.
+- **Bundling**: Every valid folder here is auto-scanned and seeded on launch by `apps/desktop/src/plugin-service.ts` (no remote catalog); enabled-by-default ids live in `bundledEnabledByDefault`.
 - **Assets/locales**: `assets/*.svg` are manifest-declared icon refs; `locales/*.json` are flat dotted-key dictionaries used by manifest `$t:` references and `ctx.t(...)`.

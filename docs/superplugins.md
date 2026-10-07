@@ -6,9 +6,9 @@ author API, this doc is the *product* intent: what official plugins should feel
 like, which ones ship, what's bundled by default, and how users invoke them.
 
 This is required reading (with [plugins.md](plugins.md)) before plugin platform,
-official-plugin, catalog, or plugin-UI work, per `AGENTS.md`. Keep the lineup and
+official-plugin, or plugin-UI work, per `AGENTS.md`. Keep the lineup and
 bundling defaults here in sync with `apps/desktop/src/plugin-service.ts` and the
-catalog generator when they change.
+plugin folders when they change.
 
 ## The thesis
 
@@ -40,7 +40,7 @@ in-the-moment interactions (snooze, done, feed).
 
 ## Official plugin lineup
 
-Official plugins live in `plugins/official/` and are the reviewed catalog set.
+Official plugins live in `plugins/official/` and are the reviewed, bundled set.
 Current lineup (verified 2026-07-10 against the folder + manifests):
 
 | Plugin id | What it is |
@@ -55,56 +55,51 @@ Current lineup (verified 2026-07-10 against the folder + manifests):
 | `openpets.magic-8-ball` | Command-driven decision/fortune responses |
 | `openpets.fortune-cookie` | Periodic or command-triggered fortunes |
 | `openpets.calendar-airmail` | Google primary-calendar reminders delivered by a selected bundled courier sprite ten minutes before and at event start |
+| `openpets.claude-usage` | Always-on Claude usage HUD: weekly limits plus the 5-hour session broken down by model, with a details panel and an optional standalone widget pet |
 
 `plugins/official/codemap.md` carries the per-plugin SDK-surface breakdown.
 
 ## Community plugin lineup
 
-Community plugins live in `plugins/community/`. They are public catalog plugins
-that pass the same packaging, ZIP, SHA, locale, and manifest checks as official
-plugins, but they are labeled `publisherType: "community"` and are not bundled or
-enabled by default.
+Community plugins live in `plugins/community/`. They pass the same manifest,
+locale, and `test.js` checks as official plugins (`pnpm plugins:test`) and are
+auto-scanned and seeded like official plugins, but none is enabled by default.
 
 Current community lineup:
 
 | Plugin id | What it is |
 |-----------|------------|
 | `openpets.walkabout` | Makes the pet roam the screen, follow the cursor, or patrol back and forth |
-
-> Drift note: `web/docs/plugin-publishing.md` still lists an **older** lineup
-> (`ambient-companion`, `break-buddy`, `pet-pal`, `github-notifications`). That
-> runbook is stale — trust this folder + the catalog generator. Tracked in the
-> root `improvements.md`.
+| `openpets.spotify-buddy` | Reacts to Spotify, syncs lyrics in real time, and controls playback |
 
 ## Bundling & default-enabled
 
-Defaults are defined in `apps/desktop/src/plugin-service.ts` and the bundled
-plugins are shipped as packaging extra-resources (`plugins/official` → packaged
-`plugins/official`, enforced by `check-packaging-contract.ts`):
+Defaults are defined in `apps/desktop/src/plugin-service.ts`; the bundled roots
+are resolved in `apps/desktop/src/main.ts`, and packaging ships
+`plugins/official` as an extra resource (`apps/desktop/electron-builder.yml`,
+enforced by `check-packaging-contract.ts`):
 
-- **Bundled with the app**: `openpets.reminders`, `openpets.focus-buddy`,
-  `openpets.launch-buddy`, `openpets.virtual-pet` (`bundledOfficialPluginIds`).
+- **Bundled with the app**: every valid plugin folder in `plugins/official/` and
+  `plugins/community/` is auto-scanned and seeded on launch; there is no
+  hard-coded bundled list. The packaged extra resources currently copy only
+  `plugins/official`.
 - **Enabled by default**: `openpets.reminders`, `openpets.focus-buddy`,
   `openpets.launch-buddy` (`bundledEnabledByDefault`).
-- **Bundled but disabled by default**: `openpets.virtual-pet`; users can enable it
-  from the Plugins page.
+- **Bundled but disabled by default**: everything else; users enable it from the
+  Plugins page.
 - **`staleBundledPluginIds`**: an explicit cleanup list of plugin ids that were
   bundled in past builds and must be removed on upgrade (e.g. `ambient-companion`,
-  `break-buddy`, `focus-buddy`-as-bundled, `github-notifications`, `pomodoro`,
-  `pet-pal`, `wander-buddy`, …). This is how the forward-only direction is
-  enforced for plugins: old bundled state is actively reaped, not left to rot.
-
-Everything else in the lineup is **available via the catalog** but not bundled —
-the user installs and enables it from the Plugins page.
+  `break-buddy`, `github-notifications`, `pomodoro`, `pet-pal`, `wander-buddy`,
+  …). This is how the forward-only direction is enforced for plugins: old
+  bundled state is actively reaped, not left to rot.
 
 > If you change what's bundled or enabled by default, update both the constants
 > in `plugin-service.ts` and this doc, and verify the packaging contract still
 > passes ([testing-and-validation.md](testing-and-validation.md)).
 
-## Relationship to the catalog
+## No plugin catalog
 
-Official and community plugins are packaged into catalog **v2** artifacts and
-ZIPs on R2 (see [catalog.md](catalog.md)). Current runtime work should not
-optimize for the legacy v1 catalog (kept as an empty compatibility shim). The
-packaging + release gates are in [testing-and-validation.md](testing-and-validation.md).
+There is no remote plugin catalog, ZIP hosting, or plugin release pipeline;
+plugins ship only as bundled folders (see [plugins.md](plugins.md)). The plugin
+quality gates are in [testing-and-validation.md](testing-and-validation.md).
 </content>

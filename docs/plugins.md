@@ -1,14 +1,14 @@
 # Plugin Platform
 
 OpenPets plugins are small companion programs that extend the pet: reminders,
-focus timers, a Tamagotchi-style virtual pet, GitHub notifications, and so on.
+focus timers, a Tamagotchi-style virtual pet, a Claude usage HUD, and so on.
 This doc is the platform architecture — the manifest contract, the permission
-model, the runtime and sandbox, install paths, and packaging/publishing. For the
+model, the runtime and sandbox, install paths, and packaging. For the
 *author-facing* API see [sdk.md](sdk.md); for the product direction and the
 official lineup see [superplugins.md](superplugins.md).
 
 This doc is required reading before changing plugin platform code, official
-plugins, catalog generation, packaging, runtime behavior, or plugin-facing UI
+plugins, packaging, runtime behavior, or plugin-facing UI
 (per `AGENTS.md`). When you change behavior, update this doc in the same change.
 
 Source maps: `apps/desktop/src/codemap.md` (the `plugin-*.ts` modules),
@@ -21,7 +21,9 @@ Plugin source is split by intent:
 - `plugins/official/` — first-party, reviewed OpenPets plugins. Auto-scanned and
   bundled on launch.
 - `plugins/community/` — community plugins. Also auto-scanned and bundled on
-  launch, labeled `publisherType: "community"` in their manifests.
+  launch through the same bundled-root resolution in `apps/desktop/src/main.ts`.
+  Note that the packaged app's extra resources (`apps/desktop/electron-builder.yml`)
+  currently copy only `plugins/official`.
 - `plugins/dev/` — local experiments only. Not auto-scanned; use
   `OPENPETS_DEV_PLUGIN_ROOTS` to load these during development.
 
@@ -71,14 +73,14 @@ The manifest is the contract the host validates before *any* plugin code runs
 - Localization: `name`/`description`/labels can be `$t:` keys resolved from
   `locales/en.json` (see [i18n.md](i18n.md)).
 
-`name`/`description`/labels in the manifest use `$t:` references; the catalog
-generator and release validator fail if those don't resolve.
+`name`/`description`/labels in the manifest use `$t:` references; a key missing
+from `locales/en.json` shows up raw on the Plugins page.
 
-Catalog card icons can use bundled SVG assets. A plugin declares the SVG under
-`assets.icons` (for example `"assets": { "icons": { "spotify":
-"assets/spotify.svg" } }`); the packaging flow sanitizes the SVG and embeds it
-as catalog `iconDataUrl`. Do **not** use external SVG URLs for plugin icons — the
-icon must be part of the reviewed, hash-pinned package.
+Plugin card icons can use bundled SVG assets. A plugin declares the SVG under
+`assets.icons`; `plugin-service.ts` reads the declared, size-capped SVG from the
+installed plugin and hands it to the Plugins page as `iconDataUrl`. Do **not**
+use external SVG URLs for plugin icons — the icon must be part of the plugin
+folder.
 
 ### Manifest reading is hardened
 
@@ -163,7 +165,7 @@ mirror of all this is the SDK in [sdk.md](sdk.md).
 - `plugin-config.ts` — default/effective config validation and reference
   resolution.
 - `plugin-assets.ts` — validates/resolves declared assets (formats + size caps)
-  for SDK refs and catalog cards. Courier sprites are WebP strips with bounded,
+  for SDK refs and plugin cards. Courier sprites are WebP strips with bounded,
   declared frame metadata; their dimensions are checked at package/install time.
 - `plugin-bubble-arbiter.ts` — priority/coalescing of transient vs pinned bubble
   slots.
@@ -177,15 +179,17 @@ mirror of all this is the SDK in [sdk.md](sdk.md).
 
 ## Install paths
 
-### Catalog install
+### Bundled seeding
 
-`plugin-catalog.ts` fetches the active plugin catalog (v2; see
-[catalog.md](catalog.md)) with timeout, redirect rejection, size cap, and cache.
-`plugin-catalog-validation.ts` validates the catalog strictly. `plugin-package.ts`
-downloads the ZIP from `zip.openpets.dev/plugins/`, **verifies SHA-256**,
-restricts ZIP size/entries, extracts the **root manifest only**, checks
-manifest↔catalog consistency, and installs to `userData/plugins/{id}`. It also
-owns safe uninstall path resolution.
+There is no remote plugin catalog or download path. On launch (outside dev
+plugin mode) `plugin-service.ts` scans each bundled root that `main.ts`
+resolves, validates every plugin folder's manifest, and copies the manifest,
+entry, and declared files into `userData/plugins/{id}`, recording the plugin as
+bundled. Bundled plugins cannot be uninstalled, only disabled; a re-seed keeps
+the user's existing enabled flag and config, and first-seen plugins get their
+default from `bundledEnabledByDefault`. Ids in `staleBundledPluginIds` are
+pruned from the profile. `plugin-package.ts` owns safe install-directory
+resolution and deletion.
 
 ### Local development
 
@@ -209,7 +213,7 @@ repo dev build still supports maintainer-only env paths with
 4. **Validate**: `openpets plugin validate <dir>` checks manifest, permissions,
    SDK compatibility, config field types, network hosts, asset formats/size
    caps, entry files, and HTML panels. (`packages/cli/src/plugin-validate.ts`.)
-5. **Package & publish**: see below.
+5. **Ship**: commit the folder; it is bundled with the app (see below).
 
 ### Calendar Airmail
 
@@ -269,8 +273,8 @@ there is no remote catalog, download step, or release pipeline. See
 
 Run `pnpm plugins:test` before committing plugin changes — it validates
 manifests, locale coverage (`locales/en.json` plus locale stubs), and runs
-each plugin's `test.js`. `publisherType` in the manifest distinguishes
-first-party plugins from community ones.
+each plugin's `test.js`. The source folder (`plugins/official/` vs
+`plugins/community/`) distinguishes first-party plugins from community ones.
 
 ## Troubleshooting
 
