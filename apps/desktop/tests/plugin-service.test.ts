@@ -405,7 +405,23 @@ await localScenario("bundled defaults enable Focus Buddy and Launch Buddy but no
   assert.equal(store.getRecord("openpets.virtual-pet")?.enabled, false);
 });
 
-await localScenario("bundled seeding prunes stale ids and blocks uninstall update", async ({ userData, root, store }) => {
+await localScenario("bundled Focus Buddy keeps user disable and config across restart", async ({ userData, root, store }) => {
+  const official = join(root, "official");
+  const source = join(official, "openpets.focus-buddy");
+  writeManifest(source, { manifestVersion: 2, id: "openpets.focus-buddy", name: "Focus Buddy", version: "1.0.0", runtime: "javascript", sdkVersion: "1.0.0", entry: "index.js", permissions: ["pet:speak"], configSchema: { minutes: { type: "number", default: 25 } } });
+  writeFileSync(join(source, "index.js"), "OpenPetsPlugin.register({ start() {} });\n", "utf8");
+  await new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official] }).start();
+  store.setEnabled("openpets.focus-buddy", false);
+  store.replaceConfig("openpets.focus-buddy", { minutes: 50 });
+
+  await new PluginService({ userDataPath: userData, stateStore: store, runtime: new FakeRuntime() as never, bundledPluginSourceDirs: [official] }).start();
+
+  const record = store.getRecord("openpets.focus-buddy");
+  assert.equal(record?.enabled, false);
+  assert.deepEqual(record?.config, { minutes: 50 });
+});
+
+await localScenario("bundled seeding prunes stale ids and blocks uninstall update",async ({ userData, root, store }) => {
   const oldInstall = join(userData, "plugins", "openpets.pomodoro");
   const oldManifest = writeManifest(oldInstall, manifest({ id: "openpets.pomodoro" }));
   store.upsertRecord({ id: "openpets.pomodoro", version: "1.0.0", installPath: oldInstall, manifestPath: oldManifest, source: "bundled", enabled: true, approvedPermissions: ["timer", "pet:speak"], config: {} });
