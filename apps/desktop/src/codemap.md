@@ -10,7 +10,7 @@ Core TypeScript source for the OpenPets desktop application. Organized into: lif
 - **Protocol-First IPC**: Versioned JSON protocol over TCP/Unix sockets with token auth
 - **Defensive I/O**: All file operations use temp+rename for atomicity, path traversal validation, symlink checks
 - **Validation at Boundaries**: Catalog, ZIP entries, pet metadata, and IPC params all strictly validated
-- **Lease Pattern**: Agent pets use expiring leases (15s TTL) with heartbeats; default pet is persistent; pet lifecycle is driven by window-keyed bindings (window-pet-registry.ts) rather than lease counts
+- **Lease Pattern**: Agent pets use expiring leases (60s default TTL, renewed by heartbeats, PID-liveness checked); default pet is persistent; pet lifecycle is driven by window-keyed bindings (window-pet-registry.ts) rather than lease counts
 - **Sandboxed Renderers**: Control Center loads the Vite React/Tailwind bundle through a hardened BrowserWindow and narrow preload bridge; transparent pet windows and plugin SDK host windows stay separate
 - **Structured Logging**: Scoped logging (app, ipc, lease, pet.*, state, tray, ui) with log rotation and redaction
 - **Reaction Animation Mapping**: User-configurable mapping from reaction types to sprite animation states
@@ -185,6 +185,9 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `preference-patch.ts`: Pure validation of Control Center preference patches (`validatePreferencePatch`/`PreferencePatch`) for the `update-preferences` IPC path, including the `petCrossDisplayEnabled` toggle; consumed by `windows.ts`
 - `assets.ts`: Tray icon loading with generated fallback
 - `display.ts`: Screen geometry helpers, pet window positioning
+- `window-tracker.ts`: Cross-platform window enumeration (`get-windows`), terminal-window lookup for a client PID via its ancestor chain, on-screen/occlusion checks, and the window-tracking subscriptions used by confinement
+- `window-tracker-ppid.ts`: Per-platform parent-PID lookup with short-TTL caches (one PowerShell CIM chain walk on win32, `ps` on macOS, `/proc` on Linux)
+- `window-select.ts`: Pure choice of the session's window among one process's windows (title↔cwd-segment matching, previous-selection latch, largest-area fallback, desktop-shell exclusion)
 - `window-tracker-latch.ts`: Re-entrancy latch helper (`createLatchedTick`) that prevents overlapping async ticks from stacking; used by the window-tracking poller
 - `renderer/`: Vite React/Tailwind Control Center shell for Dashboard, Pets, Integrations, Plugins, and Settings.
 
@@ -193,6 +196,13 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `default-pet-controller.ts`: Default pet visibility, position persistence, transient reactions, status badges, logging
 - `agent-pet-controller.ts`: Registry-triggered pet windows, dismissal/hide tracking, farewell close, notification flyout toggle, transient displays, status badges, logging
 - `window-pet-registry.ts`: Window-keyed pet binding registry (one pet per OS window), per-binding notification stores, pool draw at identity time, session lifecycle events, focus-target resolution
+- `project-pet-memory.ts`: Pure persisted project→pet map logic (normalized cwd keys, 128-entry LRU cap) used by `app-state.ts`
+- `pet-pool.ts`: Pure pool assignment (first free eligible slot in pool order, or a random free one; null → default when exhausted) plus pool-order normalization
+- `confinement-manager.ts`: Per-pet terminal-window confinement state and clamping used by the motion systems (explicit agent pets only; free-roam when the terminal is minimized/occluded)
+- `confinement-poller.ts`: Pure resolve-then-subscribe terminal tracking for confinement with null-resolve backoff and a one-time macOS Screen Recording permission notice
+- `session-live-status.ts`: Per-session live status (idle/thinking/editing/running/testing/waiting) from hook reactions with 30s decay; herdr-driven statuses stay until the next transition
+- `speech-bubble-queue.ts`: One-at-a-time speech bubble queue for multi-session hub mode (same-session bubbles replace the current one; other sessions queue, bounded with oldest dropped)
+- `hook-notification-kind.ts`: Maps Claude hook events (PermissionRequest/Stop/StopFailure) to notification kinds and their localized messages
 - `notification-store.ts`: Pure per-pet notification state (one row per session, upsert on record, policy-driven persistence/fade/off, oldest-unresolved ordering)
 - `notification-view.ts`: Pure notification view builders (badge count, flyout markup, age text, HTML escaping, 12-row cap)
 - `pet-motion-engine.ts`: Interpolated movement vector/tick engine for plugin-driven pet motion and target-following behavior
@@ -212,6 +222,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `herdr-focus.ts`: Herdr multiplexer pane focus — `validateHerdrFocusContext()` validates the optional `herdr` params object on `lease.acquire` ({paneId, tabId?, socketPath?}, captured by the client from `HERDR_PANE_ID`/`HERDR_TAB_ID`/`HERDR_SOCKET_PATH` env), `focusHerdrPane()` runs `herdr agent focus <paneId>` (fallback `herdr tab focus <tabId>`) fire-and-forget with injectable runner. Herdr panes run under a windowless detached server so terminal identity never resolves for them — the pane context is their only focus handle
 - `herdr-window.ts`: OS-window raise for herdr sessions — enumerates `herdr` processes with command lines (PowerShell CIM / ps), `parseHerdrClientInvocation()`/`pickHerdrClientPid()` classify the CLIENT process (bare/`--session`/`session attach` invocations; never the `server` or one-shot CLI calls, null on ambiguity), then reuses `findTerminalWindowForPid()` + `focusTerminalWindow()` on the client PID; client PID cached per socket path with liveness re-check and one stale-cache re-enumeration; injectable deps, all failures degrade to false
 - `herdr-state.ts`: Herdr agent-state watcher — one NDJSON connection per herdr socket path (win32: named pipe `\\.\pipe\<socketPath>`, the file itself is a `PID:nonce` placeholder; POSIX: unix socket), subscribes to `pane.updated`/`pane.closed`/`pane.exited`, diffs `agent_status` per pane and emits normalized changes; the post-subscribe replay is flagged `seeding` so the glue applies state silently; reconnects with backoff while herdr leases exist and self-stops once none remain; `herdrStatusActions()` is the pure merge policy (blocked→waiting dot + once-per-stretch notification, working→running dot only over idle + activity touch, idle/done→clear, unknown→ignore); glue in `local-ipc.ts` (`ensureHerdrStateWatching` on lease acquire, `applyHerdrStatus` executor)
+- `terminal-focus.ts`: `focusTerminalWindow()` raises a terminal window (macOS AXRaise via osascript with a one-time Accessibility prompt, Windows user32 via PowerShell, Linux no-op)
 - `session-focus.ts`: Shared `SessionFocusTarget` shape ({terminalOwnerPid?, terminalWindowId?, herdr?, leaseId?}) and `focusSessionTarget()` dispatch used by every focus call-site — raises the terminal window and/or switches the herdr pane (herdr-only targets raise the herdr client's terminal window via `herdr-window.ts` instead), resolving true when any succeeded; `local-ipc.ts` enriches registry targets with the lease's herdr context (`withHerdrContext`) and falls back to herdr-context leases for sessions absent from the window registry
 
 **Installation**:
@@ -220,6 +231,8 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 - `codex-pets.ts`: Import from `~/.codex/pets/` with validation
 - `codex-pets-core.ts`: Codex metadata validation constants
 - `catalog.ts`: Remote catalog fetch with V3 pagination support, search, fixture fallback
+- `petdex-catalog-core.ts`: Pure Petdex manifest parsing, pinned asset-host URL validation, and slug safety checks
+- `petdex-catalog.ts`: Petdex community catalog client (cached manifest fetch, preview batches with LRU cache, install by validating Codex pet metadata and handing a temp folder to the local-folder installer) behind Control Center handlers in `windows.ts`
 - `catalog-validation.ts`: CatalogV2/V3 schema validation
 - `zip-safety.ts`: ZIP entry path validation (traversal prevention, case collision detection)
 
@@ -263,6 +276,8 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 **Agent Integration**:
 - `agent-setup.ts`: Claude/OpenCode/Cursor/VS Code detection, MCP configuration, hooks management, action journaling
 - `claude-memory.ts`: Claude instructions file management (`~/.claude/openpets.md`)
+- `claude-usage.ts`: Pure `agent:usage` core (OAuth usage API parsing, transcript JSONL per-model token accumulation, cost-weighted shares)
+- `claude-usage-collector.ts`: Lazy 60s poller that reads Claude credentials read-only, scans transcripts, and emits `agent:usage` plugin events on first subscription
 - `update-checker.ts`: GitHub release polling, update status
 - `update-version.ts`: Version parsing and comparison
 
@@ -279,7 +294,7 @@ main.ts/settings → i18n.setLocaleFromPreference(system/user locale)
 | ZIP Download | `pet-installation.ts` | Extracted to `userData/pets/{id}/` |
 | `app-state.ts` | `userData/openpets-state.json` | Atomic JSON writes with reaction animation overrides |
 | CLI via IPC | `local-ipc.ts` | `pet.react`, `pet.say`, `lease.*` |
-| `lease-manager.ts` | `agent-pet-controller.ts` | Show/close agent pets |
+| `window-pet-registry.ts` | `agent-pet-controller.ts` | Spawn/close/rebind agent pets per window binding (leases only carry session identity) |
 | `windows.ts` | Renderer | State snapshots via IPC invoke |
 | `agent-setup.ts` | Claude/OpenCode/Cursor/VS Code | MCP add/remove, config writes |
 | All modules | `logger.ts` | Structured logs to `userData/logs/openpets.log` |

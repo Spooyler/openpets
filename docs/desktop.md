@@ -33,10 +33,14 @@ launching a second one.
 ## Startup sequence
 
 `main.ts` runs a deterministic bootstrap (see `src/codemap.md` for the exact
-order): install lifecycle handlers → initialize app state → initialize the
-logger → create the tray → start the local IPC server → initialize the plugin
-service (with the Electron JS host) → optionally show the default pet. Shutdown
-runs the reverse: stop the plugin service, IPC server, and pet windows on quit.
+order): take the single-instance lock and install lifecycle handlers → (on
+ready) initialize the logger → initialize app state, analytics, and the UI
+locale → install the internal UI protocol and renderer IPC handlers → create
+the tray → start the local IPC server → initialize the plugin service (with the
+Electron JS host) → optionally show the default pet → start the LAN controller
+→ start the plugin service and load dev/local plugins (async) → check for
+updates (async). Shutdown runs the reverse: stop the plugin service, IPC
+server, and pet windows on quit.
 
 Key files: `main.ts` (entry/bootstrap), `lifecycle.ts` (app events + cleanup),
 `state.ts` (shell pause flag).
@@ -87,7 +91,7 @@ The x11-forcing branch and the `OPENPETS_ALLOW_WAYLAND` opt-out are asserted by
 ### Control Center (renderer)
 
 The React/Tailwind UI under `src/renderer/`. Pages: **Dashboard, Pets,
-Integrations, Plugins, Settings**. It is a pure consumer of main-process
+Sessions, Settings, Plugins, Integrations, Docs**. It is a pure consumer of main-process
 snapshots and actions exposed over the preload bridge — it holds no privileged
 capability of its own. The renderer is the only "frontend" in scope for these
 docs (the `web/` marketing site is out of scope). See
@@ -137,9 +141,15 @@ Settings live in Control Center → Settings (`idleChatWarnEnabled`,
 `userData/openpets-state.json` using atomic temp-write + rename. It holds
 installed pets, the default-pet config, reaction→animation overrides, onboarding
 state, locale preference, the pet pool preference (ordered pet list +
-`petPoolEnabled` toggle), and display-roaming preferences (`petConfinementEnabled`,
-`petCrossDisplayEnabled`). `app-state-core.ts` holds pure helpers (scale
-options, onboarding normalization) that are testable without Electron.
+`petPoolEnabled` toggle + `petSelectionStrategy`), session routing
+(`sessionAssignment`: `hub` default / `auto-spawn`; `petAssignmentMode`, see
+below), the persisted project→pet memory (`projectPetAssignments`),
+display-roaming preferences (`petConfinementEnabled`, `petCrossDisplayEnabled`,
+`petGravityEnabled`), the per-kind `notificationPolicy`
+(persistent/fade/off), and the idle-chat settings. `app-state-core.ts` holds
+pure helpers (scale options, onboarding normalization) that are testable
+without Electron. Renderer preference writes are validated by
+`preference-patch.ts`.
 
 #### Pet pool preference
 
@@ -237,8 +247,9 @@ reaction speech, with English fallback. See [i18n.md](i18n.md).
 
 ### Updates
 
-`update-checker.ts` polls GitHub releases and surfaces update status to the tray
-and Dashboard; `update-version.ts` does version parsing/comparison.
+`update-checker.ts` polls GitHub releases and surfaces update status in the tray
+menu (the Control Center no longer shows it); `update-version.ts` does version
+parsing/comparison.
 
 ### Logging
 

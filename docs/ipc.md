@@ -71,13 +71,21 @@ shapes before returning.
 | `pet.react` | Set a pet reaction (animation state) |
 | `pet.say` | Show a speech bubble on a pet |
 | `agent.activity` | Re-arm an active busy status badge (statusline heartbeat); never creates one |
+| `vscode.wait-focus` | Long-poll parked by the VS Code extension; completed with a session's ancestor PID chain when the user focuses a session, so the editor can reveal the matching terminal tab |
 | `lease.acquire` / `lease.heartbeat` / `lease.release` | Manage a pet lease |
 
 Client method names (`hello()`, `status()`, `listPets()`, `installPet()`,
 `installLocalPet()`, `acquireLease()`, `heartbeatLease()`, `releaseLease()`,
-`react()`, `say()`) wrap these. `installLocalPet()` requires an absolute path
-and an explicit `zip`/`folder` kind. `react()`/`say()` accept an optional
-`leaseId` to target a specific pet.
+`react()`, `say()`) wrap these. `agent.activity` and `vscode.wait-focus` have
+no client wrapper; their callers (`packages/claude/src/statusline.ts`,
+`packages/vscode-extension/src/extension.ts`) use `sendRequest()` directly.
+`installLocalPet()` requires an absolute path and an explicit `zip`/`folder`
+kind. `react()`/`say()` accept an optional `leaseId` to target a specific pet.
+
+`vscode.wait-focus` is the one request that is not answered immediately: the
+server lifts the socket idle timeout and parks it (`vscode-tab-focus.ts`), a
+~60s keepalive answers "no command" so the client re-parks, and over the park
+cap the server answers at once with a retry delay.
 
 ## The lease model
 

@@ -3,8 +3,9 @@
 OpenPets reacts to coding agents. Each supported agent has an integration
 package that does two jobs: **configure** the agent to talk to OpenPets, and at
 runtime **translate** the agent's activity into safe pet reactions sent over
-local IPC. This doc covers all five integrations (Claude Code, MCP, OpenCode,
-Cursor, Pi), the shared speech-safety layer, and the CLI that orchestrates them.
+local IPC. This doc covers all six integrations (Claude Code, MCP, OpenCode,
+Cursor, VS Code, Pi), the shared speech-safety layer, and the CLI that
+orchestrates them.
 
 For the wire protocol they all use, see [ipc.md](ipc.md). Source maps live in
 each `packages/*/codemap.md`.
@@ -120,8 +121,11 @@ are what the Control Center Integrations page and the CLI call.
 ## MCP server — `@open-pets/mcp`
 
 A standalone stdio MCP server (`open-pets-mcp`) for any MCP-capable agent. It
-registers exactly three tools — `openpets_status`, `openpets_react`,
-`openpets_say` — with Zod-validated input and read-only/idempotent annotations.
+registers four tools — `openpets_status`, `openpets_react`, `openpets_say`,
+and `openpets_adopt` (switch this session's pet to an installed pet id, or
+back to the default when `petId` is omitted; the new lease is acquired before
+the old one is released) — with Zod-validated input; only `openpets_status` is
+annotated read-only/idempotent (`packages/mcp/src/server.ts`, `tools.ts`).
 On startup it acquires a lease, heartbeats every ~5s, and releases on
 SIGINT/SIGTERM. Errors are sanitized so IPC paths/tokens/sockets never leak into
 tool output. It is spawned by the CLI (`runMcp()`) which forwards stdio and
@@ -224,6 +228,20 @@ unpinned versions (`@latest`). Rules ownership requires an exact
 `OPENPETS:CURSOR_RULES:START/END` marker pair. The desktop uses preview/copy;
 the CLI writes project rules.
 
+## VS Code — `@open-pets/vscode` + `openpets-vscode` extension
+
+Two halves. `@open-pets/vscode` is file management like Cursor: it manages the
+`openpets` entry under `servers` in VS Code's user-level `mcp.json` (used by
+Copilot agent mode and other MCP-aware agents) with the same strict-JSON,
+symlink-rejecting, atomic-write posture; the desktop's Integrations page drives
+install/replace/remove (`agent-setup.ts`). The `openpets-vscode` extension
+(`packages/vscode-extension/`) adds terminal-tab focus: it keeps one
+`vscode.wait-focus` request parked at the desktop (see [ipc.md](ipc.md)), and
+when the user focuses a session the desktop answers with that session's
+ancestor PID chain; the window whose integrated terminal owns a PID in the
+chain reveals it. Only PIDs are exchanged, and every failure is swallowed and
+retried with backoff.
+
 ## Pi — `@open-pets/pi`
 
 A Pi coding-agent extension (declared in `pi.extensions`). It maps Pi lifecycle
@@ -262,5 +280,6 @@ The CLI enforces safe project paths and atomic config writes throughout.
 | MCP (generic) | agent's MCP config | stdio MCP tools |
 | OpenCode | `.opencode/` or `~/.config/opencode/` | plugin event hooks |
 | Cursor | `.cursor/mcp.json` + rules | MCP tools |
+| VS Code | user-level `mcp.json` + extension | MCP tools + `vscode.wait-focus` tab reveal |
 | Pi | `pi.extensions` | extension events + `/openpets` |
 </content>
