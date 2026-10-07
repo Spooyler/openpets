@@ -184,7 +184,10 @@ notification row, and nudges the pet (once per blocked stretch, skipped when a
 hook already reported waiting); **working** fills in a busy dot when nothing
 more specific is known and counts as activity for the idle-chat watchdog;
 **idle**/**done** clear the dot immediately instead of waiting for the 30s
-hook-status decay. This matters most for sessions whose integration sends few
+hook-status decay. Because herdr pushes only transitions, herdr-driven
+waiting/busy dots never decay — they hold until the next herdr transition (or a
+newer hook status) replaces them, while hook-driven status keeps the 30s decay
+(`session-live-status.ts`). This matters most for sessions whose integration sends few
 events of its own (an MCP-only agent, say): herdr's classification gives their
 pets a live status and blocked alerts they otherwise wouldn't have. The
 watcher reconnects with backoff while herdr-hosted sessions exist and stands

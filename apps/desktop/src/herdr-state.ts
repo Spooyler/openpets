@@ -66,12 +66,12 @@ export interface HerdrPaneStatusEvent {
 
 /**
  * What the glue should do for a status change. `liveReaction` is fed to
- * SessionLiveStatusTracker.update() — "waiting"/"running" set the dot,
- * "idle" clears it (any non-reaction string deletes the entry), null leaves
- * it untouched.
+ * SessionLiveStatusTracker.update() — "herdr-waiting"/"herdr-running" set a
+ * non-decaying dot (herdr pushes only transitions), "idle" clears it (any
+ * non-reaction string deletes the entry), null leaves it untouched.
  */
 export interface HerdrStatusActions {
-  readonly liveReaction: "waiting" | "running" | "idle" | null;
+  readonly liveReaction: "herdr-waiting" | "herdr-running" | "idle" | null;
   readonly notifyBlocked: boolean;
   readonly touchActivity: boolean;
 }
@@ -89,10 +89,10 @@ export interface HerdrStatusActions {
  */
 export function herdrStatusActions(status: HerdrAgentStatus, currentLive: string, seeding: boolean): HerdrStatusActions {
   if (status === "blocked") {
-    return { liveReaction: "waiting", notifyBlocked: !seeding && currentLive !== "waiting", touchActivity: false };
+    return { liveReaction: "herdr-waiting", notifyBlocked: !seeding && currentLive !== "waiting", touchActivity: false };
   }
   if (status === "working") {
-    return { liveReaction: currentLive === "idle" ? "running" : null, notifyBlocked: false, touchActivity: true };
+    return { liveReaction: currentLive === "idle" ? "herdr-running" : null, notifyBlocked: false, touchActivity: true };
   }
   if (status === "idle" || status === "done") {
     return { liveReaction: "idle", notifyBlocked: false, touchActivity: false };

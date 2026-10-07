@@ -6,16 +6,16 @@ import { createHerdrStateWatcher, herdrStatusActions, type HerdrPaneStatusEvent,
 
 {
   // blocked always sets the waiting dot; notifies once, never while seeding.
-  assert.deepEqual(herdrStatusActions("blocked", "idle", false), { liveReaction: "waiting", notifyBlocked: true, touchActivity: false });
-  assert.deepEqual(herdrStatusActions("blocked", "editing", false), { liveReaction: "waiting", notifyBlocked: true, touchActivity: false });
-  assert.deepEqual(herdrStatusActions("blocked", "waiting", false), { liveReaction: "waiting", notifyBlocked: false, touchActivity: false });
-  assert.deepEqual(herdrStatusActions("blocked", "idle", true), { liveReaction: "waiting", notifyBlocked: false, touchActivity: false });
+  assert.deepEqual(herdrStatusActions("blocked", "idle", false), { liveReaction: "herdr-waiting", notifyBlocked: true, touchActivity: false });
+  assert.deepEqual(herdrStatusActions("blocked", "editing", false), { liveReaction: "herdr-waiting", notifyBlocked: true, touchActivity: false });
+  assert.deepEqual(herdrStatusActions("blocked", "waiting", false), { liveReaction: "herdr-waiting", notifyBlocked: false, touchActivity: false });
+  assert.deepEqual(herdrStatusActions("blocked", "idle", true), { liveReaction: "herdr-waiting", notifyBlocked: false, touchActivity: false });
   console.log("policy: blocked — PASS");
 }
 
 {
   // working fills an idle dot but never clobbers a specific hook status.
-  assert.deepEqual(herdrStatusActions("working", "idle", false), { liveReaction: "running", notifyBlocked: false, touchActivity: true });
+  assert.deepEqual(herdrStatusActions("working", "idle", false), { liveReaction: "herdr-running", notifyBlocked: false, touchActivity: true });
   assert.deepEqual(herdrStatusActions("working", "editing", false), { liveReaction: null, notifyBlocked: false, touchActivity: true });
   console.log("policy: working — PASS");
 }

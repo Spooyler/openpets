@@ -7,8 +7,11 @@
  *   (5) An unmapped reaction (e.g. "success") clears the entry back to idle.
  *   (6) remove() clears a session immediately.
  *   (7) all() returns only active (non-decayed) statuses.
+ *   (8) Herdr-driven status persists past the decay window — herdr only
+ *       pushes transitions, so the dot holds until the next one.
  */
 import assert from "node:assert/strict";
+import { herdrStatusActions } from "../src/herdr-state.js";
 import { SessionLiveStatusTracker } from "../src/session-live-status.js";
 
 let now = 1_000_000;
@@ -67,5 +70,18 @@ assert.deepEqual(
 now += 30_001;
 snapshot = tracker.all();
 assert.equal(snapshot.size, 0, "(7b) all() excludes decayed entries");
+
+// (8) Herdr-driven status does not decay; the next herdr transition clears it.
+for (const [herdrStatus, expected] of [["blocked", "waiting"], ["working", "running"]] as const) {
+  const key = `herdr-${herdrStatus}`;
+  const reaction = herdrStatusActions(herdrStatus, tracker.get(key), false).liveReaction;
+  assert.ok(reaction, `(8) ${herdrStatus} yields a live reaction`);
+  tracker.update(key, reaction);
+  now += 120_000;
+  assert.equal(tracker.get(key), expected, `(8a) herdr ${herdrStatus} still ${expected} after the decay window`);
+  assert.equal(tracker.all().get(key), expected, `(8b) all() keeps herdr ${herdrStatus}`);
+  tracker.update(key, herdrStatusActions("idle", tracker.get(key), false).liveReaction!);
+  assert.equal(tracker.get(key), "idle", `(8c) herdr idle transition clears ${expected}`);
+}
 
 console.log("session-live-status tests passed.");
