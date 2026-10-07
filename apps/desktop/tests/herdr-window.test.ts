@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { clearHerdrClientPidCache, focusHerdrClientWindow, parseHerdrClientInvocation, pickHerdrClientPid, type HerdrProcessInfo, type HerdrWindowDeps } from "../src/herdr-window.js";
+import { clearHerdrClientPidCache, focusHerdrClientWindow, isKnownTerminalBinary, parseHerdrClientInvocation, pickHerdrClientPid, type HerdrProcessInfo, type HerdrVisibleWindow, type HerdrWindowDeps } from "../src/herdr-window.js";
 
 const exe = `"C:\\Users\\me\\AppData\\Local\\Programs\\Herdr\\bin\\herdr.exe"`;
 
@@ -80,6 +80,7 @@ interface DepsScript {
   windows: Map<number, { terminalPid: number; window: { id: number } | null } | null>;
   raiseResult: boolean;
   consoleHosts?: Map<number, number>;
+  visibleWindows?: HerdrVisibleWindow[];
 }
 
 function scriptedDeps(script: DepsScript): { deps: HerdrWindowDeps; calls: { list: number; raises: Array<{ terminalPid: number; windowId?: number }> } } {
@@ -90,6 +91,7 @@ function scriptedDeps(script: DepsScript): { deps: HerdrWindowDeps; calls: { lis
     resolveWindow: async (clientPid) => script.windows.get(clientPid) ?? null,
     raiseWindow: async (terminalPid, windowId) => { calls.raises.push({ terminalPid, windowId }); return script.raiseResult; },
     consoleHostPid: async (clientPid) => script.consoleHosts?.get(clientPid) ?? null,
+    listWindows: script.visibleWindows ? async () => script.visibleWindows! : undefined,
   };
   return { deps, calls };
 }
@@ -222,6 +224,89 @@ const context = { paneId: "wC:p4", tabId: "wC:t4", socketPath: "C:\\Users\\me\\A
   };
   assert.equal(await focusHerdrClientWindow(context, throwing), false);
   console.log("focus: failure paths return false — PASS");
+}
+
+// --- isKnownTerminalBinary ---
+
+{
+  assert.equal(isKnownTerminalBinary("C:\\Program Files\\WindowsApps\\WindowsTerminal.exe"), true);
+  assert.equal(isKnownTerminalBinary("/usr/bin/alacritty.exe"), true);
+  assert.equal(isKnownTerminalBinary("C:\\tools\\mintty.exe"), true);
+  assert.equal(isKnownTerminalBinary("C:\\Windows\\explorer.exe"), false);
+  assert.equal(isKnownTerminalBinary(undefined), false);
+  assert.equal(isKnownTerminalBinary(""), false);
+  console.log("isKnownTerminalBinary: known and unknown binaries — PASS");
+}
+
+// --- broad terminal scan fallback ---
+
+{
+  // PPID chain fails, console host fails, but broad scan finds the single
+  // terminal emulator window → raises it.
+  clearHerdrClientPidCache();
+  const { deps, calls } = scriptedDeps({
+    processes: [{ pid: 100, commandLine: exe }],
+    alivePids: new Set([100]),
+    windows: new Map(), // PPID chain yields nothing
+    raiseResult: true,
+    visibleWindows: [
+      { id: 999, ownerPid: 555, ownerPath: "C:\\Program Files\\WindowsApps\\WindowsTerminal.exe" },
+    ],
+  });
+  assert.equal(await focusHerdrClientWindow(context, deps), true);
+  assert.deepEqual(calls.raises, [{ terminalPid: 555, windowId: 999 }]);
+  console.log("focus: broad scan single terminal raises window — PASS");
+}
+
+{
+  // Broad scan with title preference: picks the window whose title contains "herdr".
+  clearHerdrClientPidCache();
+  const { deps, calls } = scriptedDeps({
+    processes: [{ pid: 100, commandLine: exe }],
+    alivePids: new Set([100]),
+    windows: new Map(),
+    raiseResult: true,
+    visibleWindows: [
+      { id: 998, ownerPid: 555, ownerPath: "C:\\Program Files\\WindowsApps\\WindowsTerminal.exe", title: "PowerShell" },
+      { id: 999, ownerPid: 555, ownerPath: "C:\\Program Files\\WindowsApps\\WindowsTerminal.exe", title: "herdr - work" },
+    ],
+  });
+  assert.equal(await focusHerdrClientWindow(context, deps), true);
+  assert.deepEqual(calls.raises, [{ terminalPid: 555, windowId: 999 }]);
+  console.log("focus: broad scan prefers herdr-titled window — PASS");
+}
+
+{
+  // Multiple terminal emulator PROCESSES → ambiguous → no raise.
+  clearHerdrClientPidCache();
+  const { deps, calls } = scriptedDeps({
+    processes: [{ pid: 100, commandLine: exe }],
+    alivePids: new Set([100]),
+    windows: new Map(),
+    raiseResult: true,
+    visibleWindows: [
+      { id: 998, ownerPid: 555, ownerPath: "C:\\Program Files\\WindowsApps\\WindowsTerminal.exe" },
+      { id: 999, ownerPid: 666, ownerPath: "C:\\tools\\alacritty.exe" },
+    ],
+  });
+  assert.equal(await focusHerdrClientWindow(context, deps), false);
+  assert.equal(calls.raises.length, 0);
+  console.log("focus: broad scan multiple terminal processes skips — PASS");
+}
+
+{
+  // No listWindows dep → broad scan skipped gracefully.
+  clearHerdrClientPidCache();
+  const { deps, calls } = scriptedDeps({
+    processes: [{ pid: 100, commandLine: exe }],
+    alivePids: new Set([100]),
+    windows: new Map(),
+    raiseResult: true,
+    // visibleWindows intentionally omitted
+  });
+  assert.equal(await focusHerdrClientWindow(context, deps), false);
+  assert.equal(calls.raises.length, 0);
+  console.log("focus: no listWindows dep skips broad scan — PASS");
 }
 
 clearHerdrClientPidCache();

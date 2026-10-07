@@ -57,6 +57,14 @@ export interface HerdrClientWindow {
   readonly window: { readonly id: number } | null;
 }
 
+/** Visible window entry for the broad terminal scan fallback. */
+export interface HerdrVisibleWindow {
+  readonly id: number;
+  readonly ownerPid: number;
+  readonly ownerPath?: string;
+  readonly title?: string;
+}
+
 /** Injectable seams — production defaults spawn PowerShell/ps and lazy-require Electron-side modules. */
 export interface HerdrWindowDeps {
   readonly listProcesses: () => Promise<readonly HerdrProcessInfo[]>;
@@ -71,6 +79,14 @@ export interface HerdrWindowDeps {
    * emulator, so walking from it still reaches the window. Win32 only.
    */
   readonly consoleHostPid: (clientPid: number) => Promise<number | null>;
+  /**
+   * List visible (non-minimized) windows. Last-resort fallback when the
+   * client's PPID chain and console-host chain both fail to reach a terminal
+   * emulator (e.g. Windows default-terminal handoff severs all process-tree
+   * links). The broad scan raises the terminal window directly when there is
+   * exactly one unambiguous terminal emulator process.
+   */
+  readonly listWindows?: () => Promise<readonly HerdrVisibleWindow[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +237,45 @@ function defaultIsPidAlive(pid: number): boolean {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Broad terminal scan (last-resort fallback for defterm setups)
+// ---------------------------------------------------------------------------
+
+const knownTerminalBinaries = new Set([
+  "windowsterminal.exe",
+  "alacritty.exe",
+  "wezterm-gui.exe",
+  "hyper.exe",
+  "tabby.exe",
+  "conemu.exe",
+  "conemu64.exe",
+  "mintty.exe",
+  "terminal",
+  "iterm2",
+]);
+
+export function isKnownTerminalBinary(ownerPath: string | undefined): boolean {
+  if (!ownerPath) return false;
+  const base = ownerPath.split(/[\\/]/).pop()?.toLowerCase();
+  return base !== undefined && knownTerminalBinaries.has(base);
+}
+
+async function findTerminalByBroadScan(deps: HerdrWindowDeps): Promise<HerdrClientWindow | null> {
+  if (!deps.listWindows) return null;
+  const windows = await deps.listWindows();
+  const terminalWindows = windows.filter((w) => isKnownTerminalBinary(w.ownerPath));
+  if (terminalWindows.length === 0) return null;
+  const uniquePids = new Set(terminalWindows.map((w) => w.ownerPid));
+  if (uniquePids.size !== 1) {
+    log("debug", "broad terminal scan: multiple terminal processes", { processCount: uniquePids.size, windowCount: terminalWindows.length });
+    return null;
+  }
+  const herdrTitled = terminalWindows.filter((w) => w.title?.toLowerCase().includes("herdr"));
+  const best = herdrTitled.length > 0 ? herdrTitled[0]! : terminalWindows[0]!;
+  log("info", "broad terminal scan matched", { terminalPid: best.ownerPid, windowId: best.id, windowCount: terminalWindows.length, herdrTitled: herdrTitled.length });
+  return { terminalPid: best.ownerPid, window: { id: best.id } };
+}
+
 function createDefaultDeps(): HerdrWindowDeps {
   return {
     listProcesses: process.platform === "win32" ? listHerdrProcessesWin32 : listHerdrProcessesPosix,
@@ -234,6 +289,10 @@ function createDefaultDeps(): HerdrWindowDeps {
       return focus.focusTerminalWindow(terminalPid, terminalWindowId);
     },
     consoleHostPid: process.platform === "win32" ? consoleHostPidWin32 : async () => null,
+    listWindows: async () => {
+      const tracker = nodeRequire("./window-tracker.js") as typeof import("./window-tracker.js");
+      return tracker.listWindows();
+    },
   };
 }
 
@@ -294,6 +353,9 @@ export async function focusHerdrClientWindow(context: HerdrFocusContext, deps: H
       resolved = await resolveClientPid(cacheKey, context.socketPath, deps);
       if (!resolved) return false;
       windowInfo = await resolveClientWindow(resolved.pid, deps);
+    }
+    if (!windowInfo) {
+      windowInfo = await findTerminalByBroadScan(deps);
     }
     if (!windowInfo) {
       log("debug", "herdr client window not resolved", { paneId: context.paneId, clientPid: resolved.pid });

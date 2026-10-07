@@ -158,10 +158,17 @@ regular window resolution on that PID, so the terminal hosting herdr is
 restored/foregrounded alongside the pane switch (`herdr-window.ts`). When the
 client's own parent chain is severed (dead launcher process), resolution
 re-anchors on the client's console host (conhost/OpenConsole), which for
-WT-spawned tabs is a direct child of the terminal emulator. Known limitation:
-a client hosted through the Windows *default-terminal handoff* leaves no
-process-tree link to the rendering terminal at all — there the window raise
-degrades to a no-op and only the pane switch happens.
+WT-spawned tabs is a direct child of the terminal emulator. A client hosted
+through the Windows *default-terminal handoff* leaves no process-tree link to
+the rendering terminal at all; as a last resort the desktop scans visible
+windows for known terminal-emulator binaries and raises one only when exactly
+one terminal process owns them (preferring a window whose title mentions
+herdr) — with several terminal processes it raises nothing and only the pane
+switch happens. The broad scan is a guess: with a single terminal process
+hosting several windows it can raise the wrong one. The client-window raise
+runs for every herdr-hosted session, alongside (in parallel with) the regular
+terminal raise when the session also has its own terminal identity
+(`session-focus.ts`).
 
 The desktop also follows herdr's own agent-state classification
 (`herdr-state.ts`). Herdr watches every pane's terminal output and classifies

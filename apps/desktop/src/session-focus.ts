@@ -33,9 +33,7 @@ export async function focusSessionTarget(target: SessionFocusTarget): Promise<bo
       ? focusTerminalWindow(target.terminalOwnerPid!, target.terminalWindowId).catch(() => false)
       : Promise.resolve(false),
     target.herdr ? focusHerdrPane(target.herdr) : Promise.resolve(false),
-    // Herdr-only sessions have no terminal identity — raise the window of the
-    // terminal hosting the herdr client instead.
-    target.herdr && !hasTerminalIdentity ? focusHerdrClientWindow(target.herdr) : Promise.resolve(false),
+    target.herdr ? focusHerdrClientWindow(target.herdr) : Promise.resolve(false),
   ]);
   return windowFocused || paneFocused || clientWindowFocused;
 }
