@@ -10,6 +10,7 @@ const fallbackText = "🐾 OpenPets";
 
 interface StatuslineLeaseClient {
   acquireLease(options?: { readonly requestedPetId?: string }): Promise<{ readonly leaseId: string }>;
+  releaseLease(leaseId: string): Promise<unknown>;
 }
 
 export interface ClaudeStatuslineOptions {
@@ -50,13 +51,24 @@ export async function handleClaudeStatuslinePayload(raw: string, options: Claude
 
   const now = options.now?.() ?? Date.now();
   const throttlePath = options.throttlePath ?? getDefaultThrottlePath();
-  if (!shouldSendThrottleKey("statusline", statuslinePingCooldownMs, now, throttlePath)) {
+  if (!shouldSendThrottleKey(statuslineThrottleKey(payload), statuslinePingCooldownMs, now, throttlePath)) {
     return { text, pinged: false };
   }
 
   try {
-    const leaseId = options.configuredPetId ? (await acquireLease(options)).leaseId : undefined;
-    await (options.sendActivity ?? defaultSendActivity)(leaseId);
+    if (!options.configuredPetId) {
+      await (options.sendActivity ?? defaultSendActivity)(undefined);
+      return { text, pinged: true };
+    }
+    // Each statusline render is a fresh short-lived process (new pid + nonce),
+    // so the desktop can never reuse its lease: release it after the ping.
+    const client: StatuslineLeaseClient = options.client ?? createOpenPetsClient({ connectTimeoutMs: 500, responseTimeoutMs: 500 });
+    const { leaseId } = await client.acquireLease({ requestedPetId: options.configuredPetId });
+    try {
+      await (options.sendActivity ?? defaultSendActivity)(leaseId);
+    } finally {
+      await client.releaseLease(leaseId).catch(() => undefined);
+    }
     return { text, pinged: true };
   } catch (error) {
     if (options.debug || process.env.OPENPETS_DEBUG === "1") {
@@ -79,14 +91,16 @@ export function formatStatuslineText(payload: Record<string, unknown>): string {
   return `🐾 ${parts.join(" · ")}`;
 }
 
-async function acquireLease(options: ClaudeStatuslineOptions): Promise<{ readonly leaseId: string }> {
-  const client: StatuslineLeaseClient = options.client ?? createOpenPetsClient({ connectTimeoutMs: 500, responseTimeoutMs: 500 });
-  return client.acquireLease({ requestedPetId: options.configuredPetId });
-}
-
 async function defaultSendActivity(leaseId?: string): Promise<unknown> {
   const discovery = readDiscoveryFile();
   return sendRequest(discovery, "agent.activity", { leaseId }, { connectTimeoutMs: 500, responseTimeoutMs: 500 });
+}
+
+// Per-session throttle so concurrent Claude sessions don't suppress each other's pings.
+function statuslineThrottleKey(payload: Record<string, unknown>): string {
+  if (typeof payload.session_id === "string" && payload.session_id) return `statusline:${payload.session_id}`;
+  const cwd = isRecord(payload.workspace) && typeof payload.workspace.current_dir === "string" ? payload.workspace.current_dir : "";
+  return cwd ? `statusline:${cwd}` : "statusline";
 }
 
 function defaultWrite(line: string): void {

@@ -124,8 +124,10 @@ restore it before falling back to a fresh `lease.acquire`, so a dropped heartbea
 never re-routes an agent pet onto the default. The MCP server additionally
 releases its lease and exits **exactly once** when its stdio transport closes (or
 on `SIGINT`/`SIGTERM`), so the pet tears down promptly when the session ends and
-the shutdown path never runs twice. Failures are swallowed so the agent is never
-blocked by pet IPC.
+the shutdown path never runs twice. The Claude statusline heartbeat is the
+exception to the long-lived pattern: each render is a fresh process (new PID +
+nonce, so its lease can never be reused), so it releases its lease right after
+the ping. Failures are swallowed so the agent is never blocked by pet IPC.
 
 See [pets.md](pets.md) for what happens once a command reaches a pet window, and
 [agent-integrations.md](agent-integrations.md) for how each integration drives

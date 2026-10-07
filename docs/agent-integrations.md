@@ -94,7 +94,11 @@ The deepest integration, because Claude Code has a rich hook system.
 - **Statusline heartbeat** (`statusline.ts` + `statusline-settings.ts`): an
   optional `statusLine` entry in `~/.claude/settings.json` renders a minimal
   OpenPets statusline and sends a throttled (5s) `agent.activity` ping after
-  each assistant message. The ping only re-arms an already-active busy badge —
+  each assistant message. The throttle is per session (keyed by Claude's
+  `session_id`, falling back to the workspace cwd), so concurrent sessions
+  don't suppress each other's pings. With a configured pet, each run acquires a
+  lease for the ping and releases it right after, since every statusline
+  render is a fresh short-lived process. The ping only re-arms an already-active busy badge —
   it never creates one, so an idle session can never look busy. Installed only
   when no custom statusLine exists; a foreign entry reports `conflict` and is
   never replaced or removed. Managed from the Control Center Integrations page

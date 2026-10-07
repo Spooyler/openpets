@@ -25,6 +25,7 @@ try {
   const pings: Array<string | undefined> = [];
   const lines: string[] = [];
   const leases: string[] = [];
+  const released: string[] = [];
   const options = {
     throttlePath: join(dir, "throttle.json"),
     write: (line: string) => { lines.push(line); },
@@ -33,6 +34,10 @@ try {
       acquireLease: async (opts?: { readonly requestedPetId?: string }) => {
         leases.push(opts?.requestedPetId ?? "");
         return { leaseId: "lease-1" };
+      },
+      releaseLease: async (leaseId: string) => {
+        released.push(leaseId);
+        return { released: true };
       },
     },
   };
@@ -55,6 +60,8 @@ try {
   assert.equal(third.pinged, true);
   assert.deepEqual(leases, ["fixer"]);
   assert.equal(pings.at(-1), "lease-1");
+  // Each statusline run is a fresh process, so its lease must be released after the ping or leases pile up.
+  assert.deepEqual(released, ["lease-1"]);
 
   // Failing ping is swallowed; text still returned.
   const failing = await handleClaudeStatuslinePayload(JSON.stringify({}), { ...options, sendActivity: async () => { throw new Error("down"); }, now: () => 112_000 });
@@ -64,6 +71,13 @@ try {
   // Malformed JSON: still prints fallback text, never throws.
   const malformed = await handleClaudeStatuslinePayload("not json", { ...options, now: () => 118_000 });
   assert.equal(malformed.text, "🐾 OpenPets");
+
+  // Concurrent sessions are throttled independently, and per-session state persists across runs.
+  const sessionA = JSON.stringify({ session_id: "session-a" });
+  const sessionB = JSON.stringify({ session_id: "session-b" });
+  assert.equal((await handleClaudeStatuslinePayload(sessionA, { ...options, now: () => 200_000 })).pinged, true);
+  assert.equal((await handleClaudeStatuslinePayload(sessionB, { ...options, now: () => 201_000 })).pinged, true);
+  assert.equal((await handleClaudeStatuslinePayload(sessionA, { ...options, now: () => 202_000 })).pinged, false);
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

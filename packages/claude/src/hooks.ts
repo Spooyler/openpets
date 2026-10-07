@@ -189,7 +189,7 @@ function readThrottleState(path: string): Record<string, number> {
     if (!isRecord(parsed)) return {};
     const state: Record<string, number> = {};
     for (const [key, value] of Object.entries(parsed)) {
-      if ((key === "thinking" || key === "success" || key === "error" || key === "permission" || key === "statusline" || key.startsWith("reaction:")) && typeof value === "number" && Number.isFinite(value)) state[key] = value;
+      if ((key === "thinking" || key === "success" || key === "error" || key === "permission" || key === "statusline" || key.startsWith("statusline:") || key.startsWith("reaction:")) && typeof value === "number" && Number.isFinite(value)) state[key] = value;
     }
     return state;
   } catch {
